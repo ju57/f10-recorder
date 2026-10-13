@@ -97,7 +97,7 @@ Configuration and rotating diagnostic logs live in `%LOCALAPPDATA%\F10Recorder`.
 
 Run the migrated application regression with `.\tests\migration.ps1`. It uses controlled temporary windows, actual Windows keyboard input, native-resolution screenshots, GPU-generated media and a short display/system-audio capture. It validates all available NVENC codecs by saving and fully decoding MP4s. Reports and previews are kept under ignored `artifacts/`. This suite needs an interactive Windows desktop and NVIDIA GPU; it must not be run on a machine without permission to capture its display/audio.
 
-The platform-independent checks can run with `dotnet run --project projects/F10Recorder.CoreChecks -- artifacts/core-checks`. They cover replay boundaries, incomplete manifests, path containment, old-settings migration and invalid-file preservation; they need no GPU or capture permissions. The Core project targets `net10.0` and has no Windows references. A Linux runtime has not yet been used for acceptance.
+The platform-independent checks can run with `dotnet run --project projects/F10Recorder.CoreChecks -- artifacts/core-checks`. They cover replay boundaries, incomplete manifests, path containment, old-settings migration and invalid-file preservation; they need no GPU or capture permissions. The Core project targets `net10.0` and has no Windows references. GitHub CI runs these checks on Ubuntu; Linux desktop/capture acceptance remains pending.
 
 The following commands exercise the retained WinForms reference, not the Avalonia interface:
 
