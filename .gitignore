@@ -1,0 +1,15 @@
+bin/
+artifacts/
+vendor/
+*.user
+.tools/
+**/obj/
+**/bin/
+
+# Local acceptance reports and reverse-engineering extracts are retained for
+# development, outside the public source tree. They can contain machine paths,
+# captured media references, and third-party shipped-source excerpts.
+docs/verification.md
+docs/shadowplay-investigation.md
+docs/rea-*.json
+docs/shipped-source-observations.json

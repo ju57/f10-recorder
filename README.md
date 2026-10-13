@@ -1,0 +1,139 @@
+# F10 Recorder
+
+A local replay recorder that starts buffering at sign-in and saves recent footage with a global hotkey. Defaults: **five minutes, primary monitor, system audio, Ctrl+Shift+F10, native display resolution at 60 FPS, H.264 at 20 Mbps**.
+
+**Status: Windows/NVIDIA prototype running C# on .NET 10 with Avalonia 12.1.4. Linux capture is not implemented. Public binary release preparation is incomplete.** The original WinForms/.NET Framework build remains a local regression reference during migration. F10 Recorder's own code is [MIT licensed](LICENSE); dependency licenses are separate, as described in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
+
+## Cross-platform direction
+
+The initial hardware scope is **NVIDIA on Windows and Linux**. GPU probing must determine which NVENC codecs actually work; installing FFmpeg with an encoder listed does not prove hardware support. AMD and Intel support is outside the initial release scope.
+
+The adopted migration target is **C# on .NET 10 LTS with Avalonia UI**, retaining native capture/audio integrations and FFmpeg/NVENC. [Avalonia's rendering architecture](https://docs.avaloniaui.net/docs/fundamentals/architecture) supports a custom interface without embedding a browser. [.NET 10's support policy](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core) makes it a suitable maintained runtime target. SDK 10.0.401 and Avalonia 12.1.4 are pinned; NuGet lockfiles record transitive dependencies and dependency auditing remains enabled.
+
+| UI choice | Benefit for F10 Recorder | Cost or limitation |
+| --- | --- | --- |
+| C# + Avalonia | Keeps one application language, allows custom styling, and supports Windows/Linux UI | Requires a WinForms UI rewrite and platform-specific overlay work |
+| Electron + native recorder | Strong HTML/CSS ecosystem and flexible visual design | Bundles Chromium and Node, adds a JavaScript/native control boundary, and needs ongoing browser-runtime maintenance |
+| Tauri + native recorder | HTML/CSS UI using the operating system's webview | Introduces Rust plus a web UI alongside the existing C# recorder; webview behavior varies by platform |
+| Current WinForms or WPF | Straightforward Windows integration | Does not meet the Linux UI goal |
+
+See the official [Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model) and [Tauri architecture](https://v2.tauri.app/concept/architecture/). Resource use must be measured on the finished app; this comparison is about architecture, not benchmark results. The charcoal/emerald visual direction remains suitable for the new UI, with keyboard access, readable status, and settings available while recording.
+
+The first migration step separates three SDK projects: `F10Recorder.Core` contains configuration, replay selection and notification rules; `F10Recorder.Windows` contains native capture/audio, encoder probing, screenshots, application identity, global shortcuts and Windows session/display/power handling; `F10Recorder.Desktop` contains the Avalonia interface. The migrated app has no WinForms or System.Drawing dependency. Native Win32 message dispatch replaces the old helper window, and icons are embedded assets. Frames stay in the capture/encoder pipeline rather than passing through UI controls.
+
+The next architecture step is a small per-user recorder worker that owns buffering independently of the UI. A closed Settings window already leaves recording active; a crash of the whole UI process still stops this prototype's recorder. The future worker needs a narrow, access-restricted local control channel for commands and status, without a network listener or elevated system service. Moving the rest of retention/save/recovery into the shared engine and implementing Linux adapters also remain outstanding.
+
+| Platform | Current state | Required integration |
+| --- | --- | --- |
+| Windows + NVIDIA | Working prototype with limited acceptance coverage | Desktop Duplication, WASAPI loopback, native shortcuts, startup and composited overlay |
+| Linux X11 + NVIDIA | Not implemented | Validated native capture/audio backend, shortcuts, startup and window identity |
+| Linux Wayland + NVIDIA | Not implemented | ScreenCast portal/PipeWire capture, desktop-supported shortcuts, session restoration and overlay behavior |
+
+[Avalonia currently defaults to X11/XWayland on Linux](https://docs.avaloniaui.net/docs/platform-specific-guides/linux); that UI support does not supply a recording backend. Wayland capture needs the [ScreenCast portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html), and shortcuts need supported desktop integration such as the [GlobalShortcuts portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.GlobalShortcuts.html). Permission persistence, application identification, global hotkeys, and overlay placement depend on the compositor. Automatic capture without a prompt and NVIDIA-style overlays in every fullscreen game cannot yet be promised. Application-name folders need a documented fallback wherever the desktop does not expose the foreground application.
+
+## Public release milestones
+
+1. **First migration step implemented:** SDK projects, Avalonia Settings/tray/overlay/passive notices, direct Win32 helpers and separate verification binaries. A Windows regression exercises edited settings and shortcuts, failed-apply rollback, overlay focus, click-through notices, native-resolution screenshots, application-named replay saves, encoder/display-change recovery and decoded MP4s for available NVENC codecs. Linux-runtime and broad game/driver acceptance are still pending.
+2. Finish extracting the shared engine and introduce the independent per-user recorder worker. Keep the Avalonia UI bound to verified recorder state.
+3. Implement and validate NVIDIA capture on Linux against a declared distribution, driver and desktop matrix. Test X11 and Wayland separately, including denied permissions and restored sessions.
+4. Measure gaming frame rate, frame drops, capture latency, CPU/GPU load, idle/open-UI memory, cache size, A/V sync and save latency. Exercise long recording sessions, disk-full failures, recovery, sleep/resume, display/audio changes, HDR and real fullscreen games. The existing fixture tests do not establish those results.
+5. Prepare platform installers, dependency notices and corresponding-source arrangements for the exact FFmpeg builds, repeatable CI builds and release checks. Provide clear first-run capture/storage information, user-controlled startup, bounded cache storage and local diagnostics without uploading recordings.
+
+FFmpeg remains an automatically managed dependency: reuse a verified compatible installation or provide a verified private copy. Its path stays outside user recording settings. Linux needs its own capability checks and packaging; the current installer accepts only Windows binaries. The fallback Windows package was inspected with `ffmpeg -L` and reports **GPLv3-or-later**. [FFmpeg's license depends on the build configuration](https://ffmpeg.org/legal.html); MIT for F10's source does not replace that dependency license. The corresponding-source distribution arrangement is still a public-release gate.
+
+Local research extracts, captured media and machine-specific acceptance reports are excluded from version control by `.gitignore` and retained locally. No NVIDIA application code or binary is a runtime dependency. Source publication does not constitute a public binary release.
+
+## Contributing
+
+Use a feature branch and open a pull request against `main`. The protected branch requires successful **Core checks (Ubuntu)** and **Windows build** checks, resolved review conversations and linear history. Direct pushes, force pushes and branch deletion are blocked, including for administrators. The maintainer controls merges; public access does not grant write or administrative permissions. Required approval count is zero so the sole maintainer can merge their own reviewed changes through a passing pull request without needing a second maintainer.
+
+CI runs portable core checks on Linux and builds the Windows Avalonia app. Hosted CI does not validate GPU capture or fullscreen games; use the local Windows/NVIDIA migration suite for those implemented acceptance checks. GitHub Actions have read-only repository permissions, and action versions are pinned to commit hashes. Do not add recordings, machine paths, credentials, vendor binaries or raw reverse-engineering extracts to a pull request.
+
+## Run and install
+
+```powershell
+.\setup-development.ps1 # optional: installs the pinned SDK inside .tools only
+.\build-avalonia.ps1 -Publish
+.\install.ps1
+```
+
+The installer defaults to the Avalonia build. It copies the app, private .NET runtime and license notices to `%LOCALAPPDATA%\F10Recorder\application`, prepares FFmpeg, enables the current user's Windows sign-in startup, and launches recording. It requires 64-bit Windows 10/11 and an NVIDIA GPU with NVENC. End users need neither the .NET SDK nor a separately installed .NET runtime; the self-contained package supplies its runtime. Development requires the pinned .NET SDK and internet access for the first package restore. Setup preserves existing recording preferences.
+
+`build-avalonia.ps1` without `-Publish` produces a development build under `bin/avalonia`. `install.ps1 -NoLaunch` installs without starting capture. For comparison only, `build.ps1` builds the original WinForms reference, and `install.ps1 -Legacy` selects that reference. Verification-only flags and fixture code are excluded from the Avalonia app; the migration suite is a separate executable.
+
+FFmpeg is managed automatically. Setup checks PATH and common installation locations for a compatible 64-bit Windows binary, including the capture filters, encoders, muxers, and timestamp controls required by the recorder. It reuses a suitable installation without modifying it. Otherwise, setup downloads the pinned FFmpeg 9.0.2 essentials package from [Gyan's Windows builds](https://www.gyan.dev/ffmpeg/builds/), checks its published SHA-256, extracts and validates it, and keeps a private copy under `%LOCALAPPDATA%\F10Recorder\runtime`. A clean installation needs internet access for this download. Startup is enabled only after engine setup succeeds.
+
+The engine location is installer metadata in `media-engine.json`, separate from recording preferences. Settings has no engine-path picker. If the selected engine disappears or changes, the recorder searches for another compatible copy; run the installer again to repair a missing dependency. Reinstallation preserves recording preferences and removes the legacy editable FFmpeg path.
+
+Press **Ctrl+Shift+F10** to save an MP4 in your Windows Videos folder under **F10 Recorder**. Double-click the tray icon or choose **Settings…** to configure replay length, video codec, frame rate, bitrate, output location, audio, monitor index, and hotkey. Launching the executable again also opens Settings in the running instance. The tray menu saves clips, pauses/resumes recording, opens clips, and restarts the buffer.
+
+Replays are saved inside an **application-name subfolder** beneath the configured clips location, for example `F10 Recorder\Counter-Strike 2\Replay-….mp4`. F10 identifies the foreground executable at save time using its display metadata, with the executable name as fallback. Opening F10's Settings, overlay, or tray retains the last foreground application's name. Desktop recordings use `Desktop`; an application that cannot be identified uses `Unknown application`. Folder names are normalized for Windows. Existing clips remain in place, and screenshots keep their separately configured folder. A replay still contains the selected monitor's recent footage, which can span application changes; naming the folder does not filter that footage.
+
+Press **Ctrl+Shift+F9** to open or close the overlay on the foreground application's monitor. It shows the full Settings interface, replay toggle, and a quick Save replay button over a dimmed backdrop. **Escape**, the close button, or clicking the backdrop dismisses it and returns focus to the previous app. Opening the overlay preserves recording state; dismissal preserves unapplied edits. Both shortcuts are configurable in **Controls**. Overlay shortcuts support letters and F1–F12 with modifiers, including Alt+Z when another app has not already registered it. The tray's **Open overlay** action and `F10Recorder.exe --overlay` also toggle it.
+
+Press **Ctrl+Shift+F8** to take a full-resolution **PNG screenshot** of the display selected under Capture (primary by default), even while replay recording is paused. Choose its shortcut in **Controls → Take screenshot** and its separate save folder in **Storage → Screenshots**. The default folder is your Windows Pictures folder under **F10 Recorder**. The overlay and tray also offer **Screenshot** / **Take screenshot** actions. Taking a screenshot hides F10 Settings/overlay and the current notification first, then shows a passive success/error notice. Filenames include the capture timestamp and a unique suffix; existing images are preserved. Other visible desktop windows remain part of the screenshot. `F10Recorder.exe --screenshot` invokes the same action in the running recorder.
+
+The overlay uses Windows composition and topmost native windows. It is tested over a borderless fullscreen window. True exclusive fullscreen may minimize or leave exclusive mode when the interactive overlay takes focus; integration inside a game's graphics presentation is not implemented. Fullscreen Optimizations may run a game's nominal fullscreen mode as borderless: see [Microsoft's explanation](https://devblogs.microsoft.com/directx/demystifying-full-screen-optimizations/).
+
+Recording and save notifications use the same charcoal/emerald style in a passive overlay near the top-right of the current app's monitor. Notices confirm actual capture readiness, pause/resume, saving, successful clips, errors, and recovery. Saving stays visible until its result; other notices dismiss after four seconds (six seconds for errors). Updates replace the current notice instead of stacking, and repeated buffering progress stays quiet. The notices neither take focus nor intercept mouse clicks, and they move beside the Settings overlay when there is space. Like Settings, notification visibility over true exclusive fullscreen requires additional graphics integration; it is tested over borderless fullscreen.
+
+Settings tests encoder initialization on the actual GPU and offers the supported choices from **H.264**, **HEVC/H.265**, and **AV1**. Codec availability depends on the GPU, driver and FFmpeg build. Frame-rate choices are **24, 30, 60, and 120 FPS**; the bitrate range is **5–100 Mbps**. H.264 provides broad playback compatibility; HEVC and AV1 need a compatible player. System audio is AAC stereo at 48 kHz and 192 kbps. Changing options rebuilds the buffer and preserves an existing pause.
+
+The dark interface groups options into **Capture**, **Audio**, **Controls**, and **Storage**. The replay switch pauses/resumes recording immediately; settings edits take effect through **Apply changes**. The footer shows the estimated rolling-buffer size. Colors use charcoal (`#171B19`), soft white (`#EDF4EF`), and emerald (`#53C58B`), with amber reserved for paused/recovering states. The tray menu uses the same theme.
+
+Green means recording is advancing and the hotkey is registered. Amber means starting, paused, recovering, or a hotkey conflict. Capture failures are retried automatically. Display changes, Windows unlock/resume, and changes to the default audio output rebuild the buffer. A rebuilt buffer needs time to refill; saving early saves the available footage.
+
+## How it works
+
+Windows Desktop Duplication captures the monitor. FFmpeg encodes with NVIDIA NVENC into independently decodable one-second segments. H.264 and HEVC use MPEG-TS; AV1 uses Matroska and restores the constant capture clock while remuxing to MP4. WASAPI captures audio from the default Windows playback device, including continuous silence when nothing plays. A supervisor checks progress and completed segments rather than merely checking whether FFmpeg exists.
+
+Saving waits for the current segment to finish, snapshots the selected completed segments with local hard links (copy fallback), and remuxes them into MP4 while recording continues. Explicit segment durations avoid AAC padding accumulating into timing drift. Clips start on a keyframe and may be up to one second shorter than the chosen replay length; the endpoint is trimmed to the estimated hotkey time, within capture/progress/frame scheduling accuracy. A save typically completes after the next one-second segment boundary.
+
+The rolling buffer uses disk, not RAM. At 20 Mbps, five minutes is about 760 MB plus approximately ten seconds of retention headroom. A bounded segment manifest, time pruning, a byte limit, per-session cache directories, and Windows process jobs control temporary storage and encoder lifetime. Clips are never automatically deleted. No recording or telemetry is uploaded.
+
+Configuration and rotating diagnostic logs live in `%LOCALAPPDATA%\F10Recorder`. Settings changes rebuild the buffer. Only one interactive instance runs for your Windows user. If another app owns F10, choose a different hotkey; the tool reports the conflict. Windows startup is at **user sign-in**, when the desktop becomes available.
+
+## Verify
+
+Run the migrated application regression with `.\tests\migration.ps1`. It uses controlled temporary windows, actual Windows keyboard input, native-resolution screenshots, GPU-generated media and a short display/system-audio capture. It validates all available NVENC codecs by saving and fully decoding MP4s. Reports and previews are kept under ignored `artifacts/`. This suite needs an interactive Windows desktop and NVIDIA GPU; it must not be run on a machine without permission to capture its display/audio.
+
+The platform-independent checks can run with `dotnet run --project projects/F10Recorder.CoreChecks -- artifacts/core-checks`. They cover replay boundaries, incomplete manifests, path containment, old-settings migration and invalid-file preservation; they need no GPU or capture permissions. The Core project targets `net10.0` and has no Windows references. A Linux runtime has not yet been used for acceptance.
+
+The following commands exercise the retained WinForms reference, not the Avalonia interface:
+
+
+```powershell
+.\tests\verify.ps1 -Mode Synthetic
+.\tests\verify.ps1 -Mode Desktop
+.\tests\verify.ps1 -Mode Resilience
+.\tests\settings-regression.ps1
+.\tests\codecs.ps1
+.\tests\dependencies.ps1
+.\tests\dependencies.ps1 -Download
+.\tests\overlay.ps1
+.\tests\notifications.ps1
+.\tests\screenshots.ps1
+.\tests\application-folders.ps1
+```
+
+Synthetic mode uses generated video/audio. Desktop mode records locally for approximately 20 seconds. Resilience mode records the primary display for approximately 90 seconds, deliberately terminates only its own encoder, verifies recovery and one-minute pruning, and plays two quiet half-second tones to test audio resumption. Tests use separate workspace data directories. Desktop recording requires access to the interactive desktop; an agent sandbox can deny Desktop Duplication.
+
+The settings regression launches hidden, verifies that Settings becomes visible, restores a hidden/minimized existing window, checks hardware codecs, and verifies that a paused engine starts no capture process. Codec tests generate synthetic media, save each supported codec to MP4, and decode the result. Use `-Encoder av1_nvenc` to check one codec.
+
+The interface regression also visits and renders all four settings pages, exercises replay-switch callbacks, checks the minimum window size, and verifies that edited duration/FPS/bitrate/codec/audio values reach Apply correctly.
+
+Dependency verification checks existing-engine reuse, invalid candidates, checksum failure, archive traversal rejection, removal of the editable path, and preservation of the existing binary. `-Download` additionally tests a real clean installation in an isolated workspace directory, hardware encoder initialization, and reuse of that private installation without downloading again.
+
+The overlay regression creates a temporary fullscreen test window and sends real Windows keyboard input to exercise global open/close and save shortcuts, focus restoration, Escape dismissal, quick-save dispatch, embedded settings submission, preserved edits and pause state, and shortcut conflicts. It also verifies restoration of an existing standalone Settings window. It does not inject into or test an actual game.
+
+The notification regression checks native visibility and passive window styles, clicks through the notice and keyboard input reaching the fullscreen test app, automatic dismissal, and coexistence with Settings. A synthetic ReplayEngine exercises actual readiness, save-start/result, and pause/resume events. The resulting MP4 is fully decoded. Recovery notices are checked for repetition suppression and completion.
+
+Screenshot verification triggers the registered shortcut over a temporary fullscreen pattern, checks native-resolution PNG dimensions and pixel colors in the configured folder, captures an explicit display index, and checks unique filenames, partial-file cleanup on capture failure, invalid destinations, persisted settings, duplicate shortcuts, and conflicts that preserve the other shortcuts. Settings regression checks screenshot folder/shortcut edits; overlay regression checks its Screenshot button.
+
+Application-folder verification uses two temporary external application processes and generated recording media. It checks live process identification, save-time naming despite a later application switch, separate application folders, an overlay save retaining the preceding application's name, Windows device/invalid-name handling, desktop and missing-metadata fallbacks, preservation of existing clips, continued capture, and complete decoding of saved MP4s.
+
+Exclusive-fullscreen games, HDR fidelity, protected content, monitor hotplug, real sleep/resume, locked sessions, and switching audio devices have not all been manually validated. This version captures the selected monitor rather than injecting a game hook. Protected content may be unavailable to capture. Feature behavior is independently implemented; NVIDIA's private native capture algorithms have not been established.
+
+## Uninstall
+
+Quit from the tray menu, then run `./uninstall.ps1`. This removes the app and its private FFmpeg runtime; a reused system FFmpeg installation is preserved. Add `-RemoveSettings` to remove configuration, logs, and temporary cache as well. Saved MP4 clips are preserved.

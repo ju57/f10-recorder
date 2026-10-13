@@ -1,0 +1,190 @@
+using Avalonia;
+using Avalonia.Automation;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Platform.Storage;
+
+namespace F10Recorder;
+
+internal sealed class SettingsPanel : UserControl
+{
+    readonly WindowsRecorder recorder;
+    readonly NumericUpDown minutes = Number("ReplayMinutes", 1, 30), bitrate = Number("BitrateMbps", 5, 100), display = Number("DisplayIndex", -1, 31);
+    readonly ComboBox fps = new() { Name = "FramesPerSecond", ItemsSource = Settings.SupportedFrameRates }, codec = new() { Name = "VideoCodec", MinWidth = 260 };
+    readonly CheckBox audio = new() { Name = "SystemAudio", Content = "Capture system audio" }, startup = new() { Name = "StartWithWindows", Content = "Start buffering at Windows sign-in" };
+    readonly TextBox clips = new() { Name = "OutputDirectory" }, screenshots = new() { Name = "ScreenshotDirectory" };
+    readonly ShortcutEditor saveShortcut = new("Save", false), overlayShortcut = new("Overlay", true), screenshotShortcut = new("Screenshot", true);
+    readonly ToggleSwitch recording = new() { Name = "RecordingEnabled", OnContent = "On", OffContent = "Off" };
+    readonly TextBlock state = Ui.Label("Paused", 15, Ui.Warning, FontWeight.SemiBold), stateDetail = Ui.Label("", 12, Ui.Muted), estimate = Ui.Label("", 12, Ui.Muted), error = Ui.Label("", 13, Ui.Warning), codecStatus = Ui.Label("Checking your GPU…", 12, Ui.Muted);
+    readonly Button apply;
+    readonly ContentControl page = new();
+    readonly List<StackPanel> pages = [];
+    readonly List<Button> navigation = [];
+    bool updating, loaded, probing = true;
+    public Action CloseRequested;
+    internal Settings Submitted { get; private set; }
+    internal string Error => error.Text;
+    internal bool CodecCheckFinished => !probing;
+    internal int SelectedPage { get; private set; }
+
+    public SettingsPanel(WindowsRecorder session)
+    {
+        Background = Ui.Background;
+        recorder = session; var config = session.Config;
+        minutes.Value = config.ReplayMinutes; bitrate.Value = config.BitrateMbps; display.Value = config.DisplayIndex; fps.SelectedItem = config.FramesPerSecond;
+        audio.IsChecked = config.SystemAudio; startup.IsChecked = WindowsStartup.Enabled; clips.Text = config.OutputDirectory; screenshots.Text = config.ScreenshotDirectory;
+        saveShortcut.Load(config.SaveKey, config.SaveModifiers); overlayShortcut.Load(config.OverlayKey, config.OverlayModifiers); screenshotShortcut.Load(config.ScreenshotKey, config.ScreenshotModifiers);
+        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Margin = new Thickness(28, 22) };
+        var heading = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 0, 0, 22) };
+        var title = new StackPanel { Spacing = 5 }; title.Children.Add(Ui.Label("F10 Recorder", 27, null, FontWeight.SemiBold)); title.Children.Add(Ui.Label("Your recent moments, ready to save.", 13, Ui.Muted)); heading.Children.Add(title);
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        var quickScreenshot = Ui.Button("Screenshot", recorder.TakeScreenshot); quickScreenshot.Name = "QuickScreenshot"; actions.Children.Add(quickScreenshot);
+        var quickSave = Ui.Button("Save replay", recorder.SaveReplay, true); quickSave.Name = "QuickSaveReplay"; actions.Children.Add(quickSave); Grid.SetColumn(actions, 1); heading.Children.Add(actions); root.Children.Add(heading);
+        var header = new StackPanel { Spacing = 18 };
+        var statusGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        var statusText = new StackPanel { Spacing = 5 }; statusText.Children.Add(state); statusText.Children.Add(stateDetail); statusGrid.Children.Add(statusText);
+        recording.VerticalAlignment = VerticalAlignment.Center; AutomationProperties.SetName(recording, "Replay recording"); Grid.SetColumn(recording, 1); statusGrid.Children.Add(recording);
+        header.Children.Add(new Border { Background = Ui.Surface, CornerRadius = new CornerRadius(8), Padding = new Thickness(18, 14), Child = statusGrid });
+        var tabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(0, 0, 0, 12) };
+        foreach (string name in new[] { "Capture", "Audio", "Controls", "Storage" })
+        {
+            int index = navigation.Count; var button = Ui.Button(name, () => SelectPage(index)); button.Name = name + "Tab"; navigation.Add(button); tabs.Children.Add(button);
+        }
+        header.Children.Add(tabs); Grid.SetRow(header, 1); root.Children.Add(header);
+        pages.Add(CapturePage()); pages.Add(AudioPage()); pages.Add(ControlsPage()); pages.Add(StoragePage());
+        var scroll = new ScrollViewer { Content = page, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        Grid.SetRow(scroll, 2); root.Children.Add(scroll);
+        var footer = new StackPanel { Spacing = 10, Margin = new Thickness(0, 14, 0, 0) }; footer.Children.Add(error);
+        var footerGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto"), ColumnSpacing = 8 };
+        var info = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center }; info.Children.Add(estimate);
+        var logs = Ui.Button("Diagnostic logs", () => { try { WindowsRecorder.OpenFolder(recorder.DataDirectory); } catch (Exception ex) { error.Text = ex.Message; } }); logs.Padding = new Thickness(0); logs.Background = Brushes.Transparent; logs.Foreground = Ui.Muted; info.Children.Add(logs); footerGrid.Children.Add(info);
+        var close = Ui.Button("Close", () => CloseRequested?.Invoke()); Grid.SetColumn(close, 1); footerGrid.Children.Add(close);
+        apply = Ui.Button("Apply changes", primary: true); apply.Name = "ApplySettings"; apply.Click += async (_, _) => await ApplyAsync(); Grid.SetColumn(apply, 2); footerGrid.Children.Add(apply);
+        footer.Children.Add(footerGrid); Grid.SetRow(footer, 3); root.Children.Add(footer); Content = root;
+        recording.PropertyChanged += (_, e) => { if (!updating && e.Property == ToggleButton.IsCheckedProperty) recorder.Pause(recording.IsChecked != true); };
+        minutes.PropertyChanged += (_, e) => { if (e.Property == NumericUpDown.ValueProperty) Estimate(); }; bitrate.PropertyChanged += (_, e) => { if (e.Property == NumericUpDown.ValueProperty) Estimate(); };
+        SelectPage(0); Estimate(); UpdateState(); AttachedToVisualTree += async (_, _) => { if (!loaded) { loaded = true; await ProbeAsync(); } };
+    }
+    static NumericUpDown Number(string name, decimal minimum, decimal maximum) => new() { Name = name, Minimum = minimum, Maximum = maximum, Increment = 1, FormatString = "0", HorizontalAlignment = HorizontalAlignment.Stretch };
+    static StackPanel Page(string title, string description)
+    {
+        var body = new StackPanel { Spacing = 0, Margin = new Thickness(0, 4, 12, 4) }; body.Children.Add(Ui.Label(title, 20, null, FontWeight.SemiBold));
+        var hint = Ui.Label(description, 13, Ui.Muted); hint.Margin = new Thickness(0, 6, 0, 18); body.Children.Add(hint); return body;
+    }
+    static void Row(StackPanel body, string title, string description, Control control)
+    {
+        AutomationProperties.SetName(control, title);
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,280"), ColumnSpacing = 20, Margin = new Thickness(0, 14) };
+        var labels = new StackPanel { Spacing = 5, VerticalAlignment = VerticalAlignment.Center }; labels.Children.Add(Ui.Label(title, 14, null, FontWeight.SemiBold)); labels.Children.Add(Ui.Label(description, 12, Ui.Muted)); grid.Children.Add(labels);
+        control.VerticalAlignment = VerticalAlignment.Center; control.HorizontalAlignment = HorizontalAlignment.Stretch; Grid.SetColumn(control, 1); grid.Children.Add(control);
+        body.Children.Add(new Border { BorderBrush = Ui.Border, BorderThickness = new Thickness(0, 0, 0, 1), Child = grid });
+    }
+    StackPanel CapturePage()
+    {
+        var body = Page("Capture", "Choose the replay you want to keep. Applying changes rebuilds the buffer.");
+        Row(body, "Replay length", "Last 1–30 minutes; the cache uses disk storage.", minutes);
+        Row(body, "Video codec", "Only encoders that initialize on your GPU are offered.", codec); body.Children.Add(codecStatus);
+        Row(body, "Frame rate", "Frames per second at the display's native resolution.", fps);
+        Row(body, "Video bitrate", "5–100 Mbps. Higher values need more cache space.", bitrate);
+        Row(body, "Capture display", "−1 selects the primary display; 0–31 are adapter output indices.", display);
+        Row(body, "Resolution", "Capture keeps the display's native dimensions.", Ui.Label("Native display resolution", 13, Ui.Muted)); return body;
+    }
+    StackPanel AudioPage()
+    {
+        var body = Page("Audio", "Record the sound playing through your default output device.");
+        Row(body, "System audio", "Includes continuous silence when nothing is playing.", audio);
+        Row(body, "Playback device", "Follows the default Windows playback output.", Ui.Label("Default output", 13, Ui.Muted));
+        Row(body, "Audio format", "Mixed system audio saved with the video.", Ui.Label("AAC · stereo · 48 kHz · 192 kbps", 13, Ui.Muted)); return body;
+    }
+    StackPanel ControlsPage()
+    {
+        var body = Page("Controls", "Global shortcuts remain available while another application has focus.");
+        Row(body, "Save replay", "Save the buffered footage as an MP4.", saveShortcut);
+        Row(body, "Open overlay", "Open Settings over desktop or borderless fullscreen apps.", overlayShortcut);
+        Row(body, "Take screenshot", "Save a PNG of the capture display, even while paused.", screenshotShortcut);
+        body.Children.Add(startup); startup.Margin = new Thickness(0, 24, 0, 0); return body;
+    }
+    StackPanel StoragePage()
+    {
+        var body = Page("Storage", "Saved clips and screenshots remain separate from the rolling cache.");
+        body.Children.Add(Ui.Label("Clips", 15, null, FontWeight.SemiBold)); body.Children.Add(Ui.Label("MP4 files are grouped into folders using the foreground application's name.", 12, Ui.Muted)); body.Children.Add(Folder(clips));
+        var label = Ui.Label("Screenshots", 15, null, FontWeight.SemiBold); label.Margin = new Thickness(0, 24, 0, 0); body.Children.Add(label); body.Children.Add(Ui.Label("PNG files use a separately configured location.", 12, Ui.Muted)); body.Children.Add(Folder(screenshots));
+        var engine = Ui.Label("Recording engine", 15, null, FontWeight.SemiBold); engine.Margin = new Thickness(0, 26, 0, 6); body.Children.Add(engine);
+        body.Children.Add(Ui.Label("Setup reuses a compatible FFmpeg installation or provides a verified private copy automatically.", 12, Ui.Muted)); return body;
+    }
+    Control Folder(TextBox text)
+    {
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8, Margin = new Thickness(0, 12, 0, 0) }; grid.Children.Add(text);
+        var browse = Ui.Button("Browse…"); Grid.SetColumn(browse, 1); grid.Children.Add(browse);
+        browse.Click += async (_, _) =>
+        {
+            try
+            {
+                var provider = TopLevel.GetTopLevel(this).StorageProvider;
+                var selected = await provider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose save folder", AllowMultiple = false, SuggestedStartLocation = await provider.TryGetFolderFromPathAsync(text.Text) });
+                if (selected.Count > 0) text.Text = selected[0].TryGetLocalPath() ?? throw new IOException("Choose a local filesystem folder.");
+            }
+            catch (Exception ex) { error.Text = ex.Message; }
+        }; return grid;
+    }
+    public void SelectPage(int index)
+    {
+        SelectedPage = index; page.Content = pages[index];
+        for (int i = 0; i < navigation.Count; i++) { navigation[i].Background = i == index ? Ui.Input : Brushes.Transparent; navigation[i].Foreground = i == index ? Ui.Accent : Ui.Muted; }
+    }
+    async Task ProbeAsync()
+    {
+        try
+        {
+            var choices = await Task.Run(() => EncoderCapabilities.Probe(recorder.Config.FfmpegPath));
+            codec.ItemsSource = choices; codec.SelectedItem = choices.FirstOrDefault(c => c.Codec == recorder.Config.VideoCodec) ?? choices.FirstOrDefault();
+            codecStatus.Text = choices.Count > 0 ? "Available: " + string.Join(" / ", choices.Select(c => c.Codec.Replace("_nvenc", "").ToUpperInvariant())) : "No GPU encoder initialized. Check the NVIDIA driver or repair the installation.";
+        }
+        catch (Exception ex) { codecStatus.Text = ex.Message; }
+        finally { probing = false; UpdateState(); }
+    }
+    public void UpdateState()
+    {
+        updating = true; recording.IsChecked = !recorder.Paused; updating = false;
+        state.Text = recorder.Paused ? "Replay recording paused" : recorder.Ready ? "Replay recording active" : recorder.State;
+        state.Foreground = recorder.Ready && recorder.SaveRegistered ? Ui.Accent : Ui.Warning;
+        stateDetail.Text = recorder.Paused ? "Resume to start filling your replay buffer." : recorder.Ready ? recorder.State : "Recording becomes ready when completed footage is available.";
+        apply.IsEnabled = !probing && codec.SelectedItem != null && !recorder.Applying;
+        apply.Content = recorder.Applying ? "Applying…" : "Apply changes"; recording.IsEnabled = !recorder.Applying;
+    }
+    void Estimate() { estimate.Text = "Rolling cache ≈ " + (((minutes.Value ?? 5) * 60 + 10) * ((bitrate.Value ?? 20) + 0.192m) / 8).ToString("0") + " MB"; }
+    internal async Task<bool> ApplyAsync()
+    {
+        try
+        {
+            if (probing || codec.SelectedItem is not EncoderOption chosen) throw new InvalidOperationException("Wait for an available GPU encoder.");
+            var next = new Settings { ReplayMinutes = (int)(minutes.Value ?? 5), BitrateMbps = (int)(bitrate.Value ?? 20), DisplayIndex = (int)(display.Value ?? -1), FramesPerSecond = (int)fps.SelectedItem, VideoCodec = chosen.Codec, SystemAudio = audio.IsChecked == true, OutputDirectory = clips.Text, ScreenshotDirectory = screenshots.Text, SaveKey = saveShortcut.Key, SaveModifiers = saveShortcut.Modifiers, OverlayKey = overlayShortcut.Key, OverlayModifiers = overlayShortcut.Modifiers, ScreenshotKey = screenshotShortcut.Key, ScreenshotModifiers = screenshotShortcut.Modifiers };
+            next.Validate(); error.Text = ""; await recorder.ApplyAsync(next, startup.IsChecked == true); Submitted = next; CloseRequested?.Invoke(); return true;
+        }
+        catch (Exception ex) { error.Text = ex.Message; return false; }
+    }
+}
+
+internal sealed class ShortcutEditor : StackPanel
+{
+    readonly ComboBox key;
+    readonly CheckBox ctrl, alt, shift;
+    readonly bool letters;
+    public int Key => key.SelectedIndex < 12 ? 112 + key.SelectedIndex : 65 + key.SelectedIndex - 12;
+    public int Modifiers => (ctrl.IsChecked == true ? 2 : 0) | (alt.IsChecked == true ? 1 : 0) | (shift.IsChecked == true ? 4 : 0);
+    public ShortcutEditor(string name, bool allowLetters)
+    {
+        letters = allowLetters; Spacing = 7;
+        key = new ComboBox { Name = name + "Key", HorizontalAlignment = HorizontalAlignment.Stretch, ItemsSource = Enumerable.Range(1, 12).Select(i => "F" + i).Concat(allowLetters ? Enumerable.Range(65, 26).Select(i => ((char)i).ToString()) : [] ).ToArray() }; Children.Add(key);
+        var modifiers = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        ctrl = new CheckBox { Content = "Ctrl", Name = name + "Ctrl" }; alt = new CheckBox { Content = "Alt", Name = name + "Alt" }; shift = new CheckBox { Content = "Shift", Name = name + "Shift" };
+        modifiers.Children.Add(ctrl); modifiers.Children.Add(alt); modifiers.Children.Add(shift); Children.Add(modifiers);
+    }
+    public void Load(int virtualKey, int modifiers)
+    {
+        key.SelectedIndex = virtualKey >= 112 ? virtualKey - 112 : letters ? virtualKey - 65 + 12 : 0;
+        ctrl.IsChecked = (modifiers & 2) != 0; alt.IsChecked = (modifiers & 1) != 0; shift.IsChecked = (modifiers & 4) != 0;
+    }
+}

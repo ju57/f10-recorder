@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/Settings.cs" Link="Settings.cs" />
+    <Compile Include="../../src/RecorderRuntime.cs" Link="RecorderRuntime.cs" />
+    <Compile Include="../../src/ReplaySelection.cs" Link="ReplaySelection.cs" />
+    <Compile Include="../../src/RecorderNotifications.cs" Link="RecorderNotifications.cs" />
+    <InternalsVisibleTo Include="F10Recorder.Windows" />
+    <InternalsVisibleTo Include="F10Recorder.Desktop" />
+    <InternalsVisibleTo Include="F10Recorder.MigrationTests" />
+  </ItemGroup>
+</Project>

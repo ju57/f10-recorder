@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-ubuntu:
+    name: Core checks (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.401
+      - name: Restore locked dependencies
+        run: dotnet restore projects/F10Recorder.CoreChecks/F10Recorder.CoreChecks.csproj --locked-mode
+      - name: Run portable core checks
+        run: dotnet run --project projects/F10Recorder.CoreChecks/F10Recorder.CoreChecks.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true -- artifacts/core-checks-ci
+
+  windows-build:
+    name: Windows build
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.401
+      - name: Restore locked dependencies
+        run: dotnet restore projects/F10Recorder.Desktop/F10Recorder.Desktop.csproj --locked-mode
+      - name: Build Avalonia app
+        run: dotnet build projects/F10Recorder.Desktop/F10Recorder.Desktop.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
+
+# Hardware/UI acceptance is a separate local suite. Hosted runners do not
+# establish NVIDIA capture, fullscreen behavior, or driver performance.

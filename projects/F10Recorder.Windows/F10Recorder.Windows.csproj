@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <NoWarn>$(NoWarn);SYSLIB0014;SYSLIB0050</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../F10Recorder.Core/F10Recorder.Core.csproj" />
+    <Compile Include="../../src/ReplayEngine.cs" Link="ReplayEngine.cs" />
+    <Compile Include="../../src/Native.cs" Link="Native.cs" />
+    <Compile Include="../../src/LoopbackAudio.cs" Link="LoopbackAudio.cs" />
+    <Compile Include="../../src/MediaDependency.cs" Link="MediaDependency.cs" />
+    <Compile Include="../../src/EncoderCapabilities.cs" Link="EncoderCapabilities.cs" />
+    <Compile Include="../../src/ApplicationFolders.cs" Link="ApplicationFolders.cs" />
+    <Compile Include="../../src/ScreenshotCapture.cs" Link="ScreenshotCapture.cs" />
+    <InternalsVisibleTo Include="F10Recorder.Desktop" />
+    <InternalsVisibleTo Include="F10Recorder.MigrationTests" />
+  </ItemGroup>
+</Project>

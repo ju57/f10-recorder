@@ -1,0 +1,61 @@
+F10 Recorder dependency notices
+
+F10 Recorder's own source code and documentation are licensed under MIT.
+That license does not relicense dependencies, vendor artifacts, local research
+extracts, or captured media. F10 Recorder implements replay recording
+independently and does not ship NVIDIA application binaries or source code.
+
+FFmpeg
+Project: https://ffmpeg.org/
+Licensing information: https://ffmpeg.org/legal.html
+
+F10 Recorder launches FFmpeg as a separate executable for capture, encoding,
+segmentation, screenshots, and MP4 export. A compatible existing installation
+is reused without modification. Otherwise, the Windows prototype downloads:
+
+Package: ffmpeg-9.0.2-essentials_build.zip, supplied by Gyan
+URL: https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip
+SHA-256: 60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba
+Build information: https://www.gyan.dev/ffmpeg/builds/
+
+This exact fallback build reports GNU GPL version 3 or later through
+ffmpeg -L. It enables GPL components and version 3. Its upstream LICENSE,
+README.txt, documentation, and presets are retained alongside the private
+binary under the user's F10Recorder/runtime installation directory.
+GNU GPL version 3: https://www.gnu.org/licenses/gpl-3.0.html
+
+Other compatible existing builds can have different licenses and build flags.
+FFmpeg is generally LGPL, but optional GPL components change the license of
+the resulting FFmpeg build. Do not describe this fallback build as LGPL.
+
+PUBLIC BINARY RELEASE PREPARATION IS INCOMPLETE
+Before publishing an installer or redistributing a media-engine binary,
+review the exact build and its dependencies, preserve the applicable license
+texts and notices, and establish a license-compliant corresponding-source
+distribution arrangement, including relevant build instructions. This file
+records dependency identity; it does not itself complete that arrangement.
+
+Avalonia build dependencies
+The migrated Windows app uses Avalonia 12.1.4 and .NET 10.0.12. The .NET SDK
+10.0.401 is a development tool, not an end-user installation requirement.
+The self-contained app supplies its own .NET runtime. It no longer references
+WinForms, System.Drawing, or the Windows Desktop runtime.
+
+Avalonia and its Desktop, FreeDesktop, FreeDesktop.AtSpi, HarfBuzz, Native,
+Remote.Protocol, Skia, Themes.Fluent, Win32 and X11 packages: 12.1.4, MIT.
+Source: https://github.com/AvaloniaUI/Avalonia
+Avalonia.Angle.Windows.Natives: 2.1.27548.20260419; upstream LICENSE file.
+HarfBuzzSharp / HarfBuzzSharp.NativeAssets.Win32: 8.3.1.3, MIT wrapper with
+upstream native-code notices.
+SkiaSharp / SkiaSharp.NativeAssets.Win32: 3.119.4, MIT wrapper with upstream
+native-code notices.
+Source: https://github.com/mono/SkiaSharp
+MicroCom.Runtime: 0.11.6, MIT.
+Tmds.DBus.Protocol: 0.94.1, MIT.
+Microsoft.NETCore.App.Runtime.win-x64: 10.0.12, upstream runtime licenses and
+third-party notices. Source: https://github.com/dotnet/runtime
+
+This inventory describes the migration build. NuGet lockfiles record package
+identity and content hashes. The native components have their own notices;
+the MIT wrapper license must not be treated as their only applicable license.
+The public binary release review above also covers these exact dependencies.

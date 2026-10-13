@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- Keep ordinary build locks stable when publishing a RID-specific package. -->
+    <NuGetLockFilePath Condition="'$(RuntimeIdentifier)' != ''">packages.$(RuntimeIdentifier).lock.json</NuGetLockFilePath>
+    <NuGetLockFilePath Condition="'$(RuntimeIdentifier)' == '' and '$(RuntimeIdentifiers)' != ''">packages.$(RuntimeIdentifiers).lock.json</NuGetLockFilePath>
+    <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>
