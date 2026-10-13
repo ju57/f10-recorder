@@ -25,6 +25,8 @@ namespace F10Recorder
         NamedPipeServerStream pipe;
         double progress, progressAt;
         double lastSegmentEnd, lastSegmentAt;
+        long encodedFrames, reportedDrops, reportedDuplicates, cacheBytes;
+        double encodingSpeed, metricsAt, cpuSeconds, cpuPercent;
         volatile bool disposed;
         public string ErrorTail = "";
         public string DirectoryPath { get { return directory; } }
@@ -69,6 +71,19 @@ namespace F10Recorder
                         long value;
                         if (long.TryParse(e.Data.Substring(12), out value)) lock (gate) { double next = value / 1000000.0; if (next > progress) { progress = next; progressAt = clock.Elapsed.TotalSeconds; } }
                     }
+                    else
+                    {
+                        int split = e.Data.IndexOf('='); if (split <= 0) return;
+                        string key = e.Data.Substring(0, split), value = e.Data.Substring(split + 1);
+                        long count; double speed;
+                        lock (gate)
+                        {
+                            if (key == "frame" && long.TryParse(value, out count)) encodedFrames = count;
+                            else if (key == "drop_frames" && long.TryParse(value, out count)) reportedDrops = count;
+                            else if (key == "dup_frames" && long.TryParse(value, out count)) reportedDuplicates = count;
+                            else if (key == "speed" && double.TryParse(value.TrimEnd('x'), NumberStyles.Float, CultureInfo.InvariantCulture, out speed)) encodingSpeed = speed;
+                        }
+                    }
                 };
                 process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e) { if (e.Data != null) { lock (gate) { ErrorTail = (ErrorTail + "\n" + e.Data); if (ErrorTail.Length > 3000) ErrorTail = ErrorTail.Substring(ErrorTail.Length - 3000); } } };
                 process.BeginOutputReadLine(); process.BeginErrorReadLine();
@@ -91,6 +106,9 @@ namespace F10Recorder
         List<Segment> ReadSegments() { try { return ReplaySelection.Read(manifest, directory); } catch (IOException) { return new List<Segment>(); } }
         public void Maintain()
         {
+            var probe = RecorderRuntime.CaptureHealthProbe;
+            string controlledFailure = probe == null ? null : probe();
+            if (controlledFailure != null) throw new IOException(controlledFailure);
             lock (gate)
             {
                 var segments = ReadSegments();
@@ -106,6 +124,37 @@ namespace F10Recorder
                 long limit = (long)((settings.ReplayMinutes * 60 + 30) * (settings.BitrateMbps * 1000000L + 192000) / 8 * 1.5);
                 if (Directory.GetFiles(directory, "chunk-*" + settings.SegmentExtension).Sum(p => new FileInfo(p).Length) > limit) throw new IOException("Replay cache exceeded its byte limit.");
                 if (audio != null && audio.DefaultEndpointChanged()) throw new IOException("Default audio output changed; rebuilding replay buffer.");
+            }
+        }
+        internal RecorderMetrics Metrics
+        {
+            get
+            {
+                lock (gate)
+                {
+                    var result = new RecorderMetrics();
+                    if (disposed || process == null) return result;
+                    result.CaptureProcessId = process.Id; result.CaptureProgressSeconds = progress;
+                    result.EncodedFrames = encodedFrames; result.EncoderReportedDrops = reportedDrops; result.EncoderReportedDuplicates = reportedDuplicates; result.EncodingSpeed = encodingSpeed;
+                    var segments = ReadSegments(); result.BufferedSeconds = segments.Count == 0 ? 0 : Math.Min(settings.ReplayMinutes * 60, segments.Last().End - segments.First().Start);
+                    double now = clock.Elapsed.TotalSeconds;
+                    try
+                    {
+                        process.Refresh(); result.CaptureWorkingSetBytes = process.WorkingSet64;
+                        if (now - metricsAt >= 1)
+                        {
+                            double total = process.TotalProcessorTime.TotalSeconds;
+                            cpuPercent = (total - cpuSeconds) / (now - metricsAt) / Environment.ProcessorCount * 100;
+                            metricsAt = now; cpuSeconds = total;
+                            cacheBytes = Directory.GetFiles(directory, "chunk-*" + settings.SegmentExtension).Sum(p => { try { return new FileInfo(p).Length; } catch (IOException) { return 0L; } });
+                        }
+                    }
+                    catch (InvalidOperationException) { }
+                    catch (System.ComponentModel.Win32Exception) { }
+                    catch (IOException) { }
+                    result.CaptureCpuPercent = cpuPercent; result.CacheBytes = cacheBytes;
+                    return result;
+                }
             }
         }
         public string Save(double end, string saveRoot)
@@ -214,6 +263,24 @@ namespace F10Recorder
         volatile bool closing, paused, restart;
         CaptureSession session;
         int saving;
+        int recoveries;
+        double lastSaveMilliseconds;
+        long lastSaveBytes;
+        bool lastSaveSucceeded;
+        internal RecorderMetrics Metrics
+        {
+            get
+            {
+                lock (gate)
+                {
+                    var result = session == null ? new RecorderMetrics() : session.Metrics;
+                    result.SampledUtc = DateTime.UtcNow.ToString("o");
+                    result.Recoveries = recoveries; result.LastSaveMilliseconds = lastSaveMilliseconds;
+                    result.LastSaveBytes = lastSaveBytes; result.LastSaveSucceeded = lastSaveSucceeded;
+                    return result;
+                }
+            }
+        }
         internal bool IsSaving { get { return Volatile.Read(ref saving) != 0; } }
         public event Action<string, bool> StateChanged;
         public event Action<string, bool> SaveFinished;
@@ -254,7 +321,7 @@ namespace F10Recorder
                         Thread.Sleep(500);
                     }
                 }
-                catch (Exception ex) { failures++; Log.Write(ex.ToString()); State("Recovering: " + ex.Message.Split('\n')[0], false); }
+                catch (Exception ex) { failures++; lock (gate) recoveries++; Log.Write(ex.ToString()); State("Recovering: " + ex.Message.Split('\n')[0], false); }
                 finally
                 {
                     lock (gate) session = null;
@@ -267,6 +334,7 @@ namespace F10Recorder
         }
         public void Save(string applicationName = null)
         {
+            if (closing) { NotifySave("Recorder is stopping.", false); return; }
             if (paused) { NotifySave("Replay recording is paused. Resume recording before saving.", false); return; }
             if (Interlocked.CompareExchange(ref saving, 1, 0) != 0) { NotifySave("A replay is already being saved.", false); return; }
             CaptureSession current; double end;
@@ -275,8 +343,14 @@ namespace F10Recorder
             var started = SaveStarted; if (started != null) started();
             Task.Run(delegate
             {
-                try { NotifySave(current.Save(end, ApplicationFolders.Destination(settings.OutputDirectory, applicationName)), true); }
-                catch (Exception ex) { Log.Write(ex.ToString()); NotifySave(ex.Message, false); }
+                var elapsed = Stopwatch.StartNew();
+                try
+                {
+                    string file = current.Save(end, ApplicationFolders.Destination(settings.OutputDirectory, applicationName));
+                    lock (gate) { lastSaveMilliseconds = elapsed.Elapsed.TotalMilliseconds; lastSaveBytes = new FileInfo(file).Length; lastSaveSucceeded = true; }
+                    NotifySave(file, true);
+                }
+                catch (Exception ex) { lock (gate) { lastSaveMilliseconds = elapsed.Elapsed.TotalMilliseconds; lastSaveBytes = 0; lastSaveSucceeded = false; } Log.Write(ex.ToString()); NotifySave(ex.Message, false); }
                 finally { Interlocked.Exchange(ref saving, 0); }
             });
         }

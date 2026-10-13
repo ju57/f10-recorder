@@ -1,154 +1,73 @@
-using Microsoft.Win32;
-using System.Diagnostics;
-
 namespace F10Recorder;
 
-// All members except encoder callbacks run on the application's UI thread.
-// NativeWindow is used only for its Win32 message dispatch, never visual controls.
-internal sealed class WindowsRecorder : IDisposable
+internal interface IWindowsRecorder : IDisposable
 {
-    readonly Action<Action> post;
-    readonly string settingsPath;
-    readonly bool synthetic;
-    readonly Action<bool> startupWriter;
-    readonly bool customStartupWriter;
-    readonly HotkeyWindow shortcuts;
-    readonly ForegroundApplicationTracker foreground;
-    readonly RecorderNotifications notices;
-    ReplayEngine engine;
-    bool disposed;
-    int generation;
-    public Settings Config { get; private set; }
-    public string DataDirectory { get; }
-    public bool Paused { get; private set; }
-    public bool Ready { get; private set; }
-    public bool Applying { get; private set; }
-    public bool ScreenshotInProgress { get; private set; }
-    public string LastScreenshot { get; private set; }
-    public string State { get; private set; } = "Starting replay buffer…";
-    public bool SaveRegistered => shortcuts.SaveRegistered;
-    public bool OverlayRegistered => shortcuts.OverlayRegistered;
-    public bool ScreenshotRegistered => shortcuts.ScreenshotRegistered;
-    public string ApplicationName => foreground.ApplicationName;
-    internal int CaptureProcessId => engine.CaptureProcessId;
-    public event Action Changed;
-    public event Action OpenSettingsRequested;
-    public event Action OverlayRequested;
-    public event Action QuitRequested;
-    public event Action PreparingScreenshot;
-    public event Action<string, string, NotificationKind, int> Notification;
-    public event Action<string, bool> Saved;
-
-    internal static void Initialize(string data)
-    {
-        Directory.CreateDirectory(data); Log.DirectoryPath = data;
-        MediaDependency.RootDirectory = data;
-        RecorderRuntime.MediaEngineResolver = MediaDependency.ResolveExecutable;
-    }
-
-    public WindowsRecorder(string data, Action<Action> dispatch, bool paused, string controlTitle, bool syntheticSource = false, Action<bool> setStartup = null)
-    {
-        Initialize(data); post = dispatch; synthetic = syntheticSource; customStartupWriter = setStartup != null; startupWriter = setStartup ?? WindowsStartup.SetEnabled;
-        DataDirectory = data; settingsPath = Path.Combine(data, "settings.json"); Config = Settings.Load(settingsPath); Paused = paused;
-        shortcuts = new HotkeyWindow(controlTitle); foreground = new ForegroundApplicationTracker();
-        notices = new RecorderNotifications((title, message, kind, duration) => Notification?.Invoke(title, message, kind, duration));
-        shortcuts.Pressed += SaveReplay; shortcuts.OverlayPressed += () => OverlayRequested?.Invoke(); shortcuts.ScreenshotPressed += TakeScreenshot;
-        shortcuts.EnvironmentChanged += Restart;
-        shortcuts.CommandRequested += command => { switch (command) { case 1: OpenSettingsRequested?.Invoke(); break; case 2: Pause(true); break; case 3: Pause(false); break; case 4: QuitRequested?.Invoke(); break; case 5: OverlayRequested?.Invoke(); break; case 6: TakeScreenshot(); break; } };
-        Register(Config); StartEngine();
-        if (!File.Exists(settingsPath)) Config.Save(settingsPath);
-    }
-    void Register(Settings settings)
-    {
-        try { shortcuts.Register(settings); }
-        catch (Exception ex) { State = ex.Message; Log.Write(ex.Message); }
-    }
-    void StartEngine()
-    {
-        int current = ++generation;
-        engine = new ReplayEngine(Config, DataDirectory, Paused, synthetic);
-        void Dispatch(Action action) => post(() => { if (!disposed && generation == current) action(); });
-        engine.StateChanged += (message, ready) => Dispatch(() =>
-        {
-            State = ready && !shortcuts.SaveRegistered ? "Buffering · save shortcut unavailable" : message;
-            Ready = ready; notices.StateChanged(message, ready, Paused, Config, shortcuts.SaveRegistered); Changed?.Invoke();
-        });
-        engine.SaveStarted += () => Dispatch(notices.SaveStarted);
-        engine.SaveFinished += (message, success) => Dispatch(() => { notices.SaveFinished(message, success); Saved?.Invoke(message, success); Changed?.Invoke(); });
-    }
-    public void SampleForeground() => foreground.Sample();
-    public void SaveReplay() { if (!Applying && !disposed) engine.Save(foreground.Sample()); }
-    public void Pause(bool value)
-    {
-        if (Applying || disposed || Paused == value) return;
-        Paused = value; Ready = false; State = value ? "Paused" : "Starting replay buffer…";
-        engine.Pause(value); notices.PauseChanged(value); Changed?.Invoke();
-    }
-    public void Restart() { if (!Applying && !disposed) engine.Restart(); }
-    public async Task ApplyAsync(Settings next, bool startup)
-    {
-        if (Applying || disposed) throw new InvalidOperationException("Wait for the current settings change.");
-        if (engine.IsSaving || ScreenshotInProgress) throw new InvalidOperationException("Wait for the current replay or screenshot to finish saving.");
-        next.Validate();
-        try { shortcuts.Register(next); }
-        catch { Register(Config); throw; }
-        Applying = true; Changed?.Invoke();
-        try
-        {
-            bool previousStartup = WindowsStartup.Enabled;
-            // Stop the old capture before replacing it, preserving the pause state.
-            await Task.Run(engine.Dispose);
-            try { next.Save(settingsPath); if (customStartupWriter || startup != previousStartup) startupWriter(startup); Config = next; }
-            catch
-            {
-                // A startup-write failure must not leave disk and live configuration different.
-                Config.Save(settingsPath);
-                if (WindowsStartup.Enabled != previousStartup) startupWriter(previousStartup);
-                throw;
-            }
-            finally { StartEngine(); }
-            Ready = false; State = Paused ? "Paused" : "Starting replay buffer…";
-        }
-        finally { Applying = false; Register(Config); Changed?.Invoke(); }
-    }
-    public async void TakeScreenshot()
-    {
-        if (disposed || ScreenshotInProgress || Applying) return;
-        ScreenshotInProgress = true; PreparingScreenshot?.Invoke(); Changed?.Invoke();
-        int display = Config.DisplayIndex; string folder = Config.ScreenshotDirectory;
-        try
-        {
-            await Task.Delay(150);
-            string file = await Task.Run(() => ScreenshotCapture.Capture(display, folder));
-            if (!disposed) { LastScreenshot = file; Notification?.Invoke("Screenshot saved", Path.GetFileName(file), NotificationKind.Success, 4000); }
-        }
-        catch (Exception ex) { Log.Write(ex.ToString()); if (!disposed) Notification?.Invoke("Screenshot not saved", ex.Message, NotificationKind.Warning, 6000); }
-        finally { ScreenshotInProgress = false; if (!disposed) Changed?.Invoke(); }
-    }
-    public static void OpenFolder(string path) { Directory.CreateDirectory(path); Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
-    public void Dispose()
-    {
-        if (disposed) return; disposed = true;
-        shortcuts.Dispose(); foreground.Dispose(); engine.Dispose();
-    }
+    Settings Config { get; }
+    string DataDirectory { get; }
+    bool Paused { get; }
+    bool Ready { get; }
+    bool Applying { get; }
+    bool ScreenshotInProgress { get; }
+    string LastScreenshot { get; }
+    string State { get; }
+    bool SaveRegistered { get; }
+    bool OverlayRegistered { get; }
+    bool ScreenshotRegistered { get; }
+    string ApplicationName { get; }
+    int CaptureProcessId { get; }
+    RecorderMetrics Metrics { get; }
+    event Action Changed, OpenSettingsRequested, OverlayRequested, QuitRequested, PreparingScreenshot;
+    event Action<string, string, NotificationKind, int> Notification;
+    event Action<string, bool> Saved;
+    void SampleForeground();
+    void SaveReplay();
+    void Pause(bool value);
+    void Restart();
+    Task ApplyAsync(Settings next, bool startup);
+    void TakeScreenshot();
+    Task StopAsync();
 }
 
-internal static class WindowsStartup
+// Production uses the independent worker. In-process hosting is restricted to the
+// existing verification harness, which supplies its synthetic source/startup writer.
+internal sealed class WindowsRecorder : IWindowsRecorder
 {
-    const string Key = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    public static bool Enabled
+    readonly IWindowsRecorder backend;
+    public WindowsRecorder(string data, Action<Action> dispatch, bool paused, string controlTitle, bool syntheticSource = false, Action<bool> setStartup = null)
     {
-        get
-        {
-            try { using var key = Registry.CurrentUser.OpenSubKey(Key); return key?.GetValue("F10Recorder") != null; }
-            catch (System.Security.SecurityException) { return false; }
-            catch (UnauthorizedAccessException) { return false; }
-        }
+        backend = syntheticSource || setStartup != null
+            ? new RecorderHost(data, dispatch, paused, controlTitle, syntheticSource, setStartup)
+            : new WorkerRecorder(data, dispatch, paused, controlTitle);
     }
-    public static void SetEnabled(bool enabled)
-    {
-        using var key = Registry.CurrentUser.CreateSubKey(Key);
-        if (enabled) key.SetValue("F10Recorder", CaptureSession.Quote(Environment.ProcessPath), RegistryValueKind.String);
-        else key.DeleteValue("F10Recorder", false);
-    }
+    internal static void Initialize(string data) => RecorderHost.Initialize(data);
+    public Settings Config => backend.Config;
+    public string DataDirectory => backend.DataDirectory;
+    public bool Paused => backend.Paused;
+    public bool Ready => backend.Ready;
+    public bool Applying => backend.Applying;
+    public bool ScreenshotInProgress => backend.ScreenshotInProgress;
+    public string LastScreenshot => backend.LastScreenshot;
+    public string State => backend.State;
+    public bool SaveRegistered => backend.SaveRegistered;
+    public bool OverlayRegistered => backend.OverlayRegistered;
+    public bool ScreenshotRegistered => backend.ScreenshotRegistered;
+    public string ApplicationName => backend.ApplicationName;
+    public int CaptureProcessId => backend.CaptureProcessId;
+    public RecorderMetrics Metrics => backend.Metrics;
+    public event Action Changed { add => backend.Changed += value; remove => backend.Changed -= value; }
+    public event Action OpenSettingsRequested { add => backend.OpenSettingsRequested += value; remove => backend.OpenSettingsRequested -= value; }
+    public event Action OverlayRequested { add => backend.OverlayRequested += value; remove => backend.OverlayRequested -= value; }
+    public event Action QuitRequested { add => backend.QuitRequested += value; remove => backend.QuitRequested -= value; }
+    public event Action PreparingScreenshot { add => backend.PreparingScreenshot += value; remove => backend.PreparingScreenshot -= value; }
+    public event Action<string, string, NotificationKind, int> Notification { add => backend.Notification += value; remove => backend.Notification -= value; }
+    public event Action<string, bool> Saved { add => backend.Saved += value; remove => backend.Saved -= value; }
+    public void SampleForeground() => backend.SampleForeground();
+    public void SaveReplay() => backend.SaveReplay();
+    public void Pause(bool value) => backend.Pause(value);
+    public void Restart() => backend.Restart();
+    public Task ApplyAsync(Settings next, bool startup) => backend.ApplyAsync(next, startup);
+    public void TakeScreenshot() => backend.TakeScreenshot();
+    public Task StopAsync() => backend.StopAsync();
+    public void Dispose() => backend.Dispose();
+    public static void OpenFolder(string path) => RecorderHost.OpenFolder(path);
 }

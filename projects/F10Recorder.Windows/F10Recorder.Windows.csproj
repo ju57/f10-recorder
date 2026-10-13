@@ -6,6 +6,7 @@
     <NoWarn>$(NoWarn);SYSLIB0014;SYSLIB0050</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="F10Recorder.WorkerChecks" />
     <ProjectReference Include="../F10Recorder.Core/F10Recorder.Core.csproj" />
     <Compile Include="../../src/ReplayEngine.cs" Link="ReplayEngine.cs" />
     <Compile Include="../../src/Native.cs" Link="Native.cs" />

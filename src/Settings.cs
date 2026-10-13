@@ -70,9 +70,10 @@ namespace F10Recorder
     {
         static readonly object Gate = new object();
         public static string DirectoryPath;
+        public static string FileName = "recorder.log";
         public static void Write(string message)
         {
-            lock (Gate) { try { string path = Path.Combine(DirectoryPath, "recorder.log"); if (File.Exists(path) && new FileInfo(path).Length > 2000000) File.Move(path, path + "." + DateTime.UtcNow.Ticks + ".old"); foreach (string old in Directory.GetFiles(DirectoryPath, "recorder.log.*.old")) if (File.GetLastWriteTimeUtc(old) < DateTime.UtcNow.AddDays(-2)) File.Delete(old); File.AppendAllText(path, DateTime.Now.ToString("O") + " " + message + Environment.NewLine); } catch { } }
+            lock (Gate) { try { string path = Path.Combine(DirectoryPath, FileName); if (File.Exists(path) && new FileInfo(path).Length > 2000000) File.Move(path, path + "." + DateTime.UtcNow.Ticks + ".old"); foreach (string old in Directory.GetFiles(DirectoryPath, FileName + ".*.old")) if (File.GetLastWriteTimeUtc(old) < DateTime.UtcNow.AddDays(-2)) File.Delete(old); File.AppendAllText(path, DateTime.Now.ToString("O") + " " + message + Environment.NewLine); } catch { } }
         }
     }
 }
