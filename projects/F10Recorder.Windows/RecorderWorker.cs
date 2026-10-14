@@ -13,6 +13,12 @@ internal static class RecorderWorker
         Log.FileName = "worker.log";
         using var ownership = new Mutex(true, @"Local\F10Recorder-Worker-" + WorkerIdentity.Scope(data), out bool first);
         if (!first) return 0;
+        using var profileOwnership = new Mutex(true, WorkerIdentity.ProfileMutexName(data), out bool firstProfile);
+        if (!firstProfile)
+        {
+            Log.Write("This recording profile is already active in another Windows session. Quit that recorder or use a separate data directory.");
+            return 1;
+        }
         var loop = new WorkerLoop();
         string pauseFile = Path.Combine(data, "worker-state.json");
         if (File.Exists(pauseFile))
@@ -94,7 +100,7 @@ internal static class RecorderWorker
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             }
-            return new WorkerStatus { Instance = instance, Revision = ++revision, Config = host.Config, Paused = host.Paused, Ready = host.Ready, Applying = host.Applying, ScreenshotInProgress = host.ScreenshotInProgress,
+            return new WorkerStatus { Instance = instance, Revision = ++revision, Config = host.Config, Paused = host.Paused, Ready = host.Ready && metrics.CaptureProcessId != 0, Applying = host.Applying, Saving = host.Saving, ScreenshotInProgress = host.ScreenshotInProgress,
                 SaveRegistered = host.SaveRegistered, OverlayRegistered = host.OverlayRegistered, ScreenshotRegistered = host.ScreenshotRegistered,
                 State = host.State, LastScreenshot = host.LastScreenshot, ApplicationName = host.ApplicationName, WorkerProcessId = Environment.ProcessId,
                 Sequence = sequence, Metrics = metrics, Stopping = stopping, Events = after < 0 ? [] : events.Where(e => e.Sequence > after).Take(16).ToArray() };
@@ -129,7 +135,7 @@ internal static class RecorderWorker
                     if (attachedUi == null || attachedUi.Id != clientPid || !UiAlive())
                     {
                         attachedUi?.Dispose(); attachedUi = Process.GetProcessById(clientPid);
-                        uiCpuAt = metricsClock.Elapsed.TotalSeconds; uiCpuSeconds = 0; uiCpuPercent = 0;
+                        uiCpuAt = metricsClock.Elapsed.TotalSeconds; uiCpuSeconds = attachedUi.TotalProcessorTime.TotalSeconds; uiCpuPercent = 0;
                         host.ExcludeUiProcess(clientPid);
                     }
                 }

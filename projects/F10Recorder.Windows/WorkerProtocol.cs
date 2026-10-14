@@ -20,6 +20,14 @@ internal static class WorkerIdentity
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..24];
     }
     internal static string PipeName(string data) => "F10Recorder.v1." + Scope(data);
+    internal static string ProfileMutexName(string data)
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        string key = (identity.User?.Value ?? throw new InvalidOperationException("Current Windows user unavailable.")) + ":" + DataPath(data).ToUpperInvariant();
+        // Profiles contain shared settings and disposable cache files. Pipe/session
+        // isolation must not permit two sessions to mutate those same files.
+        return @"Global\F10Recorder-Profile-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..24];
+    }
     internal static string ControlTitle(string data)
     {
         string standard = DataPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "F10Recorder"));
@@ -49,7 +57,7 @@ internal sealed class WorkerStatus
     public string Instance;
     public long Revision;
     public Settings Config;
-    public bool Paused, Ready, Applying, ScreenshotInProgress, SaveRegistered, OverlayRegistered, ScreenshotRegistered, Stopping;
+    public bool Paused, Ready, Applying, Saving, ScreenshotInProgress, SaveRegistered, OverlayRegistered, ScreenshotRegistered, Stopping;
     public string State, LastScreenshot, ApplicationName;
     public int WorkerProcessId;
     public long Sequence;

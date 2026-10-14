@@ -2,12 +2,17 @@ using System.Diagnostics;
 using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Microsoft.Win32;
 
 namespace F10Recorder;
 
 internal static class WorkerChecks
 {
     static string data, desktop;
+    static bool live;
+    const string StartupKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    readonly record struct StartupState(object Value, RegistryValueKind Kind);
+    static StartupState startupBefore;
     static readonly Dictionary<string, object> report = new();
     static readonly List<string> clips = [];
     static readonly List<RecorderMetrics> samples = [];
@@ -15,6 +20,7 @@ internal static class WorkerChecks
     [STAThread]
     static int Main(string[] args)
     {
+        if (args[0] == "--fixture") { DesktopFixture.Run(args[1]); return 0; }
         if (args[0] == "--worker")
         {
             string fault = Path.Combine(args[1], "controlled-health-failure.txt");
@@ -26,11 +32,15 @@ internal static class WorkerChecks
             return RecorderWorker.Run(args[1], false, args[2], true, _ => { }, (_, folder) => ScreenshotCapture.CaptureSource("testsrc2=size=640x360:rate=1", folder, false));
         }
         data = Path.GetFullPath(args[0]); desktop = Path.GetFullPath(args[1]);
+        live = args.Contains("--live");
+        startupBefore = ReadStartup(); report["startupEnabledBefore"] = startupBefore.Value != null;
         Directory.CreateDirectory(data); WindowsRecorder.Initialize(data);
         var settings = new Settings { ReplayMinutes = 1, FramesPerSecond = 30, BitrateMbps = 5, OutputDirectory = Path.Combine(data, "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots"), SaveKey = 121, SaveModifiers = 7, OverlayKey = 122, OverlayModifiers = 7, ScreenshotKey = 123, ScreenshotModifiers = 7 };
+        if (args.Contains("--alternate-shortcuts")) { settings.SaveKey = 117; settings.OverlayKey = 118; settings.ScreenshotKey = 119; }
+        if (live) { settings.FramesPerSecond = 60; settings.BitrateMbps = 20; }
         settings.Save(Path.Combine(data, "settings.json"));
         report["mediaEngine"] = MediaDependency.ResolveExecutable();
-        report["captureSource"] = "Synthetic 640x360/30 testsrc2 and 440Hz/48kHz tone; no desktop recording";
+        report["captureSource"] = live ? "Primary monitor native resolution, 60fps/20Mbps H264 NVENC; controlled animated borderless window and real WASAPI default output (silence permitted); one-minute replay buffer" : "Synthetic 640x360/30 testsrc2 and 440Hz/48kHz tone; no desktop recording";
         try { Check(int.Parse(args[2])).GetAwaiter().GetResult(); report["result"] = "passed"; }
         catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); }
         File.WriteAllText(Path.Combine(data, "verification.json"), JsonSerializer.Serialize(report, WorkerProtocol.Json));
@@ -42,15 +52,39 @@ internal static class WorkerChecks
         foreach (string arg in args) info.ArgumentList.Add(arg);
         return Process.Start(info) ?? throw new IOException("Test process did not start.");
     }
-    static Task<WorkerReply> Call(string command = "status", bool value = false, Settings settings = null, long after = -1) => WorkerProtocol.CallAsync(data, new WorkerRequest { Command = command, Value = value, Settings = settings, AfterEvent = after });
+    static Task<WorkerReply> Call(string command = "status", bool value = false, Settings settings = null, long after = -1) => WorkerProtocol.CallAsync(data, new WorkerRequest { Command = command, Value = command == "apply" ? startupBefore.Value != null : value, Settings = settings, AfterEvent = after });
+    static StartupState ReadStartup()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(StartupKey);
+        object value = key?.GetValue("F10Recorder", null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+        return new StartupState(value, value == null ? RegistryValueKind.String : key.GetValueKind("F10Recorder"));
+    }
+    static bool SameStartup(StartupState a, StartupState b) => a.Kind == b.Kind && JsonSerializer.Serialize(a.Value) == JsonSerializer.Serialize(b.Value);
+    static void PreserveStartup()
+    {
+        bool changed = !SameStartup(startupBefore, ReadStartup());
+        if (changed)
+        {
+            using var key = Registry.CurrentUser.CreateSubKey(StartupKey);
+            if (startupBefore.Value == null) key.DeleteValue("F10Recorder", false);
+            else key.SetValue("F10Recorder", startupBefore.Value, startupBefore.Kind);
+        }
+        Require(SameStartup(startupBefore, ReadStartup()), "The original sign-in startup entry was not preserved.");
+        report["startupEntryPreservedWithoutChange"] = !changed;
+        report["startupEntryRestored"] = changed;
+    }
     static void Require(bool condition, string error) { if (!condition) throw new Exception(error); }
     static async Task<WorkerStatus> Until(Func<WorkerStatus, bool> predicate, string error, int seconds = 30)
     {
         var clock = Stopwatch.StartNew();
         while (clock.Elapsed.TotalSeconds < seconds)
         {
-            var reply = await Call(); Require(reply.Error == null, reply.Error);
-            if (predicate(reply.Status)) return reply.Status;
+            try
+            {
+                var reply = await Call(); Require(reply.Error == null, reply.Error);
+                if (predicate(reply.Status)) return reply.Status;
+            }
+            catch (Exception ex) when (ex is IOException or OperationCanceledException) { }
             await Task.Delay(100);
         }
         throw new TimeoutException(error);
@@ -71,12 +105,16 @@ internal static class WorkerChecks
         }
         throw new TimeoutException("Production UI did not attach to the worker.");
     }
-    static async Task<WorkerEvent> Save(bool expected, bool hotkeyDispatch = false)
+    static async Task<WorkerEvent> Save(bool expected, bool hotkeyDispatch = false, Func<WorkerStatus, Task> afterAccepted = null)
     {
         long sequence = (await Call()).Status.Sequence;
         if (hotkeyDispatch)
             Require(Native.PostMessage(Native.FindWindow(null, WorkerIdentity.ControlTitle(data)), 0x0312, new IntPtr(1), IntPtr.Zero), "Headless worker hotkey dispatch failed.");
-        else { var begin = await Call("save"); Require(begin.Error == null, begin.Error); }
+        else
+        {
+            var begin = await Call("save"); Require(begin.Error == null, begin.Error);
+            if (afterAccepted != null) await afterAccepted(begin.Status);
+        }
         var clock = Stopwatch.StartNew();
         while (clock.Elapsed.TotalSeconds < 20)
         {
@@ -96,10 +134,21 @@ internal static class WorkerChecks
     static Settings Copy(Settings config) => JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(config, WorkerProtocol.Json), WorkerProtocol.Json);
     static async Task Check(int soakSeconds)
     {
-        Process worker = null, ui = null;
+        Process worker = null, ui = null, fixture = null;
         try
         {
-            worker = Launch(Environment.ProcessPath, "--worker", data, desktop);
+            await CheckProfileOwnership();
+            if (live)
+            {
+                Require(new DriveInfo(Path.GetPathRoot(data)).AvailableFreeSpace > 8L * 1024 * 1024 * 1024, "Live acceptance requires at least 8GiB of free space.");
+                fixture = Launch(Environment.ProcessPath, "--fixture", data);
+                var start = Stopwatch.StartNew();
+                while (!File.Exists(Path.Combine(data, "fixture-ready.json")) && !fixture.HasExited && start.Elapsed.TotalSeconds < 10) await Task.Delay(100);
+                Require(!fixture.HasExited && File.Exists(Path.Combine(data, "fixture-ready.json")), "Controlled desktop fixture did not become ready.");
+                report["fixture"] = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(data, "fixture-ready.json")));
+                worker = Launch(desktop, "--recorder-worker", "--data-dir", data);
+            }
+            else worker = Launch(Environment.ProcessPath, "--worker", data, desktop);
             var initial = await Until(s => s.Ready && s.Metrics.CaptureProgressSeconds >= 5, "Worker did not begin buffering.");
             Require(initial.WorkerProcessId == worker.Id, "Unexpected worker ownership.");
             Require(initial.SaveRegistered && initial.OverlayRegistered && initial.ScreenshotRegistered, "Worker did not own all shortcuts.");
@@ -113,15 +162,29 @@ internal static class WorkerChecks
             await Save(true, true); report["uiCrashAndHeadlessSave"] = true;
             ui = Launch(desktop, "--data-dir", data); await UntilUi(ui, worker.Id);
             Require((await Call()).Status.Metrics.CaptureProcessId == capture, "UI reattachment rebuilt the buffer."); report["uiReattachmentPreservesBuffer"] = true;
+            await Save(true, afterAccepted: async status =>
+            {
+                Require(status.Saving, "Save finished before the in-flight lifecycle check.");
+                Require((await Call("quit")).Error != null, "Quit interrupted an in-flight save.");
+                Require((await Call("apply", settings: Copy(status.Config))).Error != null, "Settings replacement interrupted an in-flight save.");
+                Require((await Call()).Status.Saving, "Save finished before the UI crash could be injected.");
+                ui.Kill(); await ui.WaitForExitAsync(); ui.Dispose(); ui = null;
+            });
+            report["uiCrashDuringSaveAndBusyCommandRejection"] = true;
+            ui = Launch(desktop, "--data-dir", data); await UntilUi(ui, worker.Id);
             using (var command = Launch(desktop, "--data-dir", data, "--overlay"))
                 await command.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
             await Task.Delay(500);
             Require((await Call("screenshot")).Error == null, "Remote screenshot command failed.");
             var screenshot = await Until(s => s.LastScreenshot != null && !s.ScreenshotInProgress, "Cross-process screenshot preparation did not complete.");
-            Require(File.Exists(screenshot.LastScreenshot), "Synthetic screenshot is missing.");
+            Require(File.Exists(screenshot.LastScreenshot), "Controlled screenshot is missing.");
             using (var uiStatus = JsonDocument.Parse(File.ReadAllText(Path.Combine(data, "status.json"))))
                 Require(!uiStatus.RootElement.GetProperty("OverlayVisible").GetBoolean(), "Screenshot preparation left the UI overlay visible.");
             report["remoteScreenshotPreparation"] = screenshot.LastScreenshot;
+
+            var requests = await Task.WhenAll(Enumerable.Range(0, 24).Select(_ => Call()));
+            Require(requests.All(r => r.Error == null && r.Status.Ready), "Concurrent status readers affected capture.");
+            report["concurrentStatusReaders"] = requests.Length;
 
             using (var pipe = new NamedPipeClientStream(".", WorkerIdentity.PipeName(data), PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly))
             {
@@ -138,6 +201,12 @@ internal static class WorkerChecks
             Require((await Call("apply", settings: invalid)).Error != null && (await Call()).Status.Config.VideoCodec == original.VideoCodec, "Invalid settings changed live capture.");
             Require(Settings.Load(Path.Combine(data, "settings.json")).VideoCodec == original.VideoCodec, "Invalid settings changed persisted capture."); report["invalidApplyRollback"] = true;
 
+            int priorCapture = (await Call()).Status.Metrics.CaptureProcessId;
+            var restarting = await Call("restart");
+            Require(restarting.Error == null && !restarting.Status.Ready, "Restart continued to advertise capture readiness.");
+            await Until(s => s.Ready && s.Metrics.CaptureProcessId != 0 && s.Metrics.CaptureProcessId != priorCapture, "Explicit restart did not rebuild capture.");
+            report["restartInvalidatesReadiness"] = true;
+
             var blocked = Copy(original); blocked.OutputDirectory = Path.Combine(data, "blocked-output"); File.WriteAllText(blocked.OutputDirectory, "Controlled non-directory output target");
             Require((await Call("apply", settings: blocked)).Error == null, "Controlled output settings did not apply.");
             await Until(s => s.Ready && s.Metrics.CaptureProgressSeconds > 4, "Capture did not recover after settings change.");
@@ -152,22 +221,53 @@ internal static class WorkerChecks
                 Require(Path.GetFullPath(encoder.MainModule.FileName).Equals(Path.GetFullPath((string)report["mediaEngine"]), StringComparison.OrdinalIgnoreCase), "Unexpected encoder process identity.");
                 encoder.Kill();
             }
-            await Until(s => s.Ready && s.Metrics.CaptureProcessId != before.Metrics.CaptureProcessId, "Encoder crash did not recover."); report["encoderCrashRecovery"] = true;
+            await Until(s => s.Ready && s.Metrics.CaptureProcessId != 0 && s.Metrics.CaptureProcessId != before.Metrics.CaptureProcessId, "Encoder crash did not recover."); report["encoderCrashRecovery"] = true;
             before = (await Call()).Status;
             Native.PostMessage(Native.FindWindow(null, WorkerIdentity.ControlTitle(data)), 0x007E, IntPtr.Zero, IntPtr.Zero);
-            await Until(s => s.Ready && s.Metrics.CaptureProcessId != before.Metrics.CaptureProcessId, "Display-change message did not recover capture."); report["displayChangeMessageRecovery"] = true;
+            await Until(s => s.Ready && s.Metrics.CaptureProcessId != 0 && s.Metrics.CaptureProcessId != before.Metrics.CaptureProcessId, "Display-change message did not recover capture."); report["displayChangeMessageRecovery"] = true;
             before = (await Call()).Status;
-            File.WriteAllText(Path.Combine(data, "controlled-health-failure.txt"), "Controlled audio endpoint change at capture-health boundary.");
-            await Until(s => s.Ready && s.Metrics.CaptureProcessId != before.Metrics.CaptureProcessId && s.Metrics.Recoveries > before.Metrics.Recoveries, "Controlled audio-health failure did not recover capture.");
-            report["audioHealthRecovery"] = "Injected health-boundary failure; physical audio endpoint was unchanged";
+            if (!live)
+            {
+                File.WriteAllText(Path.Combine(data, "controlled-health-failure.txt"), "Controlled audio endpoint change at capture-health boundary.");
+                await Until(s => s.Ready && s.Metrics.CaptureProcessId != 0 && s.Metrics.CaptureProcessId != before.Metrics.CaptureProcessId && s.Metrics.Recoveries > before.Metrics.Recoveries, "Controlled audio-health failure did not recover capture.");
+                report["audioHealthRecovery"] = "Injected health-boundary failure; physical audio endpoint was unchanged";
+            }
+            else
+            {
+                // Production UI must restart the real worker without any test-only launcher.
+                using var oldEncoder = Process.GetProcessById(before.Metrics.CaptureProcessId);
+                Require(oldEncoder.Handle != IntPtr.Zero, "Could not retain the owned encoder's exit handle.");
+                worker.Kill(); await worker.WaitForExitAsync(); worker.Dispose(); worker = null;
+                var recovered = await Until(s => s.Ready && s.Instance != before.Instance, "UI did not restart the crashed worker.", 45);
+                worker = Process.GetProcessById(recovered.WorkerProcessId); await UntilUi(ui, worker.Id);
+                await oldEncoder.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                Require(recovered.SaveRegistered && recovered.OverlayRegistered && recovered.ScreenshotRegistered, "Restarted worker did not reacquire shortcuts.");
+                await Until(s => s.Ready && s.Metrics.CaptureProgressSeconds > 4, "Restarted worker did not refill its buffer."); await Save(true);
+                report["workerCrashAutomaticRestartAndEncoderCleanup"] = new { oldWorker = before.WorkerProcessId, newWorker = recovered.WorkerProcessId, oldEncoder = oldEncoder.Id, bufferRebuilt = true };
+                foreach (int message in new[] { 0x02B1, 0x0218 })
+                {
+                    before = (await Call()).Status;
+                    Require(Native.PostMessage(Native.FindWindow(null, WorkerIdentity.ControlTitle(data)), (uint)message, new IntPtr(message == 0x02B1 ? 8 : 18), IntPtr.Zero), "Environment message dispatch failed.");
+                    await Until(s => s.Ready && s.Metrics.CaptureProcessId != 0 && s.Metrics.CaptureProcessId != before.Metrics.CaptureProcessId, "Unlock/resume message did not rebuild capture.");
+                }
+                report["unlockResumeMessageRouting"] = "Injected unlock/resume messages; no real lock or suspend";
+            }
 
             var soak = Stopwatch.StartNew(); int nextSave = 15;
+            double previousProgress = -1;
             while (soak.Elapsed.TotalSeconds < soakSeconds)
             {
+                if (live) Require(!fixture.HasExited, "Controlled fixture closed during desktop capture.");
                 var snapshot = (await Call()).Status;
                 Require(snapshot.Ready && snapshot.Metrics.CaptureProcessId != 0, "Soak capture stopped advancing.");
+                Require(snapshot.Metrics.CaptureProgressSeconds > previousProgress, "Soak encoder progress stalled.");
+                previousProgress = snapshot.Metrics.CaptureProgressSeconds;
                 samples.Add(snapshot.Metrics);
-                if (soak.Elapsed.TotalSeconds >= nextSave) { await Save(true); nextSave += 30; }
+                if (soak.Elapsed.TotalSeconds >= nextSave)
+                {
+                    await Save(true); nextSave += live ? 120 : 30;
+                    File.WriteAllText(Path.Combine(data, "acceptance-progress.json"), JsonSerializer.Serialize(new { elapsedSeconds = soak.Elapsed.TotalSeconds, samples = samples.Count, clips = clips.Count, latest = snapshot.Metrics }, WorkerProtocol.Json));
+                }
                 await Task.Delay(1000);
             }
             await Save(true);
@@ -176,7 +276,7 @@ internal static class WorkerChecks
             Require(samples.Max(s => s.CacheBytes) < bound, "Rolling cache exceeded its measured bitrate allowance.");
             report["soakSeconds"] = soak.Elapsed.TotalSeconds; report["cacheBoundBytes"] = bound;
             report["samples"] = samples; report["clips"] = clips; report["saves"] = saves;
-            report["metricsMeaning"] = "CPU normalized across logical processors; drops/duplicates are FFmpeg progress counters; GPU load and gaming FPS are not measured";
+            report["metricsMeaning"] = "CPU normalized across logical processors; drops/duplicates are FFmpeg progress counters; optional wrapper GPU counters cover the whole device; gaming FPS and perceptual sync are not measured";
             var hashes = clips.ToDictionary(p => p, p => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(p))));
 
             await Call("pause", true); await Until(s => s.Paused && s.Metrics.CaptureProcessId == 0, "Pause did not stop encoder.");
@@ -184,7 +284,7 @@ internal static class WorkerChecks
             await worker.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
             await ui.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)); ui.Dispose(); ui = null;
             report["explicitQuitStopsWorkerAndUi"] = true; worker.Dispose();
-            worker = Launch(Environment.ProcessPath, "--worker", data, desktop);
+            worker = live ? Launch(desktop, "--recorder-worker", "--data-dir", data) : Launch(Environment.ProcessPath, "--worker", data, desktop);
             var restored = await Until(s => s.Paused, "Worker restart lost persisted pause.");
             Require(restored.Metrics.CaptureProcessId == 0, "Paused worker restart launched an encoder.");
             Require(hashes.All(h => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(h.Key))) == h.Value), "Restart changed a saved clip.");
@@ -193,12 +293,45 @@ internal static class WorkerChecks
         }
         finally
         {
-            if (ui != null) { if (!ui.HasExited) ui.Kill(); ui.Dispose(); }
-            if (worker != null)
+            try
             {
-                if (!worker.HasExited) { try { await Call("quit"); await worker.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); } catch { worker.Kill(); await worker.WaitForExitAsync(); } }
-                worker.Dispose();
+                if (ui != null) { if (!ui.HasExited) ui.Kill(); ui.Dispose(); }
+                if (worker != null)
+                {
+                    if (!worker.HasExited) { try { await Call("quit"); await worker.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); } catch { worker.Kill(); await worker.WaitForExitAsync(); } }
+                    worker.Dispose();
+                }
+                if (fixture != null) { if (!fixture.HasExited) { fixture.CloseMainWindow(); if (!fixture.WaitForExit(2000)) fixture.Kill(); } fixture.Dispose(); }
             }
+            finally { PreserveStartup(); }
         }
+    }
+
+    static async Task CheckProfileOwnership()
+    {
+        string otherProfile = Path.Combine(data, "ownership-check");
+        string sentinel = Path.Combine(otherProfile, "buffer", "session-sentinel", "chunk-sentinel.ts");
+        Directory.CreateDirectory(Path.GetDirectoryName(sentinel)); File.WriteAllText(sentinel, "Preserve another session's active buffer");
+        // Hold the session-independent profile lock without the session worker lock.
+        // This exercises the same rejection path as a worker in another session.
+        using (var owner = new Mutex(true, WorkerIdentity.ProfileMutexName(otherProfile), out bool first))
+        {
+            Require(first, "Ownership-check profile was already in use.");
+            using var blocked = Launch(desktop, "--recorder-worker", "--data-dir", otherProfile, "--paused");
+            // Keep mutex ownership and disposal on this STA thread; do not await here.
+            Require(blocked.WaitForExit(5000) && blocked.ExitCode == 1, "A second session was not refused before opening the profile.");
+            Require(File.ReadAllText(sentinel) == "Preserve another session's active buffer", "Blocked worker changed the active session's buffer.");
+            owner.ReleaseMutex();
+        }
+        using var replacement = Launch(desktop, "--recorder-worker", "--data-dir", otherProfile, "--paused");
+        try
+        {
+            var ready = await WorkerProtocol.CallAsync(otherProfile, new WorkerRequest());
+            Require(ready.Error == null && ready.Status.Paused, "Profile could not reopen after ownership was released.");
+            Require((await WorkerProtocol.CallAsync(otherProfile, new WorkerRequest { Command = "quit" })).Error == null, "Ownership-check worker did not stop.");
+            await replacement.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally { if (!replacement.HasExited) { replacement.Kill(); await replacement.WaitForExitAsync(); } }
+        report["profileOwnershipAndBufferPreservation"] = "Session-independent profile lock refused another owner before cache cleanup; profile reopened after release. Actual parallel Windows logins were not created.";
     }
 }

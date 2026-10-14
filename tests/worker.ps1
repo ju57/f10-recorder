@@ -1,4 +1,4 @@
-param([ValidateRange(10,86400)][int]$SoakSeconds = 120, [switch]$NoBuild)
+param([ValidateRange(10,86400)][int]$SoakSeconds = 120, [switch]$NoBuild, [switch]$LiveDesktop)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $sdk = Join-Path $root '.tools\dotnet\dotnet.exe'
@@ -15,16 +15,33 @@ if (-not $NoBuild) {
     & $sdk build (Join-Path $root 'projects\F10Recorder.WorkerChecks\F10Recorder.WorkerChecks.csproj') -c Release -o $output -m:1 --disable-build-servers -p:UseSharedCompilation=false --ignore-failed-sources
     if ($LASTEXITCODE -ne 0) { throw 'Worker verification build failed.' }
 }
-$data = Join-Path $root ('artifacts\worker-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$prefix = if ($LiveDesktop) { 'worker-live-' } else { 'worker-' }
+$data = Join-Path $root ('artifacts\' + $prefix + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $desktop = Join-Path $root 'bin\avalonia\F10Recorder.Desktop.exe'
-$process = Start-Process -FilePath (Join-Path $output 'F10Recorder.WorkerChecks.exe') -ArgumentList @(('"' + $data + '"'),('"' + $desktop + '"'),$SoakSeconds) -WindowStyle Hidden -PassThru -Wait
+$checkArgs = @(('"' + $data + '"'),('"' + $desktop + '"'),$SoakSeconds)
+if ($LiveDesktop) { $checkArgs += '--live' }
+$process = Start-Process -FilePath (Join-Path $output 'F10Recorder.WorkerChecks.exe') -ArgumentList $checkArgs -WindowStyle Hidden -PassThru
+$gpuSamples = [System.Collections.Generic.List[object]]::new()
+$gpuTool = if ($LiveDesktop) { Get-Command nvidia-smi -ErrorAction SilentlyContinue } else { $null }
+$samplingClock = [System.Diagnostics.Stopwatch]::StartNew()
+$nextGpuSample = 0
+while (-not $process.WaitForExit(1000)) {
+    if ($gpuTool -and $samplingClock.Elapsed.TotalSeconds -ge $nextGpuSample) {
+        $nextGpuSample += 5
+        $rows = & $gpuTool.Source --query-gpu=timestamp,index,name,driver_version,utilization.gpu,utilization.encoder,utilization.decoder,memory.used --format=csv,noheader,nounits 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            foreach ($row in ($rows | ConvertFrom-Csv -Header timestamp,index,name,driver_version,gpu_percent,encoder_percent,decoder_percent,memory_mib)) { $gpuSamples.Add($row) }
+        }
+    }
+}
+if ($gpuSamples.Count) { $gpuSamples | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $data 'gpu-samples.json') -Encoding utf8 }
 $report = Get-Content -LiteralPath (Join-Path $data 'verification.json') -Raw | ConvertFrom-Json
 if ($process.ExitCode -ne 0 -or $report.result -ne 'passed') { throw ($report | ConvertTo-Json -Depth 8) }
 $probe = Join-Path (Split-Path -Parent $report.mediaEngine) 'ffprobe.exe'
 if (-not (Test-Path -LiteralPath $probe)) { $probe = (Get-Command ffprobe -ErrorAction Stop).Source }
 $media = @()
 foreach ($clip in $report.clips) {
-    $details = ((& $probe -v error -show_entries 'format=duration:stream=codec_type,codec_name,start_time,duration,r_frame_rate,nb_frames' -of json $clip) -join [Environment]::NewLine) | ConvertFrom-Json
+    $details = ((& $probe -v error -show_entries 'format=duration:stream=codec_type,codec_name,width,height,start_time,duration,r_frame_rate,nb_frames' -of json $clip) -join [Environment]::NewLine) | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0) { throw "Could not inspect saved replay: $clip" }
     $video = @($details.streams | Where-Object codec_type -eq video)
     $audio = @($details.streams | Where-Object codec_type -eq audio)
@@ -51,7 +68,10 @@ $summary = [ordered]@{
     max_encoder_reported_drops=($report.samples.EncoderReportedDrops | Measure-Object -Maximum).Maximum
     max_encoder_reported_duplicates=($report.samples.EncoderReportedDuplicates | Measure-Object -Maximum).Maximum
     media=$media
-    limitations='Synthetic NVENC fixture, not gaming performance; FFmpeg-reported drops, not total capture loss; timestamp boundary skew, not perceptual lip-sync; GPU utilization not measured.'
+    capture_source=$report.captureSource
+    gpu_sample_count=$gpuSamples.Count
+    gpu_samples=if ($gpuSamples.Count) { Join-Path $data 'gpu-samples.json' } else { $null }
+    limitations='Controlled test imagery, not gaming performance; FFmpeg-reported drops, not total capture loss; timestamp boundary skew, not perceptual lip-sync. Optional NVIDIA counters cover the whole GPU, not F10 alone. Physical device changes, sleep/resume and volume exhaustion are not exercised.'
 }
 $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $data 'measurements.json') -Encoding utf8
 Write-Host ($summary | ConvertTo-Json -Depth 8)

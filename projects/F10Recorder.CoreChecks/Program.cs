@@ -17,7 +17,10 @@ string legacy = JsonSerializer.Serialize(new { ReplayMinutes = 5, FramesPerSecon
 File.WriteAllText(settingsFile, legacy); var settings = Settings.Load(settingsFile);
 Require(settings.VideoCodec == "hevc_nvenc" && !settings.SystemAudio && settings.ReplayMinutes == 5 && settings.OverlayHotkeyText == "Ctrl+Shift+F9", "Existing settings were not preserved by the serializer migration.");
 settings.Save(settingsFile); Require(!File.ReadAllText(settingsFile).Contains("FfmpegPath"), "Engine paths must stay out of recording preferences.");
-File.WriteAllText(settingsFile, legacy.Replace("\"FramesPerSecond\":60", "\"FramesPerSecond\":999"));
+var previousInvalidFiles = Directory.GetFiles(data, "settings.json.invalid-*").ToHashSet();
+string invalidLegacy = legacy.Replace("\"FramesPerSecond\":60", "\"FramesPerSecond\":999");
+File.WriteAllText(settingsFile, invalidLegacy);
 settings = Settings.Load(settingsFile);
-Require(settings.FramesPerSecond == 60 && Directory.GetFiles(data, "settings.json.invalid-*").Length == 1, "Invalid settings must be preserved before falling back to defaults.");
+var newInvalidFiles = Directory.GetFiles(data, "settings.json.invalid-*").Where(p => !previousInvalidFiles.Contains(p)).ToArray();
+Require(settings.FramesPerSecond == 60 && newInvalidFiles.Length == 1 && File.ReadAllText(newInvalidFiles[0]) == invalidLegacy, "Invalid settings must be preserved before falling back to defaults.");
 Console.WriteLine("Passed: replay boundaries, incomplete manifests, path containment, legacy configuration migration, and invalid-file preservation.");

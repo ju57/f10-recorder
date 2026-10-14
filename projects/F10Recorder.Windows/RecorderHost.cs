@@ -3,7 +3,7 @@ using System.Diagnostics;
 
 namespace F10Recorder;
 
-// All members except encoder callbacks run on the application's UI thread.
+// All members except encoder callbacks run on the host's owner thread.
 // NativeWindow is used only for its Win32 message dispatch, never visual controls.
 internal sealed class RecorderHost : IWindowsRecorder
 {
@@ -33,6 +33,7 @@ internal sealed class RecorderHost : IWindowsRecorder
     public string ApplicationName => foreground.ApplicationName;
     public int CaptureProcessId => engine.CaptureProcessId;
     public RecorderMetrics Metrics => engine.Metrics;
+    internal bool Saving => engine.IsSaving;
     internal Func<Task> PrepareRemoteScreenshot;
     internal void ExcludeUiProcess(int id) => foreground.ExcludeProcess(id);
     public event Action Changed;
@@ -88,7 +89,12 @@ internal sealed class RecorderHost : IWindowsRecorder
         Paused = value; Ready = false; State = value ? "Paused" : "Starting replay buffer…";
         engine.Pause(value); notices.PauseChanged(value); Changed?.Invoke();
     }
-    public void Restart() { if (!Applying && !disposed) engine.Restart(); }
+    public void Restart()
+    {
+        if (Applying || disposed) return;
+        Ready = false; State = Paused ? "Paused" : "Restarting replay buffer…";
+        engine.Restart(); Changed?.Invoke();
+    }
     public async Task ApplyAsync(Settings next, bool startup)
     {
         if (Applying || disposed) throw new InvalidOperationException("Wait for the current settings change.");
