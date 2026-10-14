@@ -7,6 +7,8 @@ namespace F10Recorder
         public int CaptureProcessId;
         public int WorkerProcessId;
         public double CaptureProgressSeconds;
+        public int ConfiguredCaptureRateLimit;
+        public int ConfiguredOutputFramesPerSecond;
         public double BufferedSeconds;
         public long EncodedFrames;
         public long EncoderReportedDrops;

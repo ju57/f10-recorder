@@ -14,6 +14,12 @@ namespace F10Recorder
             var report = new Dictionary<string, object>();
             try
             {
+                string filterRows = " ... ddagrab |->V Desktop capture\n ... aresample A->A Resample audio\n ... hwdownload V->V Download frames\n";
+                if (MediaDependency.SupportsCaptureFilters(filterRows) || MediaDependency.SupportsCaptureFilters(filterRows + " ... vfrdet V->V Reports fps\n") || !MediaDependency.SupportsCaptureFilters(filterRows + " ... fps V->V Pace frames\n")) throw new Exception("Required FPS filter inventory was not enforced.");
+                string currentRows = filterRows.Replace(" ... ", " .. ");
+                if (MediaDependency.SupportsCaptureFilters(currentRows) || MediaDependency.SupportsCaptureFilters(currentRows + " .. vfrdet V->V Reports fps\n") || !MediaDependency.SupportsCaptureFilters(currentRows + " .. fps V->V Pace frames\n")) throw new Exception("Current FFmpeg filter inventory format was rejected.");
+                report["requiredFpsFilterAndDescriptionFalsePositive"] = true;
+                report["currentAndLegacyFilterInventoryFormats"] = true;
                 string existing = MediaDependency.ResolveExecutable();
                 string originalHash = MediaDependency.Hash(existing);
                 bool acquired = false;

@@ -10,6 +10,8 @@ internal static class WorkerChecks
 {
     static string data, desktop;
     static bool live;
+    static bool gpuFixture;
+    static int liveFps = 60;
     const string StartupKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     readonly record struct StartupState(object Value, RegistryValueKind Kind);
     static StartupState startupBefore;
@@ -20,6 +22,19 @@ internal static class WorkerChecks
     [STAThread]
     static int Main(string[] args)
     {
+        if (args[0] == "--analyze-saved")
+        {
+            string folder = Path.GetFullPath(args[1]);
+            using var saved = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "verification.json")));
+            var root = saved.RootElement;
+            int rate = root.GetProperty("fixture").GetProperty("fps").GetInt32();
+            var analyses = root.GetProperty("soakClips").EnumerateArray().Select(c => c.GetString()).Select(clip => new
+            {
+                clip, analysis = FramePacingChecks.Analyze(folder, clip, root.GetProperty("mediaEngine").GetString(), rate, true)
+            }).ToArray();
+            File.WriteAllText(Path.Combine(folder, "pacing-reanalysis.json"), JsonSerializer.Serialize(analyses, WorkerProtocol.Json));
+            return analyses.All(a => JsonSerializer.SerializeToElement(a.analysis).GetProperty("acceptance").GetString() == "passed") ? 0 : 1;
+        }
         if (args[0] == "--pacing-fixture") { PacingFixture.Run(args[1], int.Parse(args[2]), args[3]); return 0; }
         if (args[0] == "--pacing") return FramePacingChecks.Run(args[1], int.Parse(args[2]), int.Parse(args[3]), args[4], args[5] == "on", args.Length > 6 ? args[6] : "baseline", args.Length > 7 ? int.Parse(args[7]) : 0, args.Length > 8 ? int.Parse(args[8]) : int.Parse(args[3]), args.Length > 9 ? args[9] : "h264_nvenc");
         if (args[0] == "--fixture") { DesktopFixture.Run(args[1]); return 0; }
@@ -35,15 +50,33 @@ internal static class WorkerChecks
         }
         data = Path.GetFullPath(args[0]); desktop = Path.GetFullPath(args[1]);
         live = args.Contains("--live");
+        gpuFixture = args.Contains("--gpu-fixture");
+        int fpsIndex = Array.IndexOf(args, "--fps"); if (fpsIndex >= 0) liveFps = int.Parse(args[fpsIndex + 1]);
+        Require(!gpuFixture || live, "GPU fixture requires live desktop capture.");
         startupBefore = ReadStartup(); report["startupEnabledBefore"] = startupBefore.Value != null;
         Directory.CreateDirectory(data); WindowsRecorder.Initialize(data);
         var settings = new Settings { ReplayMinutes = 1, FramesPerSecond = 30, BitrateMbps = 5, OutputDirectory = Path.Combine(data, "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots"), SaveKey = 121, SaveModifiers = 7, OverlayKey = 122, OverlayModifiers = 7, ScreenshotKey = 123, ScreenshotModifiers = 7 };
         if (args.Contains("--alternate-shortcuts")) { settings.SaveKey = 117; settings.OverlayKey = 118; settings.ScreenshotKey = 119; }
-        if (live) { settings.FramesPerSecond = 60; settings.BitrateMbps = 20; }
+        if (live) { settings.FramesPerSecond = liveFps; settings.BitrateMbps = 20; }
         settings.Save(Path.Combine(data, "settings.json"));
         report["mediaEngine"] = MediaDependency.ResolveExecutable();
-        report["captureSource"] = live ? "Primary monitor native resolution, 60fps/20Mbps H264 NVENC; controlled animated borderless window and real WASAPI default output (silence permitted); one-minute replay buffer" : "Synthetic 640x360/30 testsrc2 and 440Hz/48kHz tone; no desktop recording";
-        try { Check(int.Parse(args[2])).GetAwaiter().GetResult(); report["result"] = "passed"; }
+        report["captureSource"] = live ? "Primary monitor native resolution, " + liveFps + "fps/20Mbps H264 NVENC; controlled " + (gpuFixture ? "DXGI flip-model GPU source" : "GDI animated borderless window") + " and real WASAPI default output (silence permitted); one-minute replay buffer" : "Synthetic 640x360/30 testsrc2 and 440Hz/48kHz tone; no desktop recording";
+        try
+        {
+            Check(int.Parse(args[2])).GetAwaiter().GetResult();
+            if (gpuFixture)
+            {
+                var analyses = new List<object>();
+                foreach (string clip in (string[])report["soakClips"])
+                {
+                    object analysis = FramePacingChecks.Analyze(data, clip, (string)report["mediaEngine"], liveFps, true);
+                    analyses.Add(new { clip, analysis }); report["pacingReports"] = analyses;
+                    var measured = JsonSerializer.SerializeToElement(analysis);
+                    Require(measured.GetProperty("acceptance").GetString() == "passed", "Soak clip failed pacing acceptance: " + clip + " " + measured);
+                }
+            }
+            report["result"] = "passed";
+        }
         catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); }
         File.WriteAllText(Path.Combine(data, "verification.json"), JsonSerializer.Serialize(report, WorkerProtocol.Json));
         return (string)report["result"] == "passed" ? 0 : 1;
@@ -143,11 +176,12 @@ internal static class WorkerChecks
             if (live)
             {
                 Require(new DriveInfo(Path.GetPathRoot(data)).AvailableFreeSpace > 8L * 1024 * 1024 * 1024, "Live acceptance requires at least 8GiB of free space.");
-                fixture = Launch(Environment.ProcessPath, "--fixture", data);
+                fixture = gpuFixture ? Launch(Environment.ProcessPath, "--pacing-fixture", data, liveFps.ToString(), "dxgi") : Launch(Environment.ProcessPath, "--fixture", data);
+                string readyFile = Path.Combine(data, gpuFixture ? "pacing-ready.json" : "fixture-ready.json");
                 var start = Stopwatch.StartNew();
-                while (!File.Exists(Path.Combine(data, "fixture-ready.json")) && !fixture.HasExited && start.Elapsed.TotalSeconds < 10) await Task.Delay(100);
-                Require(!fixture.HasExited && File.Exists(Path.Combine(data, "fixture-ready.json")), "Controlled desktop fixture did not become ready.");
-                report["fixture"] = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(data, "fixture-ready.json")));
+                while (!File.Exists(readyFile) && !fixture.HasExited && start.Elapsed.TotalSeconds < 10) await Task.Delay(100);
+                Require(!fixture.HasExited && File.Exists(readyFile), "Controlled desktop fixture did not become ready.");
+                report["fixture"] = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(readyFile));
                 worker = Launch(desktop, "--recorder-worker", "--data-dir", data);
             }
             else worker = Launch(Environment.ProcessPath, "--worker", data, desktop);
@@ -160,7 +194,7 @@ internal static class WorkerChecks
             ui.Kill(); await ui.WaitForExitAsync(); ui.Dispose(); ui = null;
             await Task.Delay(2500);
             var survived = (await Call()).Status;
-            Require(survived.Ready && survived.Metrics.CaptureProcessId == capture && survived.Metrics.CaptureProgressSeconds > progress, "UI crash interrupted capture.");
+            Require(survived.Ready && survived.Metrics.CaptureProcessId == capture && survived.Metrics.CaptureProgressSeconds > progress, "Capture changed during UI-crash check: " + survived.State);
             await Save(true, true); report["uiCrashAndHeadlessSave"] = true;
             ui = Launch(desktop, "--data-dir", data); await UntilUi(ui, worker.Id);
             Require((await Call()).Status.Metrics.CaptureProcessId == capture, "UI reattachment rebuilt the buffer."); report["uiReattachmentPreservesBuffer"] = true;
@@ -255,6 +289,7 @@ internal static class WorkerChecks
                 report["unlockResumeMessageRouting"] = "Injected unlock/resume messages; no real lock or suspend";
             }
 
+            int soakClipStart = clips.Count;
             var soak = Stopwatch.StartNew(); int nextSave = 15;
             double previousProgress = -1;
             while (soak.Elapsed.TotalSeconds < soakSeconds)
@@ -273,6 +308,7 @@ internal static class WorkerChecks
                 await Task.Delay(1000);
             }
             await Save(true);
+            report["soakClips"] = clips.Skip(soakClipStart).ToArray();
             Require(samples.Any(s => s.EncodedFrames > 0 && s.CacheBytes > 0 && s.CaptureWorkingSetBytes > 0), "Capture measurements were not populated.");
             double bound = original.BitrateMbps * 1000000d / 8 * (original.ReplayMinutes * 60 + 15) * 1.5;
             Require(samples.Max(s => s.CacheBytes) < bound, "Rolling cache exceeded its measured bitrate allowance.");

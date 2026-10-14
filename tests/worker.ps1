@@ -1,4 +1,4 @@
-param([ValidateRange(10,86400)][int]$SoakSeconds = 120, [switch]$NoBuild, [switch]$LiveDesktop)
+param([ValidateRange(10,86400)][int]$SoakSeconds = 120, [switch]$NoBuild, [switch]$LiveDesktop, [ValidateSet(24,30,60,120)][int]$FramesPerSecond = 60, [switch]$GpuFixture)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $sdk = Join-Path $root '.tools\dotnet\dotnet.exe'
@@ -19,7 +19,8 @@ $prefix = if ($LiveDesktop) { 'worker-live-' } else { 'worker-' }
 $data = Join-Path $root ('artifacts\' + $prefix + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $desktop = Join-Path $root 'bin\avalonia\F10Recorder.Desktop.exe'
 $checkArgs = @(('"' + $data + '"'),('"' + $desktop + '"'),$SoakSeconds)
-if ($LiveDesktop) { $checkArgs += '--live' }
+if ($LiveDesktop) { $checkArgs += @('--live','--fps',$FramesPerSecond) }
+if ($GpuFixture) { if (-not $LiveDesktop) { throw 'GPU fixture requires -LiveDesktop' }; $checkArgs += '--gpu-fixture' }
 $process = Start-Process -FilePath (Join-Path $output 'F10Recorder.WorkerChecks.exe') -ArgumentList $checkArgs -WindowStyle Hidden -PassThru
 $gpuSamples = [System.Collections.Generic.List[object]]::new()
 $gpuTool = if ($LiveDesktop) { Get-Command nvidia-smi -ErrorAction SilentlyContinue } else { $null }

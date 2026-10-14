@@ -11,8 +11,14 @@ internal static class PacingFixture
     internal static void Run(string data, int fps, string mode)
     {
         Forms.Application.EnableVisualStyles();
-        using var window = new Pattern(data, fps, mode);
-        if (mode == "paced") window.RunPaced(); else Forms.Application.Run(window);
+        uint previous = SetThreadExecutionState(0x80000003);
+        if (previous == 0) throw new System.ComponentModel.Win32Exception();
+        try
+        {
+            using var window = new Pattern(data, fps, mode);
+            if (mode != "legacy") window.RunPaced(); else Forms.Application.Run(window);
+        }
+        finally { SetThreadExecutionState(previous); }
     }
     sealed class Pattern : Forms.Form
     {
@@ -25,11 +31,14 @@ internal static class PacingFixture
         readonly Drawing.Brush[] colors = [Drawing.Brushes.DarkBlue, Drawing.Brushes.DarkRed, Drawing.Brushes.DarkGreen, Drawing.Brushes.DarkGoldenrod];
         long frame, next;
         bool periodSet;
+        GpuPacingSource gpu;
+        readonly bool frozen;
         internal Pattern(string directory, int rate, string mode)
         {
-            data = directory; fps = rate; paced = mode == "paced";
+            data = directory; fps = rate; paced = mode != "legacy";
+            frozen = mode == "dxgi-static";
             Directory.CreateDirectory(data);
-            trace = new StreamWriter(Path.Combine(data, "render.csv")); trace.WriteLine("id,paint_begin_qpc,compositor_flush_qpc");
+            trace = new StreamWriter(Path.Combine(data, "render.csv")); trace.WriteLine("id,render_begin_qpc,commit_return_qpc");
             Text = "F10 frame pacing controlled source"; FormBorderStyle = Forms.FormBorderStyle.None;
             StartPosition = Forms.FormStartPosition.Manual; Bounds = Forms.Screen.PrimaryScreen.Bounds; TopMost = true; DoubleBuffered = true;
             KeyPreview = true; KeyDown += (_, e) => { if (e.KeyCode == Forms.Keys.Escape) Close(); };
@@ -38,14 +47,16 @@ internal static class PacingFixture
             timer.Tick += (_, _) => Pulse(Stopwatch.GetTimestamp());
             Shown += (_, _) =>
             {
+                if (mode.StartsWith("dxgi")) gpu = new GpuPacingSource(Handle, ClientSize.Width, ClientSize.Height, fps, data);
                 next = Stopwatch.GetTimestamp(); if (!paced) timer.Start();
-                File.WriteAllText(Path.Combine(data, "pacing-ready.json"), JsonSerializer.Serialize(new { width = Bounds.Width, height = Bounds.Height, pid = Environment.ProcessId, fps, mode, qpc_frequency = Stopwatch.Frequency, timer_resolution_requested = periodSet, scheduler = paced ? "high-resolution waitable timer and QPC deadlines" : "WinForms 16ms timer" }));
+                File.WriteAllText(Path.Combine(data, "pacing-ready.json"), JsonSerializer.Serialize(new { width = Bounds.Width, height = Bounds.Height, pid = Environment.ProcessId, fps, mode, qpc_frequency = Stopwatch.Frequency, timer_resolution_requested = periodSet, display_refresh_hz = gpu?.RefreshRate, present_sync_interval = gpu?.SyncInterval, scheduler = gpu?.HardwarePaced == true ? "DXGI frame-latency wait handle and hardware presentation interval" : paced ? "high-resolution waitable timer and QPC deadlines" : "WinForms 16ms timer" }));
             };
         }
         void Pulse(long begin)
         {
-            frame++; Refresh();
-            int result = DwmFlush(); if (result != 0) throw new IOException("Compositor flush failed: " + result);
+            frame++;
+            if (gpu != null) gpu.Draw(frame);
+            else { Refresh(); int result = DwmFlush(); if (result != 0) throw new IOException("Compositor flush failed: " + result); }
             trace.WriteLine($"{frame},{begin},{Stopwatch.GetTimestamp()}");
             if (frame % fps == 0) trace.Flush();
         }
@@ -60,8 +71,9 @@ internal static class PacingFixture
                 while (!IsDisposed && Visible)
                 {
                     Forms.Application.DoEvents(); if (IsDisposed || !Visible) break;
+                    if (frozen && frame >= fps) { Thread.Sleep(10); continue; }
                     long remaining = next - Stopwatch.GetTimestamp();
-                    if (remaining > 0)
+                    if (remaining > 0 && gpu?.HardwarePaced != true)
                     {
                         long due = -Math.Max(1, remaining * 10000000 / Stopwatch.Frequency);
                         if (!SetWaitableTimer(wait, ref due, 0, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, 0) || WaitForSingleObject(wait, 1000) != 0) throw new System.ComponentModel.Win32Exception();
@@ -74,6 +86,7 @@ internal static class PacingFixture
         }
         protected override void OnPaint(Forms.PaintEventArgs e)
         {
+            if (gpu != null) return;
             base.OnPaint(e);
             // Full-screen spatial motion plus a loss-resistant 24-bit frame ID,
             // checksum byte and inverted second barcode row.
@@ -96,7 +109,7 @@ internal static class PacingFixture
         {
             if (disposing)
             {
-                timer?.Dispose(); trace?.Dispose(); font?.Dispose();
+                gpu?.Dispose(); timer?.Dispose(); trace?.Dispose(); font?.Dispose();
                 if (periodSet) { TimeEndPeriod(1); periodSet = false; }
             }
             base.Dispose(disposing);
@@ -109,4 +122,5 @@ internal static class PacingFixture
     [DllImport("kernel32.dll", EntryPoint = "SetWaitableTimerEx", SetLastError = true)] static extern bool SetWaitableTimer(IntPtr timer, ref long due, int period, IntPtr callback, IntPtr argument, IntPtr wake, uint tolerance);
     [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern uint SetThreadExecutionState(uint flags);
 }

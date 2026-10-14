@@ -15,6 +15,7 @@ namespace F10Recorder
     public sealed class CaptureSession : IDisposable
     {
         readonly Settings settings;
+        readonly int captureRateLimit;
         readonly string directory, manifest;
         readonly object gate = new object();
         readonly HashSet<string> pinned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -41,6 +42,7 @@ namespace F10Recorder
         public CaptureSession(Settings config, string root, bool synthetic, Func<bool> cancelled = null)
         {
             settings = config;
+            captureRateLimit = synthetic ? settings.FramesPerSecond : settings.FramesPerSecond * 4;
             directory = Path.Combine(root, "session-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
             manifest = Path.Combine(directory, "segments.csv");
@@ -48,9 +50,11 @@ namespace F10Recorder
             {
                 var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-stats_period", "0.25", "-progress", "pipe:1" };
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=" + settings.FramesPerSecond });
-                // ddagrab has no background buffer. A lavfi demuxer can leave it
-                // unpolled while raw audio is read, losing changing desktop frames.
-                else args.AddRange(new[] { "-filter_complex", "ddagrab=framerate=" + settings.FramesPerSecond + ":output_idx=" + (settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1[video]" });
+                // ddagrab's rate is a polling ceiling, not a guaranteed output clock.
+                // Allow acquisition headroom, then pace the GPU frames in the graph.
+                // Output-only CFR resampling still showed intermittent motion loss.
+                // The direct source avoids lavfi/audio demux scheduling stalls.
+                else args.AddRange(new[] { "-filter_complex", "ddagrab=framerate=" + captureRateLimit + ":output_idx=" + (settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1,fps=fps=" + settings.FramesPerSecond + ":round=near[video]" });
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000" });
                 else if (settings.SystemAudio)
                 {
@@ -62,6 +66,7 @@ namespace F10Recorder
                 args.AddRange(new[] { "-map", synthetic ? "0:v:0" : "[video]" });
                 if (synthetic || settings.SystemAudio) args.AddRange(new[] { "-map", synthetic ? "1:a:0" : "0:a:0", "-af", "aresample=async=1:first_pts=0", "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "192k" });
                 else args.Add("-an");
+                if (!synthetic) args.AddRange(new[] { "-r", settings.FramesPerSecond.ToString(), "-fps_mode", "cfr" });
                 args.AddRange(new[] { "-c:v", settings.VideoCodec, "-preset", "p3", "-tune", "ll", "-rc", "cbr", "-b:v", settings.BitrateMbps + "M", "-maxrate", settings.BitrateMbps + "M", "-bufsize", (settings.BitrateMbps * 2) + "M", "-g", settings.FramesPerSecond.ToString(), "-bf", "0", "-forced-idr", "1", "-force_key_frames", "expr:gte(t,n_forced*1)", "-flags", "+cgop", "-f", "segment", "-segment_time", "1", "-segment_format", settings.SegmentFormat, "-reset_timestamps", "1", "-segment_list", manifest, "-segment_list_type", "csv", "-segment_list_size", (settings.ReplayMinutes * 60 + 20).ToString(), Path.Combine(directory, "chunk-%09d" + settings.SegmentExtension) });
                 var argumentProbe = RecorderRuntime.CaptureArgumentProbe;
                 if (argumentProbe != null) args = argumentProbe(args);
@@ -139,6 +144,7 @@ namespace F10Recorder
                     var result = new RecorderMetrics();
                     if (disposed || process == null) return result;
                     result.CaptureProcessId = process.Id; result.CaptureProgressSeconds = progress;
+                    result.ConfiguredCaptureRateLimit = captureRateLimit; result.ConfiguredOutputFramesPerSecond = settings.FramesPerSecond;
                     result.EncodedFrames = encodedFrames; result.EncoderReportedDrops = reportedDrops; result.EncoderReportedDuplicates = reportedDuplicates; result.EncodingSpeed = encodingSpeed;
                     var segments = ReadSegments(); result.BufferedSeconds = segments.Count == 0 ? 0 : Math.Min(settings.ReplayMinutes * 60, segments.Last().End - segments.First().Start);
                     double now = clock.Elapsed.TotalSeconds;

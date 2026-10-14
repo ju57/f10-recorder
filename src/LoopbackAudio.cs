@@ -85,9 +85,11 @@ namespace F10Recorder
                 Check(enumerator.GetDefaultAudioEndpoint(0, 0, out device));
                 string id;
                 Check(device.GetId(out id));
-                return !String.Equals(id, EndpointId, StringComparison.Ordinal);
+                bool changed = !String.Equals(id, EndpointId, StringComparison.Ordinal);
+                if (changed) Log.Write("Default audio endpoint changed from " + EndpointId + " to " + id);
+                return changed;
             }
-            catch (COMException) { return true; }
+            catch (COMException ex) { Log.Write("Default audio endpoint query failed (0x" + ex.ErrorCode.ToString("X8") + "): " + ex.Message); return true; }
             finally { Release(device); Release(enumerator); }
         }
 
