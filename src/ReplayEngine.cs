@@ -48,7 +48,9 @@ namespace F10Recorder
             {
                 var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-stats_period", "0.25", "-progress", "pipe:1" };
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=" + settings.FramesPerSecond });
-                else args.AddRange(new[] { "-thread_queue_size", "512", "-f", "lavfi", "-i", "ddagrab=framerate=" + settings.FramesPerSecond + ":output_idx=" + (settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1" });
+                // ddagrab has no background buffer. A lavfi demuxer can leave it
+                // unpolled while raw audio is read, losing changing desktop frames.
+                else args.AddRange(new[] { "-filter_complex", "ddagrab=framerate=" + settings.FramesPerSecond + ":output_idx=" + (settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1[video]" });
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000" });
                 else if (settings.SystemAudio)
                 {
@@ -57,10 +59,12 @@ namespace F10Recorder
                     pipe = new NamedPipeServerStream(name, PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 65536, 65536);
                     args.AddRange(new[] { "-thread_queue_size", "1024", "-f", audio.FfmpegFormat, "-ar", audio.SampleRate.ToString(), "-ac", audio.Channels.ToString(), "-i", @"\\.\pipe\" + name });
                 }
-                args.AddRange(new[] { "-map", "0:v:0" });
-                if (synthetic || settings.SystemAudio) args.AddRange(new[] { "-map", "1:a:0", "-af", "aresample=async=1:first_pts=0", "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "192k" });
+                args.AddRange(new[] { "-map", synthetic ? "0:v:0" : "[video]" });
+                if (synthetic || settings.SystemAudio) args.AddRange(new[] { "-map", synthetic ? "1:a:0" : "0:a:0", "-af", "aresample=async=1:first_pts=0", "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "192k" });
                 else args.Add("-an");
                 args.AddRange(new[] { "-c:v", settings.VideoCodec, "-preset", "p3", "-tune", "ll", "-rc", "cbr", "-b:v", settings.BitrateMbps + "M", "-maxrate", settings.BitrateMbps + "M", "-bufsize", (settings.BitrateMbps * 2) + "M", "-g", settings.FramesPerSecond.ToString(), "-bf", "0", "-forced-idr", "1", "-force_key_frames", "expr:gte(t,n_forced*1)", "-flags", "+cgop", "-f", "segment", "-segment_time", "1", "-segment_format", settings.SegmentFormat, "-reset_timestamps", "1", "-segment_list", manifest, "-segment_list_type", "csv", "-segment_list_size", (settings.ReplayMinutes * 60 + 20).ToString(), Path.Combine(directory, "chunk-%09d" + settings.SegmentExtension) });
+                var argumentProbe = RecorderRuntime.CaptureArgumentProbe;
+                if (argumentProbe != null) args = argumentProbe(args);
                 process = StartProcess(settings.FfmpegPath, args, directory);
                 job.Add(process);
                 process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)

@@ -20,6 +20,8 @@ internal static class WorkerChecks
     [STAThread]
     static int Main(string[] args)
     {
+        if (args[0] == "--pacing-fixture") { PacingFixture.Run(args[1], int.Parse(args[2]), args[3]); return 0; }
+        if (args[0] == "--pacing") return FramePacingChecks.Run(args[1], int.Parse(args[2]), int.Parse(args[3]), args[4], args[5] == "on", args.Length > 6 ? args[6] : "baseline", args.Length > 7 ? int.Parse(args[7]) : 0, args.Length > 8 ? int.Parse(args[8]) : int.Parse(args[3]), args.Length > 9 ? args[9] : "h264_nvenc");
         if (args[0] == "--fixture") { DesktopFixture.Run(args[1]); return 0; }
         if (args[0] == "--worker")
         {
