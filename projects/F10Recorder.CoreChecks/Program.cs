@@ -23,4 +23,29 @@ File.WriteAllText(settingsFile, invalidLegacy);
 settings = Settings.Load(settingsFile);
 var newInvalidFiles = Directory.GetFiles(data, "settings.json.invalid-*").Where(p => !previousInvalidFiles.Contains(p)).ToArray();
 Require(settings.FramesPerSecond == 60 && newInvalidFiles.Length == 1 && File.ReadAllText(newInvalidFiles[0]) == invalidLegacy, "Invalid settings must be preserved before falling back to defaults.");
-Console.WriteLine("Passed: replay boundaries, incomplete manifests, path containment, legacy configuration migration, and invalid-file preservation.");
+// A late audio client starts at a nonzero position on the session timeline.
+// GetBuffer's QPC is in100ns units even when Stopwatch has another frequency.
+var mediaClock = new MediaClock(50_000, 1_000, 1_800_000_000_000_000, 0);
+Require(mediaClock.SamplesAtQpc(50_400, 48_000) == 19_200, "Audio startup must preserve the session epoch instead of resetting to zero.");
+Require(mediaClock.SamplesAtReferenceTime(501_250_000, 48_000) == 6_000, "WASAPI100ns timestamps must map to the same QPC epoch across frequencies.");
+Require(mediaClock.SamplesAtReferenceTime(499_900_000, 48_000) == -480, "The initial packet can precede the session epoch and must be clipped by the timeline writer.");
+Require(mediaClock.SamplesAtQpc(350_000, 44_100) == 13_230_000, "A five-minute timeline must retain sample-rate precision.");
+Require(mediaClock.VideoTimestampFilter.Contains("PREV_OUTPTS-PREV_INPTS"), "Video must retain its acquisition intervals after its one-time epoch bridge.");
+File.WriteAllText(Path.Combine(data, "clock-filter.txt"), mediaClock.VideoTimestampFilter);
+foreach (string format in new[] { "u8", "s16le", "s24le", "s32le", "f32le" })
+{
+    int bytesPerSample = format == "u8" ? 1 : format == "s16le" ? 2 : format == "s24le" ? 3 : 4;
+    var pcm = new byte[480 * 2 * bytesPerSample];
+    for (int i = 0; i < pcm.Length; i++) pcm[i] = format == "f32le" ? BitConverter.GetBytes(.25f)[i % 4] : (byte)(format == "u8" ? 128 : 1);
+    File.WriteAllBytes(Path.Combine(data, format + "-expected.pcm"), pcm.Concat(pcm).ToArray());
+    foreach (bool delayed in new[] { false, true })
+    {
+        using var stream = File.Create(Path.Combine(data, format + (delayed ? "-delayed" : "-normal") + ".mka"));
+        var transport = new TimestampedAudio(stream, 48_000, 2, format);
+        if (delayed) Thread.Sleep(100);
+        transport.Write(pcm, 0, pcm.Length, 24_000);
+        transport.Write(pcm, 0, pcm.Length, 24_480);
+    }
+    Require(File.ReadAllBytes(Path.Combine(data, format + "-normal.mka")).SequenceEqual(File.ReadAllBytes(Path.Combine(data, format + "-delayed.mka"))), "Delivery delay must not change audio timestamps or samples.");
+}
+Console.WriteLine("Passed: replay boundaries, incomplete manifests, path containment, configuration migration, invalid-file preservation, and common audio/video epoch mapping.");

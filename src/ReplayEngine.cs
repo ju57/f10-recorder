@@ -16,6 +16,7 @@ namespace F10Recorder
     {
         readonly Settings settings;
         readonly int captureRateLimit;
+        readonly bool timestampedAudio, recordAudio;
         readonly string directory, manifest;
         readonly object gate = new object();
         readonly HashSet<string> pinned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -42,35 +43,47 @@ namespace F10Recorder
         public CaptureSession(Settings config, string root, bool synthetic, Func<bool> cancelled = null)
         {
             settings = config;
+            timestampedAudio = !synthetic && settings.SystemAudio;
+            recordAudio = synthetic || settings.SystemAudio;
             captureRateLimit = synthetic ? settings.FramesPerSecond : settings.FramesPerSecond * 4;
             directory = Path.Combine(root, "session-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
             manifest = Path.Combine(directory, "segments.csv");
             try
             {
+                // Resolve/validate the engine and audio format before taking the
+                // epoch so dependency discovery is not part of media startup.
+                string executable = settings.FfmpegPath;
+                if (!synthetic && settings.SystemAudio) audio = new LoopbackAudio();
+                MediaClock mediaClock = audio == null ? null : MediaClock.Capture();
+                if (mediaClock != null) Log.Write("Media clock: QPC=" + mediaClock.QpcEpoch + "; frequency=" + mediaClock.QpcFrequency + "; UTC microseconds=" + mediaClock.UnixMicroseconds + "; bridge bracket ticks=" + mediaClock.BridgeUncertaintyTicks);
                 var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-stats_period", "0.25", "-progress", "pipe:1" };
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=" + settings.FramesPerSecond });
                 // ddagrab's rate is a polling ceiling, not a guaranteed output clock.
                 // Allow acquisition headroom, then pace the GPU frames in the graph.
                 // Output-only CFR resampling still showed intermittent motion loss.
-                // The direct source avoids lavfi/audio demux scheduling stalls.
-                else args.AddRange(new[] { "-filter_complex", "ddagrab=framerate=" + captureRateLimit + ":output_idx=" + (settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1,fps=fps=" + settings.FramesPerSecond + ":round=near[video]" });
+                // Audio capture uses independent input queues so its delivery
+                // cushion cannot stall video acquisition on the shared clock.
+                else if (mediaClock == null) args.AddRange(new[] { "-filter_complex", "ddagrab=framerate=" + captureRateLimit + ":output_idx=" + (settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1,fps=fps=" + settings.FramesPerSecond + ":round=near[video]" });
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000" });
                 else if (settings.SystemAudio)
                 {
-                    audio = new LoopbackAudio();
                     string name = "F10Recorder-" + Guid.NewGuid().ToString("N");
                     pipe = new NamedPipeServerStream(name, PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 65536, 65536);
-                    args.AddRange(new[] { "-thread_queue_size", "1024", "-f", audio.FfmpegFormat, "-ar", audio.SampleRate.ToString(), "-ac", audio.Channels.ToString(), "-i", @"\\.\pipe\" + name });
+                    args.AddRange(new[] { "-copyts", "-thread_queue_size", "64", "-probesize", "32", "-analyzeduration", "0", "-f", "matroska", "-i", @"\\.\pipe\" + name });
+                    // The independent video input thread keeps acquisition moving
+                    // while audio's jitter buffer deliberately delays delivery.
+                    args.AddRange(new[] { "-thread_queue_size", "32", "-f", "lavfi", "-i", "ddagrab=framerate=" + captureRateLimit + ":output_idx=" + (settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1," + mediaClock.VideoTimestampFilter + ",fps=fps=" + settings.FramesPerSecond + ":round=near" });
                 }
-                args.AddRange(new[] { "-map", synthetic ? "0:v:0" : "[video]" });
-                if (synthetic || settings.SystemAudio) args.AddRange(new[] { "-map", synthetic ? "1:a:0" : "0:a:0", "-af", "aresample=async=1:first_pts=0", "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "192k" });
+                args.AddRange(new[] { "-map", synthetic ? "0:v:0" : mediaClock == null ? "[video]" : "1:v:0" });
+                if (synthetic || settings.SystemAudio) args.AddRange(new[] { "-map", synthetic ? "1:a:0" : "0:a:0", "-af", synthetic ? "aresample=async=1:first_pts=0" : "aresample=async=1", "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "192k" });
                 else args.Add("-an");
-                if (!synthetic) args.AddRange(new[] { "-r", settings.FramesPerSecond.ToString(), "-fps_mode", "cfr" });
+                if (!synthetic && mediaClock == null) args.AddRange(new[] { "-r", settings.FramesPerSecond.ToString(), "-fps_mode", "cfr" });
+                else if (mediaClock != null) args.AddRange(new[] { "-fps_mode", "passthrough" });
                 args.AddRange(new[] { "-c:v", settings.VideoCodec, "-preset", "p3", "-tune", "ll", "-rc", "cbr", "-b:v", settings.BitrateMbps + "M", "-maxrate", settings.BitrateMbps + "M", "-bufsize", (settings.BitrateMbps * 2) + "M", "-g", settings.FramesPerSecond.ToString(), "-bf", "0", "-forced-idr", "1", "-force_key_frames", "expr:gte(t,n_forced*1)", "-flags", "+cgop", "-f", "segment", "-segment_time", "1", "-segment_format", settings.SegmentFormat, "-reset_timestamps", "1", "-segment_list", manifest, "-segment_list_type", "csv", "-segment_list_size", (settings.ReplayMinutes * 60 + 20).ToString(), Path.Combine(directory, "chunk-%09d" + settings.SegmentExtension) });
                 var argumentProbe = RecorderRuntime.CaptureArgumentProbe;
                 if (argumentProbe != null) args = argumentProbe(args);
-                process = StartProcess(settings.FfmpegPath, args, directory);
+                process = StartProcess(executable, args, directory);
                 job.Add(process);
                 process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)
                 {
@@ -94,7 +107,20 @@ namespace F10Recorder
                         }
                     }
                 };
-                process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e) { if (e.Data != null) { lock (gate) { ErrorTail = (ErrorTail + "\n" + e.Data); if (ErrorTail.Length > 3000) ErrorTail = ErrorTail.Substring(ErrorTail.Length - 3000); } } };
+                bool videoBridgeLogged = false;
+                process.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs e)
+                {
+                    if (e.Data == null) return;
+                    double bridge;
+                    string bridgeText = Regex.Match(e.Data, @"(?:^|\]\s+)([0-9]{15,17}(?:\.0+)?)$").Groups[1].Value;
+                    if (mediaClock != null && !videoBridgeLogged && double.TryParse(bridgeText, NumberStyles.Float, CultureInfo.InvariantCulture, out bridge) && bridge > 1000000000000000)
+                    {
+                        videoBridgeLogged = true;
+                        Log.Write("Video first-frame RTC microseconds=" + bridge.ToString("F0", CultureInfo.InvariantCulture) + "; acquisition offset ms=" + ((bridge - mediaClock.UnixMicroseconds) / 1000).ToString("F3", CultureInfo.InvariantCulture));
+                        return;
+                    }
+                    lock (gate) { ErrorTail = (ErrorTail + "\n" + e.Data); if (ErrorTail.Length > 3000) ErrorTail = ErrorTail.Substring(ErrorTail.Length - 3000); }
+                };
                 process.BeginOutputReadLine(); process.BeginErrorReadLine();
                 if (pipe != null)
                 {
@@ -106,13 +132,25 @@ namespace F10Recorder
                         if (process.HasExited || timeout.Elapsed.TotalSeconds > 10) throw new IOException("FFmpeg did not connect to system audio. " + ErrorTail);
                     }
                     pipe.EndWaitForConnection(connected); connected.AsyncWaitHandle.Close();
-                    audio.Start(pipe);
+                    audio.Start(pipe, mediaClock);
                 }
                 Log.Write("Capture started; PID " + process.Id + "; " + directory);
             }
             catch { Dispose(); throw; }
         }
-        List<Segment> ReadSegments() { try { return ReplaySelection.Read(manifest, directory); } catch (IOException) { return new List<Segment>(); } }
+        List<Segment> ReadSegments()
+        {
+            try
+            {
+                var segments = ReplaySelection.Read(manifest, directory);
+                // The initial GOP is pre-roll: the audio client and video device
+                // become available at different times. Only advertise readiness
+                // and export after the next closed GOP has both streams running.
+                if (timestampedAudio) segments.RemoveAll(s => Path.GetFileName(s.Path) == "chunk-000000000" + settings.SegmentExtension);
+                return segments;
+            }
+            catch (IOException) { return new List<Segment>(); }
+        }
         public void Maintain()
         {
             var probe = RecorderRuntime.CaptureHealthProbe;
@@ -211,6 +249,8 @@ namespace F10Recorder
                 // TS duration probes include AAC packet padding; authoritative video boundaries prevent per-segment drift.
                 File.WriteAllLines(concat, selection.SelectMany(s => new[] { "file '" + Path.GetFileName(s.Path) + "'", "duration " + (s.End - s.Start).ToString("0.000000", CultureInfo.InvariantCulture) }), new UTF8Encoding(false));
                 var arguments = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-f", "concat", "-safe", "1", "-i", concat, "-t", (end - selection[0].Start).ToString("0.000000", CultureInfo.InvariantCulture), "-c", "copy", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart" };
+                arguments.AddRange(new[] { "-map", "0:v:0" });
+                if (recordAudio) arguments.AddRange(new[] { "-map", "0:a:0" });
                 if (settings.VideoCodec == "hevc_nvenc") arguments.AddRange(new[] { "-tag:v", "hvc1" });
                 if (settings.VideoCodec == "av1_nvenc")
                 {
@@ -261,6 +301,7 @@ namespace F10Recorder
             if (pipe != null) pipe.Dispose();
             job.Dispose();
             if (process != null) process.Dispose();
+            if (!string.IsNullOrWhiteSpace(ErrorTail)) Log.Write("Capture diagnostics: " + ErrorTail);
         }
     }
     public sealed class ReplayEngine : IDisposable

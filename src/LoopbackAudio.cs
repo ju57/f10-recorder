@@ -6,7 +6,7 @@ using System.Threading;
 
 namespace F10Recorder
 {
-    // Raw interleaved PCM in the default rendering endpoint's shared mix format.
+    // Timestamped PCM from the default rendering endpoint's shared mix format.
     // Start transfers ownership of the output stream; Dispose closes it to unblock writes.
     public sealed class LoopbackAudio : IDisposable
     {
@@ -20,6 +20,7 @@ namespace F10Recorder
         private Stream destination;
         private Thread worker;
         private bool disposed;
+        private MediaClock mediaClock;
 
         public int SampleRate { get; private set; }
         public int Channels { get; private set; }
@@ -59,13 +60,19 @@ namespace F10Recorder
 
         public void Start(Stream output)
         {
+            Start(output, MediaClock.Capture());
+        }
+        internal void Start(Stream output, MediaClock clock)
+        {
             if (output == null) throw new ArgumentNullException("output");
+            if (clock == null) throw new ArgumentNullException("clock");
             if (!output.CanWrite) throw new ArgumentException("Audio output must be writable.", "output");
             lock (gate)
             {
                 if (disposed) throw new ObjectDisposedException("LoopbackAudio");
                 if (worker != null) throw new InvalidOperationException("Loopback audio has already started.");
                 destination = output;
+                mediaClock = clock;
                 worker = new Thread(Run);
                 worker.IsBackground = true;
                 worker.Name = "F10 WASAPI loopback";
@@ -144,16 +151,19 @@ namespace F10Recorder
                     throw new InvalidOperationException("Windows performance clock is unavailable.");
                 long ticks;
                 QueryPerformanceCounter(out ticks);
-                double epoch = ticks * (10000000.0 / frequency);
+                long audioStartSample = mediaClock.SamplesAtQpc(ticks, SampleRate);
+                Log.Write("Audio clock: session QPC=" + mediaClock.QpcEpoch + "; client start QPC=" + ticks + "; sample offset=" + audioStartSample + "; delivery cushion=100ms");
                 Check(client.Start());
                 started = true;
                 Queue<Packet> packets = new Queue<Packet>();
                 byte[] silence = new byte[Math.Max(blockAlign, (SampleRate / 100) * blockAlign)];
                 FillSilence(silence);
-                long written = 0;
+                var transport = new TimestampedAudio(destination, SampleRate, Channels, FfmpegFormat);
+                long written = Math.Max(0, audioStartSample);
                 long nextDeviceCheck = SampleRate;
                 // Hold output 100 ms behind capture so packet jitter does not erase real sound.
                 long cushion = SampleRate / 10;
+                bool firstBlock = true;
                 while (!stopping)
                 {
                     uint frames;
@@ -184,7 +194,7 @@ namespace F10Recorder
                                 QueryPerformanceCounter(out ticks);
                                 packetClock = ticks * (10000000.0 / frequency) - frames * (10000000.0 / SampleRate);
                             }
-                            long start = (long)Math.Round((packetClock - epoch) * (SampleRate / 10000000.0));
+                            long start = mediaClock.SamplesAtReferenceTime(packetClock, SampleRate);
                             // A negative start can occur for the first engine packet.
                             if (start + frames > written)
                                 packets.Enqueue(new Packet { Start = start, Frames = (int)frames, Data = copy });
@@ -196,13 +206,16 @@ namespace F10Recorder
                     }
 
                     QueryPerformanceCounter(out ticks);
-                    long elapsed = (long)((ticks * (10000000.0 / frequency) - epoch) * (SampleRate / 10000000.0));
+                    long elapsed = mediaClock.SamplesAtQpc(ticks, SampleRate);
                     long target = Math.Max(0, elapsed - cushion);
                     // Do not synthesize a huge burst after suspension or a blocked destination.
-                    if (target - written > SampleRate * 2L)
+                    // The client may start after the session epoch. Its initial
+                    // offset is not a blocked-output discontinuity.
+                    if (target - Math.Max(written, audioStartSample) > SampleRate * 2L)
                         throw new IOException("Audio capture fell behind the system clock; capture must restart.");
                     while (written < target && !stopping)
                     {
+                        if (firstBlock) { firstBlock = false; Log.Write("Audio first block: session sample=" + written + "; timestamp us=" + (written * 1000000L / SampleRate)); }
                         while (packets.Count > 0 && packets.Peek().Start + packets.Peek().Frames <= written)
                             packets.Dequeue();
                         Packet packet = packets.Count > 0 ? packets.Peek() : null;
@@ -210,14 +223,14 @@ namespace F10Recorder
                         {
                             long end = packet == null ? target : Math.Min(target, packet.Start);
                             int count = (int)Math.Min(end - written, silence.Length / blockAlign);
-                            destination.Write(silence, 0, count * blockAlign);
+                            transport.Write(silence, 0, count * blockAlign, written);
                             written += count;
                         }
                         else
                         {
                             int offset = (int)(written - packet.Start);
                             int count = (int)Math.Min(target - written, packet.Frames - offset);
-                            destination.Write(packet.Data, offset * blockAlign, count * blockAlign);
+                            transport.Write(packet.Data, offset * blockAlign, count * blockAlign, written);
                             written += count;
                         }
                     }
