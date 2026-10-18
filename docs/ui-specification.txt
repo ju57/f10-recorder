@@ -82,3 +82,12 @@ Do not promote the integrated candidate until a coexistence policy or alternativ
 capture design is agreed. Window-targeted capture changes monitor-wide replay
 semantics and needs separate worker/clock/recovery qualification. It does not by
 itself establish interactive exclusive-fullscreen support.
+
+The clean-footage requirement remains in force. Assessment of an optional
+window/game capture mode is authorized; this is not an implemented feature or a
+change to the default monitor mode. Such a path must use ordinary UI windows
+without the exclusion flag, validate explicit target identity/lifetime, and
+define resize, minimize and source-closure behavior. It must not silently fall
+back to recording the desktop when its selected window disappears. Source
+timestamps, system-audio labeling, available-footage/readiness states and real
+interactive game behavior need qualification before worker integration/promotion.
