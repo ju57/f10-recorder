@@ -22,14 +22,22 @@ internal static class MigrationChecks
     static string data;
     static readonly Dictionary<string, object> report = new();
     static bool failStartup;
+    static int shortcutModifiers = 7;
     [STAThread]
     static int Main(string[] args)
     {
         data = args[0]; Directory.CreateDirectory(data);
         if (args.Contains("--fixture")) { Fixture(); return 0; }
+        int modifiersIndex = Array.IndexOf(args, "--shortcut-modifiers");
+        if (modifiersIndex >= 0)
+        {
+            shortcutModifiers = int.Parse(args[modifiersIndex + 1]);
+            if (shortcutModifiers < 1 || shortcutModifiers > 7) throw new ArgumentOutOfRangeException(nameof(shortcutModifiers));
+        }
+        report["testShortcutModifiers"] = shortcutModifiers;
         WindowsRecorder.Initialize(data);
         report["mediaEngine"] = MediaDependency.ResolveExecutable();
-        var config = new Settings { ReplayMinutes = 1, FramesPerSecond = 30, BitrateMbps = 5, OutputDirectory = Path.Combine(data, "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots"), SaveKey = 114, SaveModifiers = 7, OverlayKey = 117, OverlayModifiers = 7, ScreenshotKey = 118, ScreenshotModifiers = 7 };
+        var config = new Settings { ReplayMinutes = 1, FramesPerSecond = 30, BitrateMbps = 5, OutputDirectory = Path.Combine(data, "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots"), SaveKey = 114, SaveModifiers = shortcutModifiers, OverlayKey = 117, OverlayModifiers = shortcutModifiers, ScreenshotKey = 118, ScreenshotModifiers = shortcutModifiers };
         config.Save(Path.Combine(data, "settings.json"));
         App.DataDirectory = data; App.Arguments = ["--paused", "--settings"]; App.ControlTitle = "F10Recorder.MigrationCheck." + Guid.NewGuid();
         App.RecorderFactory = (root, post, paused, title) => new WindowsRecorder(root, post, paused, title, true, enabled => { if (failStartup) { failStartup = false; throw new IOException("Controlled startup-write failure."); } report["startupChoiceSubmitted"] = enabled; });
@@ -125,7 +133,7 @@ internal static class MigrationChecks
             await Until(() => fixture.MainWindowHandle != IntPtr.Zero, "External fixture window did not appear."); ActivateFixture(fixture);
             recorder.SampleForeground(); string expectedApplication = recorder.ApplicationName;
             report["captureExclusion"] = await CaptureExclusionChecks.Run(app, data, () => ActivateFixture(fixture));
-            SendKey(116, 7); await Until(() => app.SettingsWindow.OverlayVisible, "Registered overlay shortcut failed.");
+            SendKey(116, shortcutModifiers); await Until(() => app.SettingsWindow.OverlayVisible, "Registered overlay shortcut failed.");
             SendKey(27, 0); await Until(() => !app.SettingsWindow.OverlayVisible, "Escape did not dismiss the overlay.");
             Require(Native.GetForegroundWindow() == fixture.MainWindowHandle, "Overlay did not return focus."); report["globalOverlayShortcutAndFocus"] = true;
             app.Notice.Present("Migration check", "Passive notification", NotificationKind.Success, 1200, app.SettingsWindow); await Task.Delay(150);
@@ -140,7 +148,7 @@ internal static class MigrationChecks
             app.Notice.Present("Replay saved", "Replacement gets its own dwell.", NotificationKind.Success, 500, app.SettingsWindow); await Task.Delay(250);
             Require(app.Notice.IsVisible, "Replacement inherited the previous notice timeout.");
             await Until(() => !app.Notice.IsVisible, "Replacement notice never dismissed.", 2500); report["notificationReplacementLifetime"] = true;
-            SendKey(119, 7); await Until(() => recorder.LastScreenshot != null, "Screenshot shortcut did not save.", 20000);
+            SendKey(119, shortcutModifiers); await Until(() => recorder.LastScreenshot != null, "Screenshot shortcut did not save.", 20000);
             using (var image = System.Drawing.Image.FromFile(recorder.LastScreenshot)) Require(image.Width == Forms.Screen.PrimaryScreen.Bounds.Width && image.Height == Forms.Screen.PrimaryScreen.Bounds.Height, "Screenshot lost native resolution.");
             Require(recorder.Paused && recorder.LastScreenshot.StartsWith(recorder.Config.ScreenshotDirectory), "Screenshot destination or paused state changed."); report["pausedScreenshotShortcut"] = recorder.LastScreenshot;
             string firstScreenshot = recorder.LastScreenshot; app.ToggleOverlay(); app.SettingsWindow.Overlay.ScreenshotAction.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -149,7 +157,7 @@ internal static class MigrationChecks
             // Replay action shares the production engine and native save shortcut.
             Control<ToggleSwitch>(panel, "RecordingEnabled").IsChecked = true; await Until(() => recorder.Ready, "Replay switch did not resume capture.", 25000); await Task.Delay(5500);
             string saved = null; bool? success = null; recorder.Saved += (file, ok) => { saved = file; success = ok; };
-            ActivateFixture(fixture); recorder.SampleForeground(); expectedApplication = recorder.ApplicationName; SendKey(115, 7);
+            ActivateFixture(fixture); recorder.SampleForeground(); expectedApplication = recorder.ApplicationName; SendKey(115, shortcutModifiers);
             await Until(() => success != null, "Replay shortcut did not finish saving.", 20000); Require(success == true, "Replay failed: " + saved);
             Require(Path.GetFileName(Path.GetDirectoryName(saved)) == ApplicationFolders.FolderName(expectedApplication), "Save lost the foreground application folder.");
             report["hotkeyReplayClip"] = saved; report["applicationName"] = expectedApplication; int capture = recorder.CaptureProcessId; await Task.Delay(1000); Require(capture != 0 && recorder.CaptureProcessId == capture, "Capture did not continue after save.");

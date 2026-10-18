@@ -1,4 +1,4 @@
-param([switch]$NoBuild, [switch]$FocusOnly)
+param([switch]$NoBuild, [switch]$FocusOnly, [ValidateRange(1,7)][int]$ShortcutModifiers = 7)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $sdk = Join-Path $root '.tools\dotnet\dotnet.exe'
@@ -15,7 +15,7 @@ if (-not $NoBuild) {
     if ($LASTEXITCODE -ne 0) { throw 'Migration verification build failed.' }
 }
 $data = Join-Path $root ('artifacts\migration-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-$testArguments = @(('"' + $data + '"'))
+$testArguments = @(('"' + $data + '"'),'--shortcut-modifiers',$ShortcutModifiers)
 if ($FocusOnly) { $testArguments += '--focus-only' }
 $process = Start-Process -FilePath (Join-Path $output 'F10Recorder.MigrationTests.exe') -ArgumentList $testArguments -WindowStyle Hidden -PassThru -Wait
 $report = Get-Content -LiteralPath (Join-Path $data 'verification.json') -Raw | ConvertFrom-Json

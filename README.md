@@ -121,6 +121,8 @@ Run the migrated application regression with `.\tests\migration.ps1`. It uses co
 
 Use `.\tests\migration.ps1 -FocusOnly` for the paused focus regression. It opens only task-owned test windows and checks Settings restoration after switching away, explicit Settings activation, and return to previously focused Settings. It starts no recording, takes no screenshots, injects no input, and submits no settings or startup changes. Encoder availability is still probed, and the interactive desktop must be available for the test windows to activate.
 
+If another isolated recorder owns the regression shortcuts, use `-ShortcutModifiers 3` for Ctrl+Alt instead of the default Ctrl+Alt+Shift (`7`). This changes only the test profile; an occupied shortcut still fails rather than modifying or stopping another recorder. Modifier bits are Alt=`1`, Ctrl=`2`, Shift=`4`.
+
 The platform-independent checks can run with `dotnet run --project projects/F10Recorder.CoreChecks -- artifacts/core-checks`. They cover replay boundaries, incomplete manifests, path containment, old-settings migration and invalid-file preservation; they need no GPU or capture permissions. The Core project targets `net10.0` and has no Windows references. GitHub CI runs these checks on Ubuntu; Linux desktop/capture acceptance remains pending.
 
 The following commands exercise the retained WinForms reference, not the Avalonia interface:
