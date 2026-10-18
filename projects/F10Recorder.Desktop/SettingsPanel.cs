@@ -13,6 +13,11 @@ internal sealed class SettingsPanel : UserControl
     readonly WindowsRecorder recorder;
     readonly NumericUpDown minutes = Number("ReplayMinutes", 1, 30), bitrate = Number("BitrateMbps", 5, 100), display = Number("DisplayIndex", -1, 31);
     readonly ComboBox fps = new() { Name = "FramesPerSecond", ItemsSource = Settings.SupportedFrameRates }, codec = new() { Name = "VideoCodec", MinWidth = 260 };
+    readonly ComboBox captureMode = new() { Name = "CaptureMode", ItemsSource = new[] { "Monitor", "Application window · experimental" } }, window = new() { Name = "CaptureWindow", HorizontalAlignment = HorizontalAlignment.Stretch, MinHeight = 40, PlaceholderText = "Refresh windows to choose an application" };
+    readonly StackPanel windowSelection = new() { Spacing = 8 };
+    readonly TextBlock resolution = Ui.Label("", 13, Ui.Muted), targetPolicy = Ui.Label("", 12, Ui.Muted), screenshotPolicy = Ui.Label("", 12, Ui.Muted);
+    readonly Button quickSave, quickScreenshot;
+    string selectedExecutable, selectedClass;
     readonly CheckBox audio = new() { Name = "SystemAudio", Content = "Capture system audio" }, startup = new() { Name = "StartWithWindows", Content = "Start buffering at Windows sign-in" };
     readonly TextBox clips = new() { Name = "OutputDirectory" }, screenshots = new() { Name = "ScreenshotDirectory" };
     readonly ShortcutEditor saveShortcut = new("Save", false), overlayShortcut = new("Overlay", true), screenshotShortcut = new("Screenshot", true);
@@ -35,6 +40,7 @@ internal sealed class SettingsPanel : UserControl
         Background = Ui.Background;
         recorder = session; var config = session.Config;
         minutes.Value = config.ReplayMinutes; bitrate.Value = config.BitrateMbps; display.Value = config.DisplayIndex; fps.SelectedItem = config.FramesPerSecond;
+        selectedExecutable = config.WindowExecutable; selectedClass = config.WindowClass; captureMode.SelectedIndex = config.CaptureMode == "window" ? 1 : 0;
         audio.IsChecked = config.SystemAudio; startup.IsChecked = WindowsStartup.Enabled; clips.Text = config.OutputDirectory; screenshots.Text = config.ScreenshotDirectory;
         saveShortcut.Load(config.SaveKey, config.SaveModifiers); overlayShortcut.Load(config.OverlayKey, config.OverlayModifiers); screenshotShortcut.Load(config.ScreenshotKey, config.ScreenshotModifiers);
         estimate.Name = "RollingCacheEstimate"; audioFormat.Name = "AudioFormat"; playbackDevice.Name = "PlaybackDevicePolicy";
@@ -43,8 +49,8 @@ internal sealed class SettingsPanel : UserControl
         var heading = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 0, 0, 22) };
         var title = new StackPanel { Spacing = 5 }; title.Children.Add(Ui.Label("F10 Recorder", 27, null, FontWeight.SemiBold)); title.Children.Add(Ui.Label("Keep the moment. Save it when it matters.", 13, Ui.Muted)); heading.Children.Add(title);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
-        var quickScreenshot = Ui.Button("Screenshot", recorder.TakeScreenshot); quickScreenshot.Name = "QuickScreenshot"; actions.Children.Add(quickScreenshot);
-        var quickSave = Ui.Button("Save replay", recorder.SaveReplay, true); quickSave.Name = "QuickSaveReplay"; actions.Children.Add(quickSave); Grid.SetColumn(actions, 1); heading.Children.Add(actions); root.Children.Add(heading);
+        quickScreenshot = Ui.Button("Screenshot", recorder.TakeScreenshot); quickScreenshot.Name = "QuickScreenshot"; actions.Children.Add(quickScreenshot);
+        quickSave = Ui.Button("Save replay", recorder.SaveReplay, true); quickSave.Name = "QuickSaveReplay"; actions.Children.Add(quickSave); Grid.SetColumn(actions, 1); heading.Children.Add(actions); root.Children.Add(heading);
         var header = new StackPanel { Spacing = 18 };
         var statusGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
         var statusText = new StackPanel { Spacing = 5 }; statusText.Children.Add(state); statusText.Children.Add(stateDetail); statusGrid.Children.Add(statusText);
@@ -71,6 +77,9 @@ internal sealed class SettingsPanel : UserControl
         recording.PropertyChanged += (_, e) => { if (!updating && e.Property == ToggleButton.IsCheckedProperty) recorder.Pause(recording.IsChecked != true); };
         minutes.PropertyChanged += (_, e) => { if (e.Property == NumericUpDown.ValueProperty) Estimate(); }; bitrate.PropertyChanged += (_, e) => { if (e.Property == NumericUpDown.ValueProperty) Estimate(); };
         audio.PropertyChanged += (_, e) => { if (e.Property == ToggleButton.IsCheckedProperty) UpdateAudioSummary(); };
+        captureMode.SelectionChanged += (_, _) => UpdateSourceSummary();
+        window.SelectionChanged += (_, _) => { if (window.SelectedItem is WindowCaptureChoice choice) { selectedExecutable = choice.Executable; selectedClass = choice.ClassName; UpdateSourceSummary(); } };
+        UpdateSourceSummary();
         SelectPage(0); UpdateAudioSummary(); UpdateState(); AttachedToVisualTree += async (_, _) => { if (!loaded) { loaded = true; await ProbeAsync(); } };
     }
     static NumericUpDown Number(string name, decimal minimum, decimal maximum) => new() { Name = name, Minimum = minimum, Maximum = maximum, Increment = 1, FormatString = "0", HorizontalAlignment = HorizontalAlignment.Stretch };
@@ -91,13 +100,18 @@ internal sealed class SettingsPanel : UserControl
     StackPanel CapturePage()
     {
         var body = Page("Capture", "Set the length and quality of your next replays. Applying changes starts a new buffer.");
+        Row(body, "Video source", "Record a display or one application window.", captureMode);
+        windowSelection.Children.Add(window);
+        var refresh = Ui.Button("Refresh windows", RefreshWindows); refresh.HorizontalAlignment = HorizontalAlignment.Left; windowSelection.Children.Add(refresh);
+        windowSelection.Children.Add(targetPolicy); body.Children.Add(windowSelection);
+        body.Children.Add(screenshotPolicy);
         Row(body, "Replay length", "Last 1–30 minutes; the cache uses disk storage.", minutes);
         Row(body, "Video codec", "Only encoders that initialize on your GPU are offered.", codec); body.Children.Add(codecStatus);
         Row(body, "Output frame rate", "Configured FPS for saved video, not a live capture measurement.", fps);
         Row(body, "Video bitrate", "5–100 Mbps. Higher values need more cache space.", bitrate);
         Row(body, "Capture display", "−1 selects the primary display; 0–31 are adapter output indices.", display);
-        var resolution = Ui.Label("Native · no resizing", 13, Ui.Muted); resolution.Name = "NativeResolutionPolicy";
-        Row(body, "Resolution", "Uses the selected display's native dimensions. Resolution is automatic.", resolution); return body;
+        resolution.Name = "NativeResolutionPolicy";
+        Row(body, "Resolution", "Automatic for the selected capture source.", resolution); return body;
     }
     StackPanel AudioPage()
     {
@@ -111,13 +125,13 @@ internal sealed class SettingsPanel : UserControl
         var body = Page("Controls", "Global shortcuts remain available while another application has focus.");
         Row(body, "Save replay", "Save the buffered footage as an MP4.", saveShortcut);
         Row(body, "Open overlay", "Open replay controls over desktop or borderless fullscreen apps.", overlayShortcut);
-        Row(body, "Take screenshot", "Save a PNG of the capture display, even while paused.", screenshotShortcut);
+        Row(body, "Take screenshot", "Save a PNG of the applied capture source. Window mode needs a visible, unambiguous target.", screenshotShortcut);
         body.Children.Add(startup); startup.Margin = new Thickness(0, 24, 0, 0); return body;
     }
     StackPanel StoragePage()
     {
         var body = Page("Storage", "Saved clips and screenshots remain separate from the rolling cache.");
-        body.Children.Add(Ui.Label("Clips", 15, null, FontWeight.SemiBold)); body.Children.Add(Ui.Label("MP4 files are grouped into folders using the foreground application's name.", 12, Ui.Muted)); body.Children.Add(Folder(clips));
+        body.Children.Add(Ui.Label("Clips", 15, null, FontWeight.SemiBold)); body.Children.Add(Ui.Label("MP4 folders follow the selected application in window mode, or the foreground application in monitor mode.", 12, Ui.Muted)); body.Children.Add(Folder(clips));
         var label = Ui.Label("Screenshots", 15, null, FontWeight.SemiBold); label.Margin = new Thickness(0, 24, 0, 0); body.Children.Add(label); body.Children.Add(Ui.Label("PNG files use a separately configured location.", 12, Ui.Muted)); body.Children.Add(Folder(screenshots));
         var engine = Ui.Label("Recording engine", 15, null, FontWeight.SemiBold); engine.Margin = new Thickness(0, 26, 0, 6); body.Children.Add(engine);
         body.Children.Add(Ui.Label("Setup reuses a compatible FFmpeg installation or provides a verified private copy automatically.", 12, Ui.Muted)); return body;
@@ -162,11 +176,31 @@ internal sealed class SettingsPanel : UserControl
     public void UpdateState()
     {
         updating = true; recording.IsChecked = !recorder.Paused; updating = false;
-        state.Text = recorder.Paused ? "Replay recording paused" : recorder.Ready ? "Replay recording active" : recorder.State;
-        state.Foreground = recorder.Ready && recorder.SaveRegistered ? Ui.Accent : Ui.Warning;
-        stateDetail.Text = recorder.Paused ? "Resume to start filling your replay buffer." : recorder.Ready ? recorder.State : "Recording becomes ready when completed footage is available.";
+        var status = ReplayPresentation.Describe(recorder.Phase, recorder.State, recorder.Paused, recorder.Ready, recorder.CanSave, recorder.Applying, recorder.Saving, recorder.SaveRegistered, recorder.Metrics?.BufferedSeconds ?? 0);
+        state.Text = status.Heading; state.Foreground = status.Healthy && recorder.SaveRegistered ? Ui.Accent : Ui.Warning; stateDetail.Text = status.Detail;
+        quickSave.IsEnabled = status.CanSave; quickScreenshot.IsEnabled = !recorder.Applying && !recorder.ScreenshotInProgress;
         apply.IsEnabled = !probing && codec.SelectedItem != null && !recorder.Applying;
-        apply.Content = recorder.Applying ? "Applying…" : "Apply changes"; recording.IsEnabled = !recorder.Applying;
+        apply.Content = recorder.Applying ? "Applying…" : "Apply changes"; recording.IsEnabled = !recorder.Applying && recorder.Phase != CapturePhase.Reconnecting && recorder.Phase != CapturePhase.Unknown;
+    }
+    void RefreshWindows()
+    {
+        try
+        {
+            var choices = WindowCaptureTarget.List(); window.ItemsSource = choices;
+            window.SelectedItem = choices.FirstOrDefault(c => string.Equals(c.Executable, selectedExecutable, StringComparison.OrdinalIgnoreCase) && c.ClassName == selectedClass);
+            UpdateSourceSummary();
+        }
+        catch (Exception ex) { error.Text = "Windows could not be listed: " + ex.Message; }
+    }
+    void UpdateSourceSummary()
+    {
+        bool selectedWindow = captureMode.SelectedIndex == 1;
+        display.IsEnabled = !selectedWindow; windowSelection.IsVisible = selectedWindow;
+        resolution.Text = selectedWindow ? "Initial client area · fit on resize" : "Native · no resizing";
+        targetPolicy.Text = string.IsNullOrEmpty(selectedExecutable) ? "Select a window, then Apply. If it is unavailable, replay waits."
+            : "Selected: " + Path.GetFileNameWithoutExtension(selectedExecutable) + ". Reconnects only when one matching application window is open. A restored window starts a fresh buffer.";
+        screenshotPolicy.Text = selectedWindow ? "Experimental window capture. System audio includes all PC sound; check audio sync before relying on clips."
+            : "Monitor capture can interrupt NVIDIA Instant Replay when F10 controls are shown on this PC.";
     }
     void UpdateAudioSummary()
     {
@@ -186,10 +220,10 @@ internal sealed class SettingsPanel : UserControl
         try
         {
             if (probing || codec.SelectedItem is not EncoderOption chosen) throw new InvalidOperationException("Wait for an available GPU encoder.");
-            var next = new Settings { ReplayMinutes = (int)(minutes.Value ?? 5), BitrateMbps = (int)(bitrate.Value ?? 20), DisplayIndex = (int)(display.Value ?? -1), FramesPerSecond = (int)fps.SelectedItem, VideoCodec = chosen.Codec, SystemAudio = audio.IsChecked == true, OutputDirectory = clips.Text, ScreenshotDirectory = screenshots.Text, SaveKey = saveShortcut.Key, SaveModifiers = saveShortcut.Modifiers, OverlayKey = overlayShortcut.Key, OverlayModifiers = overlayShortcut.Modifiers, ScreenshotKey = screenshotShortcut.Key, ScreenshotModifiers = screenshotShortcut.Modifiers };
-            next.Validate(); error.Text = ""; await recorder.ApplyAsync(next, startup.IsChecked == true); Submitted = next; CloseRequested?.Invoke(); return true;
+            var next = new Settings { CaptureMode = captureMode.SelectedIndex == 1 ? "window" : "monitor", WindowExecutable = selectedExecutable, WindowClass = selectedClass, ReplayMinutes = (int)(minutes.Value ?? 5), BitrateMbps = (int)(bitrate.Value ?? 20), DisplayIndex = (int)(display.Value ?? -1), FramesPerSecond = (int)fps.SelectedItem, VideoCodec = chosen.Codec, SystemAudio = audio.IsChecked == true, OutputDirectory = clips.Text, ScreenshotDirectory = screenshots.Text, SaveKey = saveShortcut.Key, SaveModifiers = saveShortcut.Modifiers, OverlayKey = overlayShortcut.Key, OverlayModifiers = overlayShortcut.Modifiers, ScreenshotKey = screenshotShortcut.Key, ScreenshotModifiers = screenshotShortcut.Modifiers };
+            next.Validate(); error.Text = ""; CaptureVisibility.Configure(next); await recorder.ApplyAsync(next, startup.IsChecked == true); Submitted = next; CloseRequested?.Invoke(); return true;
         }
-        catch (Exception ex) { error.Text = ex.Message; return false; }
+        catch (Exception ex) { CaptureVisibility.Configure(recorder.Config); error.Text = ex.Message; return false; }
     }
 }
 

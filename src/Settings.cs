@@ -13,6 +13,9 @@ namespace F10Recorder
         public string VideoCodec = "h264_nvenc";
         public bool SystemAudio = true;
         public int DisplayIndex = -1;
+        // Missing in older profiles means monitor capture. Never persist an HWND.
+        public string CaptureMode = "monitor";
+        public string WindowExecutable = "", WindowClass = "";
         public string OutputDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "F10 Recorder");
         internal string FfmpegPath { get { return RecorderRuntime.ResolveExecutable(); } }
         public int SaveKey = 121; // VK_F10
@@ -35,6 +38,9 @@ namespace F10Recorder
             if (BitrateMbps < 5 || BitrateMbps > 100) throw new ArgumentException("Bitrate must be 5–100 Mbps.");
             if (VideoCodec != "h264_nvenc" && VideoCodec != "hevc_nvenc" && VideoCodec != "av1_nvenc") throw new ArgumentException("Choose H.264, HEVC, or AV1.");
             if (DisplayIndex < -1 || DisplayIndex > 31) throw new ArgumentException("Invalid display index.");
+            if (CaptureMode != "monitor" && CaptureMode != "window") throw new ArgumentException("Choose monitor or window capture.");
+            if (WindowExecutable == null || WindowClass == null || WindowExecutable.Length > 32768 || WindowClass.Length > 256) throw new ArgumentException("Invalid window selection.");
+            if (WindowExecutable.Length > 0 && (!Path.IsPathRooted(WindowExecutable) || Path.GetFullPath(WindowExecutable) != WindowExecutable)) throw new ArgumentException("Choose an application window with an absolute executable path.");
             if (SaveKey < 112 || SaveKey > 123 || SaveModifiers < 0 || SaveModifiers > 7) throw new ArgumentException("Choose an F1–F12 hotkey with optional modifiers.");
             if ((OverlayKey < 65 || OverlayKey > 90) && (OverlayKey < 112 || OverlayKey > 123) || OverlayModifiers < 1 || OverlayModifiers > 7) throw new ArgumentException("Choose an overlay shortcut with a letter or F1–F12 and at least one modifier.");
             if (SaveKey == OverlayKey && SaveModifiers == OverlayModifiers) throw new ArgumentException("Use different shortcuts for saving and opening the overlay.");
@@ -47,8 +53,16 @@ namespace F10Recorder
         public static Settings Load(string path)
         {
             if (!File.Exists(path)) return new Settings();
-            try { var result = new JavaScriptSerializer().Deserialize<Settings>(File.ReadAllText(path)); if (result == null) throw new FormatException("Empty settings."); result.ValidateValues(); return result; }
-            catch (Exception ex) { File.Copy(path, path + ".invalid-" + DateTime.UtcNow.Ticks); Log.Write("Settings could not be loaded; original preserved. " + ex.Message); return new Settings(); }
+            Settings result = null;
+            string contents = File.ReadAllText(path);
+            try { result = new JavaScriptSerializer().Deserialize<Settings>(contents); if (result == null) throw new FormatException("Empty settings."); result.ValidateValues(); return result; }
+            catch (Exception ex)
+            {
+                File.Copy(path, path + ".invalid-" + DateTime.UtcNow.Ticks); Log.Write("Settings could not be loaded; original preserved. " + ex.Message);
+                // An invalid window/unknown mode must never expand capture to the desktop.
+                bool waitForSelection = result != null ? result.CaptureMode != "monitor" : contents.Contains("\"CaptureMode\"");
+                return new Settings { CaptureMode = waitForSelection ? "window" : "monitor" };
+            }
         }
         public void Save(string path)
         {

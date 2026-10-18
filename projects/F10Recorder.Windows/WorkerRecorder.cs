@@ -22,6 +22,9 @@ internal sealed class WorkerRecorder : IWindowsRecorder
     public string DataDirectory { get; }
     public bool Paused => status.Paused;
     public bool Ready => status.Ready;
+    public CapturePhase Phase => status.Phase;
+    public bool CanSave => status.CanSave;
+    public bool Saving => status.Saving;
     public bool Applying => applying || status.Applying;
     public bool ScreenshotInProgress => status.ScreenshotInProgress;
     public string LastScreenshot => status.LastScreenshot;
@@ -70,7 +73,12 @@ internal sealed class WorkerRecorder : IWindowsRecorder
             {
                 if (lifetime.IsCancellationRequested) break;
                 Log.Write("Recorder connection unavailable: " + ex.Message);
-                post(() => { if (!disposed) { status.Ready = false; status.State = "Recorder unavailable · reconnecting…"; Changed?.Invoke(); } });
+                post(() => { if (!disposed) { status.Ready = false; status.CanSave = false; status.Phase = CapturePhase.Reconnecting; status.State = "Recorder unavailable · reconnecting…"; Changed?.Invoke(); } });
+                if (ex is WorkerProtocolMismatchException)
+                {
+                    post(() => { if (!disposed) { status.State = ex.Message; Notification?.Invoke("Recorder build mismatch", ex.Message, NotificationKind.Warning, 6000); Changed?.Invoke(); } });
+                    break;
+                }
                 if (!stopping && WorkerProtocol.WasStopped(DataDirectory))
                 {
                     stopping = true; post(() => QuitRequested?.Invoke()); break;

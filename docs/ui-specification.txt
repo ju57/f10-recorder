@@ -83,11 +83,18 @@ capture design is agreed. Window-targeted capture changes monitor-wide replay
 semantics and needs separate worker/clock/recovery qualification. It does not by
 itself establish interactive exclusive-fullscreen support.
 
-The clean-footage requirement remains in force. Assessment of an optional
-window/game capture mode is authorized; this is not an implemented feature or a
-change to the default monitor mode. Such a path must use ordinary UI windows
-without the exclusion flag, validate explicit target identity/lifetime, and
-define resize, minimize and source-closure behavior. It must not silently fall
-back to recording the desktop when its selected window disappears. Source
-timestamps, system-audio labeling, available-footage/readiness states and real
-interactive game behavior need qualification before worker integration/promotion.
+The clean-footage requirement remains in force. Optional window capture is now
+implemented on this isolated development branch, with ordinary UI surfaces,
+explicit application intent, validated transient targets and no desktop fallback.
+Monitor defaults are unchanged. Minimize/loss stops acquisition and retains
+completed footage for saving; restoration starts a fresh buffer. Resolution fits
+resizes into the initial even-pixel client canvas. System audio remains the
+Windows default mix. Screenshots follow the selected window and fail if missing.
+Readiness, save availability and explicit pause are separate states. Unknown or
+disconnected workers never appear actively recording. Pending settings do not
+change the applied source. Status is consistent across Settings, sidebar/tray and
+notice transitions; missing-target polling must remain quiet after its first notice.
+See tests/window-capture.md for source/protocol/lifecycle details. The delivery
+anchor does not establish first-acquisition A/V alignment. Coded audio/video sync,
+gameplay focus/keyboard, full default retention and clean-monitor coexistence remain
+promotion gates. No installation or production-readiness claim follows.

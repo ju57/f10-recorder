@@ -34,7 +34,7 @@ internal sealed class OverlayPanel : UserControl
         body.Children.Add(new Border { Background = Ui.Surface, BorderBrush = Ui.Border, BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(8), Padding = new Thickness(20), Child = status, Margin = new Thickness(0, 0, 0, 12) });
         save = Action("Save replay", saveHint, recorder.SaveReplay, true); save.Name = "OverlaySaveReplay"; body.Children.Add(save);
-        screenshot = Action("Screenshot", Ui.Label("Save a full-resolution PNG", 12, Ui.Muted), recorder.TakeScreenshot); screenshot.Name = "OverlayScreenshot"; body.Children.Add(screenshot);
+        screenshot = Action("Screenshot", Ui.Label("Save a PNG of the capture source", 12, Ui.Muted), recorder.TakeScreenshot); screenshot.Name = "OverlayScreenshot"; body.Children.Add(screenshot);
         pause = Action("Pause replay", Ui.Label("Saved clips stay in place", 12, Ui.Muted), () => recorder.Pause(!recorder.Paused)); pause.Name = "OverlayPause"; body.Children.Add(pause);
         var settings = Action("Recording settings", Ui.Label("Capture, audio, shortcuts and storage", 12, Ui.Muted), openSettings); settings.Name = "OverlaySettings"; body.Children.Add(settings);
         root.Children.Add(new ScrollViewer { Content = body, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, [Grid.RowProperty] = 1 });
@@ -61,14 +61,11 @@ internal sealed class OverlayPanel : UserControl
 
     internal void UpdateState()
     {
-        state.Text = recorder.Paused ? "Replay paused" : recorder.Ready ? "Ready to save" : recorder.State;
-        state.Foreground = recorder.Ready && recorder.SaveRegistered ? Ui.Accent : Ui.Warning;
-        detail.Text = recorder.Paused ? "Resume to start filling your replay buffer."
-            : recorder.Ready ? $"Up to {recorder.Config.ReplayMinutes} min of recent footage."
-            : "The buffer is filling. Saving becomes available when footage is ready.";
-        if (recorder.Ready && !recorder.SaveRegistered) detail.Text += " Save shortcut unavailable; use Save replay here.";
+        var status = ReplayPresentation.Describe(recorder.Phase, recorder.State, recorder.Paused, recorder.Ready, recorder.CanSave, recorder.Applying, recorder.Saving, recorder.SaveRegistered, recorder.Metrics?.BufferedSeconds ?? 0);
+        state.Text = status.Heading; state.Foreground = status.Healthy && recorder.SaveRegistered ? Ui.Accent : Ui.Warning;
+        detail.Text = status.Detail;
         saveHint.Text = recorder.Config.HotkeyText + " · MP4 video";
-        save.IsEnabled = recorder.Ready && !recorder.Paused && !recorder.Applying;
+        save.IsEnabled = status.CanSave;
         foreach (var label in ((StackPanel)save.Content).Children.OfType<TextBlock>()) label.Foreground = save.IsEnabled ? Ui.Background : Ui.Muted;
         screenshot.IsEnabled = !recorder.Applying && !recorder.ScreenshotInProgress;
         pause.IsEnabled = !recorder.Applying;

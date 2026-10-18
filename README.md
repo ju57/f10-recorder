@@ -1,5 +1,11 @@
 # F10 Recorder
 
+This UI integration branch includes experimental selected-window video capture
+and separate live-readiness/save-availability states. Existing profiles retain
+monitor capture; installation and promotion remain held. See
+[the window capture contract and checks](tests/window-capture.md) for lifecycle,
+clock uncertainty, NVIDIA coexistence and remaining acceptance gates.
+
 A local replay recorder that starts buffering at sign-in and saves recent footage with a global hotkey. Defaults: **five minutes, primary monitor, system audio, Ctrl+Shift+F10, native display resolution at 60 FPS, H.264 at 20 Mbps**.
 
 **Status: Windows/NVIDIA prototype running C# on .NET 10 with Avalonia 12.1.4. Linux capture is not implemented. Public binary release preparation is incomplete.** The original WinForms/.NET Framework build remains a local regression reference during migration. F10 Recorder's own code is [MIT licensed](LICENSE); dependency licenses are separate, as described in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
@@ -93,7 +99,7 @@ The overlay uses Windows composition and topmost native windows. It is tested ov
 
 Recording and save notifications use compact charcoal/emerald cards at the right edge near the top of the current app's monitor. Notices confirm actual capture readiness, pause/resume, saving, successful clips, errors, and recovery. Saving stays visible until its result; other notices dismiss after four seconds (six seconds for errors), with a short opacity fade. Updates replace the current notice with a fresh timeout instead of stacking, and repeated buffering progress stays quiet. The notices neither take focus nor intercept mouse clicks. Like Settings, notification visibility over true exclusive fullscreen requires additional graphics integration; it is tested over borderless fullscreen.
 
-On Windows 10 version 2004 and later, F10 requests capture exclusion for its Settings, replay sidebar, backdrop and notification windows. Controlled Desktop Duplication PNG/replay checks verify that the underlying picture remains visible rather than a black mask. This uses Windows composition and does not establish exclusion for every third-party capture path or exclusive-fullscreen configuration. If Windows rejects the request, F10 logs the failure; earlier Windows versions do not receive the request. Screenshot preparation still hides F10 surfaces before capturing.
+In monitor mode on Windows 10 version 2004 and later, F10 requests capture exclusion for its Settings, replay sidebar, backdrop and notification windows. Controlled Desktop Duplication PNG/replay checks verify that the underlying picture remains visible rather than a black mask. This uses Windows composition and does not establish exclusion for every third-party capture path or exclusive-fullscreen configuration. If Windows rejects the request, F10 logs the failure; earlier Windows versions do not receive the request. Screenshot preparation still hides F10 surfaces before capturing.
 
 Capture exclusion has an unresolved compatibility issue with NVIDIA Instant Replay. In a controlled local comparison, showing a window with this flag triggered NVIDIA's protected-content shutdown even without F10 recording; ordinary windows did not. A successful exclusion request therefore does not establish compatibility with another recorder. This also affects paused UI tests. Simultaneous use requires further qualification before promoting this prototype.
 
@@ -160,7 +166,7 @@ Screenshot verification triggers the registered shortcut over a temporary fullsc
 
 Application-folder verification uses two temporary external application processes and generated recording media. It checks live process identification, save-time naming despite a later application switch, separate application folders, an overlay save retaining the preceding application's name, Windows device/invalid-name handling, desktop and missing-metadata fallbacks, preservation of existing clips, continued capture, and complete decoding of saved MP4s.
 
-Exclusive-fullscreen games, HDR fidelity, protected content, monitor hotplug, real sleep/resume, locked sessions, and switching audio devices have not all been manually validated. This version captures the selected monitor rather than injecting a game hook. Protected content may be unavailable to capture. Feature behavior is independently implemented; NVIDIA's private native capture algorithms have not been established.
+Exclusive-fullscreen games, HDR fidelity, protected content, monitor hotplug, real sleep/resume, locked sessions, and switching audio devices have not all been manually validated. The default mode captures the selected monitor; experimental window mode targets one application. Neither injects a game hook. Protected content may be unavailable to capture. Feature behavior is independently implemented; NVIDIA's private native capture algorithms have not been established.
 
 ## Uninstall
 

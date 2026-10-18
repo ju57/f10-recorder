@@ -38,15 +38,62 @@ internal static class MigrationChecks
         WindowsRecorder.Initialize(data);
         report["mediaEngine"] = MediaDependency.ResolveExecutable();
         var config = new Settings { ReplayMinutes = 1, FramesPerSecond = 30, BitrateMbps = 5, OutputDirectory = Path.Combine(data, "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots"), SaveKey = 114, SaveModifiers = shortcutModifiers, OverlayKey = 117, OverlayModifiers = shortcutModifiers, ScreenshotKey = 118, ScreenshotModifiers = shortcutModifiers };
+        if (args.Contains("--presentation-only")) config.CaptureMode = "window";
         config.Save(Path.Combine(data, "settings.json"));
         App.DataDirectory = data; App.Arguments = ["--paused", "--settings"]; App.ControlTitle = "F10Recorder.MigrationCheck." + Guid.NewGuid();
         App.RecorderFactory = (root, post, paused, title) => new WindowsRecorder(root, post, paused, title, true, enabled => { if (failStartup) { failStartup = false; throw new IOException("Controlled startup-write failure."); } report["startupChoiceSubmitted"] = enabled; });
-        App.Started = app => _ = args.Contains("--focus-only") ? CheckFocusAsync(app) : CheckAsync(app);
+        App.Started = app => _ = args.Contains("--presentation-only") ? CheckPresentationAsync(app, args.Contains("--render-only")) : args.Contains("--focus-only") ? CheckFocusAsync(app) : CheckAsync(app);
         try { Program.BuildAvaloniaApp().StartWithClassicDesktopLifetime([]); }
         catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); File.WriteAllText(Path.Combine(data, "verification.json"), JsonSerializer.Serialize(report)); }
         return report.TryGetValue("result", out var result) && (string)result == "passed" ? 0 : 1;
     }
     static void Require(bool condition, string error) { if (!condition) throw new Exception(error); }
+    [DllImport("user32.dll")] static extern bool GetWindowDisplayAffinity(IntPtr window, out uint affinity);
+    // No recording, screenshot, settings Apply, startup write or input injection.
+    static async Task CheckPresentationAsync(App app, bool renderOnly)
+    {
+        Window other = null;
+        try
+        {
+            var panel = app.SettingsWindow.Panel;
+            await Until(() => panel.CodecCheckFinished, "GPU codec check did not finish.");
+            Require(app.Recorder.Paused && app.Recorder.CaptureProcessId == 0, "Presentation check started capture.");
+            Require(GetWindowDisplayAffinity(app.SettingsWindow.TryGetPlatformHandle().Handle, out uint settingsAffinity) && settingsAffinity == 0, "Window-mode Settings requested capture exclusion.");
+            Require(!Control<NumericUpDown>(panel, "DisplayIndex").IsEnabled && Control<TextBlock>(panel, "NativeResolutionPolicy").Text.Contains("fit on resize"), "Window-mode resolution/display policy is misleading.");
+            Require(!Control<Button>(panel, "QuickSaveReplay").IsEnabled, "Paused Settings advertised Save as available.");
+            for (int i = 0; i < 4; i++) { panel.SelectPage(i); await Task.Delay(100); Render(app.SettingsWindow, "settings-" + i); }
+            panel.SelectPage(0); Control<ComboBox>(panel, "CaptureMode").SelectedIndex = 0;
+            Require(Control<NumericUpDown>(panel, "DisplayIndex").IsEnabled && app.Recorder.Config.CaptureMode == "window", "Pending monitor selection changed the applied source.");
+            Control<ComboBox>(panel, "CaptureMode").SelectedIndex = 1;
+            app.ToggleOverlay(); await Task.Delay(150);
+            Require(app.SettingsWindow.OverlayVisible && !app.SettingsWindow.Overlay.SaveAction.IsEnabled, "Paused sidebar actions were misleading.");
+            Require(GetWindowDisplayAffinity(app.SettingsWindow.OverlaySurface.TryGetPlatformHandle().Handle, out uint renderedAffinity) && renderedAffinity == 0, "Window-mode sidebar requested capture exclusion.");
+            Render(app.SettingsWindow.OverlaySurface, "sidebar-paused"); app.SettingsWindow.Dismiss();
+            report["renderedAllPagesAndPausedSidebar"] = true;
+            if (renderOnly)
+            {
+                report["captureStarted"] = false; report["result"] = "incomplete";
+                report["reason"] = "Rendering checks passed; focus acceptance not run after the earlier Windows foreground denial.";
+                return;
+            }
+            other = new Window { Title = "F10 window-mode focus target", Width = 480, Height = 240 };
+            other.Show(); other.Activate();
+            Native.ShowWindow(other.TryGetPlatformHandle().Handle, 9);
+            report["foregroundRequestAccepted"] = Native.SetForegroundWindow(other.TryGetPlatformHandle().Handle);
+            await Until(() => Native.GetForegroundWindow() == other.TryGetPlatformHandle().Handle, "Windows did not grant foreground activation to the owned focus fixture.");
+            app.ToggleOverlay(); await Task.Delay(150);
+            Require(app.SettingsWindow.OverlayVisible && !app.SettingsWindow.Overlay.SaveAction.IsEnabled, "Paused sidebar actions were misleading.");
+            Require(GetWindowDisplayAffinity(app.SettingsWindow.OverlaySurface.TryGetPlatformHandle().Handle, out uint overlayAffinity) && overlayAffinity == 0, "Window-mode sidebar requested capture exclusion.");
+            Require(GetWindowDisplayAffinity(app.SettingsWindow.OverlayBackdrop.TryGetPlatformHandle().Handle, out uint backdropAffinity) && backdropAffinity == 0, "Window-mode backdrop requested capture exclusion.");
+            Render(app.SettingsWindow.OverlaySurface, "sidebar-paused"); app.SettingsWindow.Dismiss();
+            Require(Native.GetForegroundWindow() == other.TryGetPlatformHandle().Handle, "Dismissal failed to restore the previous task-owned window.");
+            Require(app.Recorder.Paused && app.Recorder.CaptureProcessId == 0, "Presentation or focus checks changed recording intent.");
+            report["ordinaryWindowModeSurfacesAndFocus"] = true; report["pendingSourceDoesNotApply"] = true; report["disabledPausedSaveActions"] = true;
+            report["captureStarted"] = false; report["result"] = "passed";
+        }
+        catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); }
+        finally { other?.Close(); File.WriteAllText(Path.Combine(data, "verification.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true })); app.Quit(); }
+    }
     static async Task Until(Func<bool> condition, string error, int milliseconds = 15000)
     {
         var timer = Stopwatch.StartNew(); while (!condition() && timer.ElapsedMilliseconds < milliseconds) await Task.Delay(50); Require(condition(), error);

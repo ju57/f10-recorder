@@ -30,9 +30,10 @@ namespace F10Recorder
         long encodedFrames, reportedDrops, reportedDuplicates, cacheBytes;
         double encodingSpeed, metricsAt, cpuSeconds, cpuPercent;
         volatile bool disposed;
+        volatile bool stopped;
         public string ErrorTail = "";
         public string DirectoryPath { get { return directory; } }
-        internal int ProcessId { get { return process == null ? 0 : process.Id; } }
+        internal int ProcessId { get { return process == null || stopped || process.HasExited ? 0 : process.Id; } }
         public bool HasExited { get { return process == null || process.HasExited; } }
         public double Position { get { lock (gate) return progress > 0 ? progress + Math.Min(0.5, clock.Elapsed.TotalSeconds - progressAt) : 0; } }
         public double BufferedSeconds { get { lock (gate) { var list = ReadSegments(); return list.Count == 0 ? 0 : Math.Min(settings.ReplayMinutes * 60, list.Last().End - list.First().Start); } } }
@@ -40,12 +41,13 @@ namespace F10Recorder
         {
             get { return !HasExited && (audio == null || audio.Failure == null) && clock.Elapsed.TotalSeconds - lastSegmentAt < 15 && clock.Elapsed.TotalSeconds - progressAt < 15; }
         }
-        public CaptureSession(Settings config, string root, bool synthetic, Func<bool> cancelled = null)
+        public CaptureSession(Settings config, string root, bool synthetic, Func<bool> cancelled = null) : this(config, root, synthetic, cancelled, null) { }
+        internal CaptureSession(Settings config, string root, bool synthetic, Func<bool> cancelled, WindowTargetSnapshot target, Func<bool> sourceStillValid = null)
         {
             settings = config;
             timestampedAudio = !synthetic && settings.SystemAudio;
             recordAudio = synthetic || settings.SystemAudio;
-            captureRateLimit = synthetic ? settings.FramesPerSecond : settings.FramesPerSecond * 4;
+            captureRateLimit = synthetic || settings.CaptureMode == "window" ? settings.FramesPerSecond : settings.FramesPerSecond * 4;
             directory = Path.Combine(root, "session-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
             manifest = Path.Combine(directory, "segments.csv");
@@ -54,17 +56,20 @@ namespace F10Recorder
                 // Resolve/validate the engine and audio format before taking the
                 // epoch so dependency discovery is not part of media startup.
                 string executable = settings.FfmpegPath;
+                if (settings.CaptureMode == "window" && !synthetic && (target == null || !target.Available)) throw new InvalidOperationException("A validated window target is required; monitor fallback is disabled.");
                 if (!synthetic && settings.SystemAudio) audio = new LoopbackAudio();
                 MediaClock mediaClock = audio == null ? null : MediaClock.Capture();
                 if (mediaClock != null) Log.Write("Media clock: QPC=" + mediaClock.QpcEpoch + "; frequency=" + mediaClock.QpcFrequency + "; UTC microseconds=" + mediaClock.UnixMicroseconds + "; bridge bracket ticks=" + mediaClock.BridgeUncertaintyTicks);
                 var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-stats_period", "0.25", "-progress", "pipe:1" };
+                string source = settings.CaptureMode == "window" && !synthetic ? WindowVideoSource(target, settings.FramesPerSecond)
+                    : "ddagrab=framerate=" + captureRateLimit + ":output_idx=" + (synthetic ? 0 : settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1";
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=" + settings.FramesPerSecond });
                 // ddagrab's rate is a polling ceiling, not a guaranteed output clock.
                 // Allow acquisition headroom, then pace the GPU frames in the graph.
                 // Output-only CFR resampling still showed intermittent motion loss.
                 // Audio capture uses independent input queues so its delivery
                 // cushion cannot stall video acquisition on the shared clock.
-                else if (mediaClock == null) args.AddRange(new[] { "-filter_complex", "ddagrab=framerate=" + captureRateLimit + ":output_idx=" + (settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1,fps=fps=" + settings.FramesPerSecond + ":round=near[video]" });
+                else if (mediaClock == null) args.AddRange(new[] { "-filter_complex", source + ",fps=fps=" + settings.FramesPerSecond + ":round=near[video]" });
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000" });
                 else if (settings.SystemAudio)
                 {
@@ -73,7 +78,10 @@ namespace F10Recorder
                     args.AddRange(new[] { "-copyts", "-thread_queue_size", "64", "-probesize", "32", "-analyzeduration", "0", "-f", "matroska", "-i", @"\\.\pipe\" + name });
                     // The independent video input thread keeps acquisition moving
                     // while audio's jitter buffer deliberately delays delivery.
-                    args.AddRange(new[] { "-thread_queue_size", "32", "-f", "lavfi", "-i", "ddagrab=framerate=" + captureRateLimit + ":output_idx=" + (settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1," + mediaClock.VideoTimestampFilter + ",fps=fps=" + settings.FramesPerSecond + ":round=near" });
+                    // gfxcapture 7fd2be97b9 subtracts its first SystemRelativeTime.
+                    // Re-anchor that relative timeline once at first delivery;
+                    // its unknown first-frame delivery delay needs live A/V qualification.
+                    args.AddRange(new[] { "-thread_queue_size", "32", "-f", "lavfi", "-i", source + "," + mediaClock.VideoTimestampFilter + ",fps=fps=" + settings.FramesPerSecond + ":round=near" });
                 }
                 args.AddRange(new[] { "-map", synthetic ? "0:v:0" : mediaClock == null ? "[video]" : "1:v:0" });
                 if (synthetic || settings.SystemAudio) args.AddRange(new[] { "-map", synthetic ? "1:a:0" : "0:a:0", "-af", synthetic ? "aresample=async=1:first_pts=0" : "aresample=async=1", "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "192k" });
@@ -83,6 +91,8 @@ namespace F10Recorder
                 args.AddRange(new[] { "-c:v", settings.VideoCodec, "-preset", "p3", "-tune", "ll", "-rc", "cbr", "-b:v", settings.BitrateMbps + "M", "-maxrate", settings.BitrateMbps + "M", "-bufsize", (settings.BitrateMbps * 2) + "M", "-g", settings.FramesPerSecond.ToString(), "-bf", "0", "-forced-idr", "1", "-force_key_frames", "expr:gte(t,n_forced*1)", "-flags", "+cgop", "-f", "segment", "-segment_time", "1", "-segment_format", settings.SegmentFormat, "-reset_timestamps", "1", "-segment_list", manifest, "-segment_list_type", "csv", "-segment_list_size", (settings.ReplayMinutes * 60 + 20).ToString(), Path.Combine(directory, "chunk-%09d" + settings.SegmentExtension) });
                 var argumentProbe = RecorderRuntime.CaptureArgumentProbe;
                 if (argumentProbe != null) args = argumentProbe(args);
+                if (!synthetic && settings.CaptureMode == "window") Log.Write("Experimental window capture arguments: " + string.Join(" ", args.Select(Quote)));
+                if (sourceStillValid != null && !sourceStillValid()) throw new OperationCanceledException("The selected window changed before capture could start.");
                 process = StartProcess(executable, args, directory);
                 job.Add(process);
                 process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)
@@ -116,7 +126,7 @@ namespace F10Recorder
                     if (mediaClock != null && !videoBridgeLogged && double.TryParse(bridgeText, NumberStyles.Float, CultureInfo.InvariantCulture, out bridge) && bridge > 1000000000000000)
                     {
                         videoBridgeLogged = true;
-                        Log.Write("Video first-frame RTC microseconds=" + bridge.ToString("F0", CultureInfo.InvariantCulture) + "; acquisition offset ms=" + ((bridge - mediaClock.UnixMicroseconds) / 1000).ToString("F3", CultureInfo.InvariantCulture));
+                        Log.Write("Video first-frame RTC microseconds=" + bridge.ToString("F0", CultureInfo.InvariantCulture) + (settings.CaptureMode == "window" ? "; experimental delivery anchor offset ms=" : "; acquisition offset ms=") + ((bridge - mediaClock.UnixMicroseconds) / 1000).ToString("F3", CultureInfo.InvariantCulture));
                         return;
                     }
                     lock (gate) { ErrorTail = (ErrorTail + "\n" + e.Data); if (ErrorTail.Length > 3000) ErrorTail = ErrorTail.Substring(ErrorTail.Length - 3000); }
@@ -137,6 +147,23 @@ namespace F10Recorder
                 Log.Write("Capture started; PID " + process.Id + "; " + directory);
             }
             catch { Dispose(); throw; }
+        }
+        internal static string WindowVideoSource(WindowTargetSnapshot target, int rate)
+        {
+            if (target == null || !target.Available) throw new InvalidOperationException("A live selected window is required.");
+            return "gfxcapture=hwnd=" + target.Handle.ToString(CultureInfo.InvariantCulture) + ":capture_cursor=1:capture_border=0:width=-2:height=-2:resize_mode=scale_aspect:max_framerate=" + rate.ToString(CultureInfo.InvariantCulture);
+        }
+        internal void StopCapture()
+        {
+            if (stopped) return;
+            if (process != null)
+            {
+                try { if (!process.HasExited) { process.StandardInput.WriteLine("q"); process.StandardInput.Flush(); if (!process.WaitForExit(1500)) { process.Kill(); process.WaitForExit(5000); } } }
+                catch (InvalidOperationException) { } catch (IOException) { }
+            }
+            if (audio != null) audio.Dispose();
+            if (pipe != null) pipe.Dispose();
+            stopped = true;
         }
         List<Segment> ReadSegments()
         {
@@ -181,7 +208,7 @@ namespace F10Recorder
                 {
                     var result = new RecorderMetrics();
                     if (disposed || process == null) return result;
-                    result.CaptureProcessId = process.Id; result.CaptureProgressSeconds = progress;
+                    result.CaptureProcessId = ProcessId; result.CaptureProgressSeconds = progress;
                     result.ConfiguredCaptureRateLimit = captureRateLimit; result.ConfiguredOutputFramesPerSecond = settings.FramesPerSecond;
                     result.EncodedFrames = encodedFrames; result.EncoderReportedDrops = reportedDrops; result.EncoderReportedDuplicates = reportedDuplicates; result.EncodingSpeed = encodingSpeed;
                     var segments = ReadSegments(); result.BufferedSeconds = segments.Count == 0 ? 0 : Math.Min(settings.ReplayMinutes * 60, segments.Last().End - segments.First().Start);
@@ -219,8 +246,9 @@ namespace F10Recorder
                     {
                         if (disposed) throw new IOException("Capture restarted before the replay could be saved.");
                         var available = ReadSegments();
-                        if (available.Count > 0 && available.Last().End >= end)
+                        if (available.Count > 0 && (available.Last().End >= end || stopped))
                         {
+                            if (stopped) end = Math.Min(end, available.Last().End);
                             selection = ReplaySelection.Select(available, end, settings.ReplayMinutes * 60);
                             if (selection.Count == 0) throw new IOException("No replay frames are available yet.");
                             foreach (var segment in selection) pinned.Add(segment.Path);
@@ -293,12 +321,7 @@ namespace F10Recorder
         public void Dispose()
         {
             lock (gate) { if (disposed) return; disposed = true; }
-            if (process != null)
-            {
-                try { if (!process.HasExited) { process.StandardInput.WriteLine("q"); process.StandardInput.Flush(); if (!process.WaitForExit(1500)) process.Kill(); } } catch (InvalidOperationException) { } catch (IOException) { }
-            }
-            if (audio != null) audio.Dispose();
-            if (pipe != null) pipe.Dispose();
+            StopCapture();
             job.Dispose();
             if (process != null) process.Dispose();
             if (!string.IsNullOrWhiteSpace(ErrorTail)) Log.Write("Capture diagnostics: " + ErrorTail);
@@ -311,6 +334,7 @@ namespace F10Recorder
         readonly object gate = new object();
         readonly Thread worker;
         readonly bool synthetic;
+        readonly Func<WindowTargetSnapshot> windowTarget;
         volatile bool closing, paused, restart;
         CaptureSession session;
         int saving;
@@ -318,6 +342,7 @@ namespace F10Recorder
         double lastSaveMilliseconds;
         long lastSaveBytes;
         bool lastSaveSucceeded;
+        internal bool CanSave { get { lock (gate) return !paused && !closing && session != null && session.BufferedSeconds > 0; } }
         internal RecorderMetrics Metrics
         {
             get
@@ -334,23 +359,29 @@ namespace F10Recorder
         }
         internal bool IsSaving { get { return Volatile.Read(ref saving) != 0; } }
         public event Action<string, bool> StateChanged;
+        internal event Action<CapturePhase, string, bool> CaptureStateChanged;
         public event Action<string, bool> SaveFinished;
         public event Action SaveStarted;
         public ReplayEngine(Settings config, string dataDirectory, bool startPaused = false) : this(config, dataDirectory, startPaused, false) { }
-        internal ReplayEngine(Settings config, string dataDirectory, bool startPaused, bool syntheticSource)
+        internal ReplayEngine(Settings config, string dataDirectory, bool startPaused, bool syntheticSource) : this(config, dataDirectory, startPaused, syntheticSource, null) { }
+        internal ReplayEngine(Settings config, string dataDirectory, bool startPaused, bool syntheticSource, Func<WindowTargetSnapshot> targetProvider)
         {
+            windowTarget = targetProvider;
             settings = config; paused = startPaused; synthetic = syntheticSource; cache = Path.Combine(dataDirectory, "buffer");
             Directory.CreateDirectory(cache);
             // Only this application's disposable cache. Saved clips live elsewhere.
             foreach (string old in Directory.GetDirectories(cache, "session-*")) CaptureSession.TryDeleteDirectory(old);
             worker = new Thread(Run) { IsBackground = true, Name = "Capture supervisor" }; worker.Start();
         }
-        void State(string message, bool ready) { var callback = StateChanged; if (callback != null) callback(message, ready); }
+        void State(string message, bool ready) { State(ready ? CapturePhase.Buffering : paused ? CapturePhase.Paused : message.StartsWith("Recovering:") ? CapturePhase.Recovering : CapturePhase.Starting, message, ready); }
+        void State(CapturePhase next, string message, bool ready) { var typed = CaptureStateChanged; if (typed != null) typed(next, message, ready); var callback = StateChanged; if (callback != null) callback(message, ready); }
         public void Restart() { restart = true; }
+        internal bool RestartPending { get { return restart; } }
         public void Pause(bool value) { paused = value; restart = true; }
         internal int CaptureProcessId { get { lock (gate) return session == null ? 0 : session.ProcessId; } }
         void Run()
         {
+            if (!synthetic && settings.CaptureMode == "window") { RunWindow(); return; }
             int failures = 0;
             while (!closing)
             {
@@ -381,6 +412,73 @@ namespace F10Recorder
                 }
                 int delay = failures == 0 ? 0 : Math.Min(30, 1 << Math.Min(5, failures));
                 for (int i = 0; i < delay * 10 && !closing && !restart; i++) Thread.Sleep(100);
+            }
+        }
+        // Source loss retains only this session's completed footage. A new source
+        // session starts a new buffer; discontinuous timelines are never joined.
+        void RunWindow()
+        {
+            CaptureSession current = null;
+            long generation = -1;
+            bool capturing = false;
+            int failures = 0;
+            try
+            {
+                while (!closing)
+                {
+                    try
+                    {
+                        var target = windowTarget == null ? new WindowTargetSnapshot { Phase = CapturePhase.WaitingForTarget, Reason = "Window capture is available only through the independent Windows worker." } : windowTarget();
+                        if (paused || restart || !target.Available || (capturing && target.Generation != generation))
+                        {
+                            State(paused ? CapturePhase.Paused : target.Available ? CapturePhase.Starting : target.Phase, paused ? "Paused" : target.Reason, false);
+                            if (capturing) { current.StopCapture(); capturing = false; }
+                            if (paused || restart)
+                            {
+                                lock (gate) session = null;
+                                while (IsSaving && !closing) Thread.Sleep(50);
+                                if (current != null) { current.Dispose(); CaptureSession.TryDeleteDirectory(current.DirectoryPath); current = null; }
+                                restart = false;
+                            }
+                            if (paused || !target.Available) { Thread.Sleep(250); continue; }
+                        }
+                        if (!capturing)
+                        {
+                            lock (gate) session = null;
+                            while (IsSaving && !closing) Thread.Sleep(50);
+                            if (closing) break;
+                            if (current != null) { current.Dispose(); CaptureSession.TryDeleteDirectory(current.DirectoryPath); current = null; }
+                            settings.Validate(); State(CapturePhase.Starting, target.Reason, false);
+                            var expected = target;
+                            current = new CaptureSession(settings, cache, false, delegate { return closing || paused || restart; }, target,
+                                delegate { var latest = windowTarget(); return latest.Available && latest.Generation == expected.Generation; });
+                            var verified = windowTarget();
+                            if (!verified.Available || verified.Generation != expected.Generation) { current.StopCapture(); continue; }
+                            generation = target.Generation; capturing = true;
+                            lock (gate) session = current;
+                        }
+                        current.Maintain();
+                        if (!current.Healthy) throw new IOException("Window capture stopped advancing. " + current.ErrorTail);
+                        double buffered = current.BufferedSeconds;
+                        if (buffered > 0) { failures = 0; State(CapturePhase.Buffering, "Buffering · " + (int)buffered + "s · " + target.ApplicationName, true); }
+                        Thread.Sleep(250);
+                    }
+                    catch (Exception ex)
+                    {
+                        State(CapturePhase.Recovering, ex.Message.Split('\n')[0], false);
+                        if (current != null) current.StopCapture(); capturing = false;
+                        lock (gate) recoveries++;
+                        Log.Write(ex.ToString()); failures++;
+                        int delay = Math.Min(30, 1 << Math.Min(5, failures));
+                        for (int i = 0; i < delay * 10 && !closing && !paused && !restart; i++) Thread.Sleep(100);
+                    }
+                }
+            }
+            finally
+            {
+                lock (gate) session = null;
+                while (IsSaving && !closing) Thread.Sleep(50);
+                if (current != null) { current.Dispose(); CaptureSession.TryDeleteDirectory(current.DirectoryPath); }
             }
         }
         public void Save(string applicationName = null)

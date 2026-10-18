@@ -6,6 +6,9 @@ internal interface IWindowsRecorder : IDisposable
     string DataDirectory { get; }
     bool Paused { get; }
     bool Ready { get; }
+    CapturePhase Phase { get; }
+    bool CanSave { get; }
+    bool Saving { get; }
     bool Applying { get; }
     bool ScreenshotInProgress { get; }
     string LastScreenshot { get; }
@@ -44,6 +47,9 @@ internal sealed class WindowsRecorder : IWindowsRecorder
     public string DataDirectory => backend.DataDirectory;
     public bool Paused => backend.Paused;
     public bool Ready => backend.Ready;
+    public CapturePhase Phase => backend.Phase;
+    public bool CanSave => backend.CanSave;
+    public bool Saving => backend.Saving;
     public bool Applying => backend.Applying;
     public bool ScreenshotInProgress => backend.ScreenshotInProgress;
     public string LastScreenshot => backend.LastScreenshot;

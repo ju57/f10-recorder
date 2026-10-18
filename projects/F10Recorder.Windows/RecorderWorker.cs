@@ -100,7 +100,7 @@ internal static class RecorderWorker
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             }
-            return new WorkerStatus { Instance = instance, Revision = ++revision, Config = host.Config, Paused = host.Paused, Ready = host.Ready && metrics.CaptureProcessId != 0, Applying = host.Applying, Saving = host.Saving, ScreenshotInProgress = host.ScreenshotInProgress,
+            return new WorkerStatus { Instance = instance, Revision = ++revision, Config = host.Config, Paused = host.Paused, Ready = host.Ready && metrics.CaptureProcessId != 0, Phase = host.Phase, CanSave = host.CanSave, Applying = host.Applying, Saving = host.Saving, ScreenshotInProgress = host.ScreenshotInProgress,
                 SaveRegistered = host.SaveRegistered, OverlayRegistered = host.OverlayRegistered, ScreenshotRegistered = host.ScreenshotRegistered,
                 State = host.State, LastScreenshot = host.LastScreenshot, ApplicationName = host.ApplicationName, WorkerProcessId = Environment.ProcessId,
                 Sequence = sequence, Metrics = metrics, Stopping = stopping, Events = after < 0 ? [] : events.Where(e => e.Sequence > after).Take(16).ToArray() };
@@ -129,7 +129,7 @@ internal static class RecorderWorker
             string error = null;
             try
             {
-                if (request.Version != 1) throw new InvalidDataException("Unsupported recorder protocol version.");
+                if (request.Version != 2) throw new InvalidDataException("Unsupported recorder protocol version.");
                 if (request.AttachUi)
                 {
                     if (attachedUi == null || attachedUi.Id != clientPid || !UiAlive())

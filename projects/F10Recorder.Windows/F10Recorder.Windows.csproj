@@ -10,6 +10,7 @@
     <ProjectReference Include="../F10Recorder.Core/F10Recorder.Core.csproj" />
     <Compile Include="../../src/ReplayEngine.cs" Link="ReplayEngine.cs" />
     <Compile Include="../../src/Native.cs" Link="Native.cs" />
+    <Compile Include="../../src/WindowCaptureTarget.cs" Link="WindowCaptureTarget.cs" />
     <Compile Include="../../src/LoopbackAudio.cs" Link="LoopbackAudio.cs" />
     <Compile Include="../../src/MediaDependency.cs" Link="MediaDependency.cs" />
     <Compile Include="../../src/EncoderCapabilities.cs" Link="EncoderCapabilities.cs" />

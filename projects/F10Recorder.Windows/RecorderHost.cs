@@ -17,12 +17,15 @@ internal sealed class RecorderHost : IWindowsRecorder
     readonly ForegroundApplicationTracker foreground;
     readonly RecorderNotifications notices;
     ReplayEngine engine;
+    WindowCaptureTarget windowTarget;
     bool disposed;
     int generation;
     public Settings Config { get; private set; }
     public string DataDirectory { get; }
     public bool Paused { get; private set; }
     public bool Ready { get; private set; }
+    public CapturePhase Phase { get; private set; } = CapturePhase.Starting;
+    public bool CanSave => !Applying && !Paused && engine.CanSave;
     public bool Applying { get; private set; }
     public bool ScreenshotInProgress { get; private set; }
     public string LastScreenshot { get; private set; }
@@ -30,10 +33,10 @@ internal sealed class RecorderHost : IWindowsRecorder
     public bool SaveRegistered => shortcuts.SaveRegistered;
     public bool OverlayRegistered => shortcuts.OverlayRegistered;
     public bool ScreenshotRegistered => shortcuts.ScreenshotRegistered;
-    public string ApplicationName => foreground.ApplicationName;
+    public string ApplicationName => Config.CaptureMode == "window" ? Path.GetFileNameWithoutExtension(Config.WindowExecutable) : foreground.ApplicationName;
     public int CaptureProcessId => engine.CaptureProcessId;
     public RecorderMetrics Metrics => engine.Metrics;
-    internal bool Saving => engine.IsSaving;
+    public bool Saving => engine.IsSaving;
     internal Func<Task> PrepareRemoteScreenshot;
     internal void ExcludeUiProcess(int id) => foreground.ExcludeProcess(id);
     public event Action Changed;
@@ -71,28 +74,36 @@ internal sealed class RecorderHost : IWindowsRecorder
     void StartEngine()
     {
         int current = ++generation;
-        engine = new ReplayEngine(Config, DataDirectory, Paused, synthetic);
+        windowTarget?.Dispose(); windowTarget = null;
+        if (Config.CaptureMode == "window" && !synthetic) windowTarget = new WindowCaptureTarget(Config);
+        engine = new ReplayEngine(Config, DataDirectory, Paused, synthetic, windowTarget == null ? null : windowTarget.Read);
         void Dispatch(Action action) => post(() => { if (!disposed && generation == current) action(); });
-        engine.StateChanged += (message, ready) => Dispatch(() =>
+        engine.CaptureStateChanged += (phase, message, ready) =>
         {
-            State = ready && !shortcuts.SaveRegistered ? "Buffering · save shortcut unavailable" : message;
-            Ready = ready; notices.StateChanged(message, ready, Paused, Config, shortcuts.SaveRegistered); Changed?.Invoke();
-        });
+            int capture = engine.CaptureProcessId;
+            Dispatch(() =>
+            {
+                // A queued ready event cannot revive a retired or restarting source.
+                if (ready && (Paused || engine.RestartPending || capture == 0 || capture != engine.CaptureProcessId)) return;
+                State = ready && !shortcuts.SaveRegistered ? "Buffering · save shortcut unavailable" : message;
+                Phase = phase; Ready = ready; notices.CaptureChanged(phase, message, Ready, Paused, Config, shortcuts.SaveRegistered); Changed?.Invoke();
+            });
+        };
         engine.SaveStarted += () => Dispatch(notices.SaveStarted);
         engine.SaveFinished += (message, success) => Dispatch(() => { notices.SaveFinished(message, success); Saved?.Invoke(message, success); Changed?.Invoke(); });
     }
     public void SampleForeground() => foreground.Sample();
-    public void SaveReplay() { if (!Applying && !disposed) engine.Save(foreground.Sample()); }
+    public void SaveReplay() { if (!Applying && !disposed) engine.Save(Config.CaptureMode == "window" ? ApplicationName : foreground.Sample()); }
     public void Pause(bool value)
     {
         if (Applying || disposed || Paused == value) return;
-        Paused = value; Ready = false; State = value ? "Paused" : "Starting replay buffer…";
+        Paused = value; Ready = false; Phase = value ? CapturePhase.Paused : CapturePhase.Starting; State = value ? "Paused" : "Starting replay buffer…";
         engine.Pause(value); notices.PauseChanged(value); Changed?.Invoke();
     }
     public void Restart()
     {
         if (Applying || disposed) return;
-        Ready = false; State = Paused ? "Paused" : "Restarting replay buffer…";
+        Ready = false; Phase = Paused ? CapturePhase.Paused : CapturePhase.Starting; State = Paused ? "Paused" : "Restarting replay buffer…";
         engine.Restart(); Changed?.Invoke();
     }
     public async Task ApplyAsync(Settings next, bool startup)
@@ -117,7 +128,7 @@ internal sealed class RecorderHost : IWindowsRecorder
                 throw;
             }
             finally { StartEngine(); }
-            Ready = false; State = Paused ? "Paused" : "Starting replay buffer…";
+            Ready = false; Phase = Paused ? CapturePhase.Paused : CapturePhase.Starting; State = Paused ? "Paused" : "Starting replay buffer…";
         }
         finally { Applying = false; Register(Config); Changed?.Invoke(); }
     }
@@ -126,11 +137,18 @@ internal sealed class RecorderHost : IWindowsRecorder
         if (disposed || ScreenshotInProgress || Applying) return;
         ScreenshotInProgress = true; PreparingScreenshot?.Invoke(); Changed?.Invoke();
         int display = Config.DisplayIndex; string folder = Config.ScreenshotDirectory;
+        var selected = Config.CaptureMode == "window" ? windowTarget?.Read() : null;
         try
         {
             if (PrepareRemoteScreenshot != null) await PrepareRemoteScreenshot();
             await Task.Delay(150);
-            string file = await Task.Run(() => captureScreenshot(display, folder));
+            string file = await Task.Run(() =>
+            {
+                if (Config.CaptureMode != "window") return captureScreenshot(display, folder);
+                var verified = windowTarget?.Read();
+                if (selected == null || !selected.Available || verified == null || !verified.Available || selected.Generation != verified.Generation) throw new IOException("The selected window is unavailable. No desktop screenshot was taken.");
+                return ScreenshotCapture.CaptureSource(CaptureSession.WindowVideoSource(verified, 1).Replace(":capture_cursor=1", ":capture_cursor=0"), folder, true);
+            });
             if (!disposed) { LastScreenshot = file; Notification?.Invoke("Screenshot saved", Path.GetFileName(file), NotificationKind.Success, 4000); }
         }
         catch (Exception ex) { Log.Write(ex.ToString()); if (!disposed) Notification?.Invoke("Screenshot not saved", ex.Message, NotificationKind.Warning, 6000); }
@@ -140,7 +158,7 @@ internal sealed class RecorderHost : IWindowsRecorder
     public void Dispose()
     {
         if (disposed) return; disposed = true;
-        shortcuts.Dispose(); foreground.Dispose(); engine.Dispose();
+        shortcuts.Dispose(); foreground.Dispose(); engine.Dispose(); windowTarget?.Dispose();
     }
     public Task StopAsync()
     {

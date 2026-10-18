@@ -22,6 +22,9 @@ internal static class WorkerChecks
     [STAThread]
     static int Main(string[] args)
     {
+        if (args[0] == "--window-fixture") { WindowCaptureChecks.Fixture(args[1]); return 0; }
+        if (args[0] == "--window-checks") return WindowCaptureChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
+        if (args[0] == "--headless-status") return HeadlessStatusChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
         if (args[0] == "--analyze-saved")
         {
             string folder = Path.GetFullPath(args[1]);
@@ -229,7 +232,7 @@ internal static class WorkerChecks
                 using var limit = new CancellationTokenSource(3000); byte[] one = new byte[1];
                 Require(await pipe.ReadAsync(one, limit.Token) == 0, "Oversized request was not rejected.");
             }
-            var wrongVersion = await WorkerProtocol.CallAsync(data, new WorkerRequest { Version = 2 });
+            var wrongVersion = await WorkerProtocol.CallAsync(data, new WorkerRequest { Version = 1 });
             Require(wrongVersion.Error != null && (await Call()).Status.Ready, "Bad protocol request affected capture."); report["boundedProtocolRejection"] = true;
 
             var original = Copy((await Call()).Status.Config);

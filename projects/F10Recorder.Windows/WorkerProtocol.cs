@@ -38,7 +38,7 @@ internal static class WorkerIdentity
 
 internal sealed class WorkerRequest
 {
-    public int Version = 1;
+    public int Version = 2;
     public string Command = "status";
     public Settings Settings;
     public bool Value;
@@ -58,6 +58,8 @@ internal sealed class WorkerStatus
     public long Revision;
     public Settings Config;
     public bool Paused, Ready, Applying, Saving, ScreenshotInProgress, SaveRegistered, OverlayRegistered, ScreenshotRegistered, Stopping;
+    public CapturePhase Phase;
+    public bool CanSave;
     public string State, LastScreenshot, ApplicationName;
     public int WorkerProcessId;
     public long Sequence;
@@ -67,10 +69,11 @@ internal sealed class WorkerStatus
 internal sealed class WorkerPersistentState { public bool Paused, UserStopped; }
 internal sealed class WorkerReply
 {
-    public int Version = 1;
+    public int Version = 2;
     public string Error;
     public WorkerStatus Status;
 }
+internal sealed class WorkerProtocolMismatchException(string message) : IOException(message);
 
 internal static class WorkerProtocol
 {
@@ -106,7 +109,7 @@ internal static class WorkerProtocol
         await pipe.ConnectAsync(deadline.Token).ConfigureAwait(false);
         await WriteAsync(pipe, request, deadline.Token).ConfigureAwait(false);
         var reply = await ReadAsync<WorkerReply>(pipe, deadline.Token).ConfigureAwait(false);
-        if (reply.Version != 1) throw new InvalidDataException("Recorder protocol version mismatch.");
+        if (reply.Version != 2) throw new WorkerProtocolMismatchException("Recorder protocol version mismatch. Quit the older recorder before opening this build.");
         return reply;
     }
     internal static WorkerReply EnsureWorker(string data, bool paused, string executable = null, bool attachUi = true)
@@ -122,7 +125,7 @@ internal static class WorkerProtocol
                 using var check = new CancellationTokenSource(500);
                 return CallAsync(data, new WorkerRequest { AttachUi = attachUi }, check.Token).GetAwaiter().GetResult();
             }
-            catch (Exception ex) when (ex is IOException or OperationCanceledException or TimeoutException) { }
+            catch (Exception ex) when (ex is not WorkerProtocolMismatchException && (ex is IOException or OperationCanceledException or TimeoutException)) { }
             var info = new ProcessStartInfo(executable ?? Environment.ProcessPath) { UseShellExecute = false, CreateNoWindow = true };
             info.ArgumentList.Add("--recorder-worker"); info.ArgumentList.Add("--data-dir"); info.ArgumentList.Add(data);
             if (paused) info.ArgumentList.Add("--paused");

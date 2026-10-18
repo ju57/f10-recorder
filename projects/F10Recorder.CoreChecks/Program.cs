@@ -16,6 +16,7 @@ string settingsFile = Path.Combine(data, "settings.json");
 string legacy = JsonSerializer.Serialize(new { ReplayMinutes = 5, FramesPerSecond = 60, BitrateMbps = 20, VideoCodec = "hevc_nvenc", SystemAudio = false, DisplayIndex = -1, OutputDirectory = Path.Combine(data, "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots"), SaveKey = 121, SaveModifiers = 6, OverlayKey = 120, OverlayModifiers = 6, ScreenshotKey = 119, ScreenshotModifiers = 6, FfmpegPath = "obsolete-configured-engine", HotkeyText = "Ctrl+Shift+F10" });
 File.WriteAllText(settingsFile, legacy); var settings = Settings.Load(settingsFile);
 Require(settings.VideoCodec == "hevc_nvenc" && !settings.SystemAudio && settings.ReplayMinutes == 5 && settings.OverlayHotkeyText == "Ctrl+Shift+F9", "Existing settings were not preserved by the serializer migration.");
+Require(settings.CaptureMode == "monitor" && settings.WindowExecutable == "" && settings.WindowClass == "", "Old profiles must retain monitor mode without persisting transient target identity.");
 settings.Save(settingsFile); Require(!File.ReadAllText(settingsFile).Contains("FfmpegPath"), "Engine paths must stay out of recording preferences.");
 var previousInvalidFiles = Directory.GetFiles(data, "settings.json.invalid-*").ToHashSet();
 string invalidLegacy = legacy.Replace("\"FramesPerSecond\":60", "\"FramesPerSecond\":999");
@@ -49,3 +50,39 @@ foreach (string format in new[] { "u8", "s16le", "s24le", "s32le", "f32le" })
     Require(File.ReadAllBytes(Path.Combine(data, format + "-normal.mka")).SequenceEqual(File.ReadAllBytes(Path.Combine(data, format + "-delayed.mka"))), "Delivery delay must not change audio timestamps or samples.");
 }
 Console.WriteLine("Passed: replay boundaries, incomplete manifests, path containment, configuration migration, invalid-file preservation, and common audio/video epoch mapping.");
+// Readiness is independent of enabled intent, saved footage and an in-flight save.
+var minimized = ReplayPresentation.Describe(CapturePhase.TargetMinimized, "Restore the window.", false, false, true, false, false, true, 12);
+Require(minimized.CanSave && !minimized.Healthy && minimized.Heading.Contains("minimized") && minimized.Detail.Contains("Previously buffered"), "A minimized target must retain save access without advertising live recording.");
+foreach (var phase in new[] { CapturePhase.WaitingForTarget, CapturePhase.TargetClosed, CapturePhase.Recovering })
+{
+    var status = ReplayPresentation.Describe(phase, "Source unavailable.", false, false, false, false, false, true, 0);
+    Require(!status.Healthy && !status.CanSave && !status.Detail.Contains("buffer is filling"), "An unavailable target must not be shown as filling or ready.");
+}
+var reconnecting = ReplayPresentation.Describe(CapturePhase.Reconnecting, "", true, true, true, false, false, true, 50);
+Require(!reconnecting.CanSave && !reconnecting.Healthy && reconnecting.Detail.Contains("cannot be confirmed"), "A lost connection must override stale pause/readiness observations.");
+var active = ReplayPresentation.Describe(CapturePhase.Buffering, "", false, true, true, false, false, false, 12.5);
+Require(active.Healthy && active.CanSave && active.Detail.Contains("12 seconds") && active.Detail.Contains("shortcut unavailable"), "An unavailable shortcut must not hide valid button-based saving or exaggerate the buffer length.");
+Require(!ReplayPresentation.Describe(CapturePhase.Buffering, "", false, true, true, true, false, true, 12).Healthy, "Applying settings must not claim live readiness.");
+Require(!ReplayPresentation.Describe(CapturePhase.Buffering, "", false, true, true, false, true, true, 12).CanSave, "A save already in progress must disable a second save action.");
+var notices = new List<string>();
+var notifications = new RecorderNotifications((title, message, kind, duration) => notices.Add(title));
+for (int i = 0; i < 10; i++) notifications.CaptureChanged(CapturePhase.WaitingForTarget, "No matching window.", false, false, settings, true);
+Require(notices.Count == 1, "Polling a missing window must not repeatedly interrupt the user.");
+notifications.CaptureChanged(CapturePhase.Buffering, "", true, false, settings, true);
+notifications.CaptureChanged(CapturePhase.Buffering, "", true, false, settings, true);
+Require(notices.Count == 2, "Readiness must be announced once after the target becomes available.");
+notifications.CaptureChanged(CapturePhase.WaitingForTarget, "No matching window.", false, false, settings, true);
+notifications.PauseChanged(true); notifications.PauseChanged(false);
+notifications.CaptureChanged(CapturePhase.WaitingForTarget, "No matching window.", false, false, settings, true);
+Require(notices.Last() == "Waiting for a window", "Resuming without a target must replace the preparing-buffer notice with the actual waiting state.");
+string windowSettings = Path.Combine(data, "window-settings.json");
+File.WriteAllText(windowSettings, legacy.TrimEnd('}') + ",\"CaptureMode\":\"window\",\"WindowExecutable\":\"\",\"WindowClass\":\"\"}");
+var waiting = Settings.Load(windowSettings);
+Require(waiting.CaptureMode == "window" && waiting.VideoCodec == "hevc_nvenc", "Missing window selection must wait while preserving the profile's other preferences.");
+waiting.Save(windowSettings);
+Require(!File.ReadAllText(windowSettings).Contains("Handle") && !File.ReadAllText(windowSettings).Contains("ProcessId"), "Transient HWND/process identities must not become reboot intent.");
+File.WriteAllText(windowSettings, File.ReadAllText(windowSettings).Replace("\"CaptureMode\":\"window\"", "\"CaptureMode\":\"unsupported\""));
+Require(Settings.Load(windowSettings).CaptureMode == "window", "An invalid mode must fail closed instead of capturing the desktop.");
+File.WriteAllText(windowSettings, "{\"CaptureMode\":\"window\",\"WindowExecutable\":");
+Require(Settings.Load(windowSettings).CaptureMode == "window", "A truncated window profile must not broaden capture to the desktop.");
+Console.WriteLine("Passed: truthful replay status, retained-footage actions, notification suppression, and fail-closed window-intent migration.");

@@ -8,6 +8,7 @@
     <Compile Include="../../src/Settings.cs" Link="Settings.cs" />
     <Compile Include="../../src/RecorderRuntime.cs" Link="RecorderRuntime.cs" />
     <Compile Include="../../src/RecorderMetrics.cs" Link="RecorderMetrics.cs" />
+    <Compile Include="../../src/ReplayStatus.cs" Link="ReplayStatus.cs" />
     <Compile Include="../../src/MediaClock.cs" Link="MediaClock.cs" />
     <Compile Include="../../src/TimestampedAudio.cs" Link="TimestampedAudio.cs" />
     <Compile Include="../../src/ReplaySelection.cs" Link="ReplaySelection.cs" />
