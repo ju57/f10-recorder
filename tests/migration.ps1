@@ -1,4 +1,4 @@
-param([switch]$NoBuild)
+param([switch]$NoBuild, [switch]$FocusOnly)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $sdk = Join-Path $root '.tools\dotnet\dotnet.exe'
@@ -15,9 +15,16 @@ if (-not $NoBuild) {
     if ($LASTEXITCODE -ne 0) { throw 'Migration verification build failed.' }
 }
 $data = Join-Path $root ('artifacts\migration-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-$process = Start-Process -FilePath (Join-Path $output 'F10Recorder.MigrationTests.exe') -ArgumentList ('"' + $data + '"') -WindowStyle Hidden -PassThru -Wait
+$testArguments = @(('"' + $data + '"'))
+if ($FocusOnly) { $testArguments += '--focus-only' }
+$process = Start-Process -FilePath (Join-Path $output 'F10Recorder.MigrationTests.exe') -ArgumentList $testArguments -WindowStyle Hidden -PassThru -Wait
 $report = Get-Content -LiteralPath (Join-Path $data 'verification.json') -Raw | ConvertFrom-Json
 if ($process.ExitCode -ne 0 -or $report.result -ne 'passed') { throw ($report | ConvertTo-Json -Depth 8) }
+if ($FocusOnly) {
+    Write-Host ($report | ConvertTo-Json -Depth 8)
+    Write-Host "Paused focus checks passed without recording or screenshots: $data"
+    return
+}
 $engine = $report.mediaEngine
 $probe = Join-Path (Split-Path -Parent $engine) 'ffprobe.exe'
 if (-not (Test-Path -LiteralPath $probe)) { $probe = (Get-Command ffprobe -ErrorAction Stop).Source }

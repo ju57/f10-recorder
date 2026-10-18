@@ -1,0 +1,72 @@
+F10 Recorder: replay controls and passive notices
+
+Purpose
+Make capture state, recent-footage actions and recording policies clear while
+keeping buffering/export independent of the UI. This Windows composition UI
+does not add graphics hooks or exclusive-fullscreen integration.
+
+Overlay
+- A full-height 440-DIP sidebar at the left edge of the foreground app's monitor.
+  Keep the charcoal/emerald F10 palette and a lightly dimmed backdrop.
+- Show actual worker state: paused, filling/recovering, or ready. Enable Save only
+  when completed footage is ready; screenshots remain available while paused.
+- Expose Save replay, Screenshot, Pause/Resume and Recording settings. Show the
+  configured shortcut and replay limit without implying a full buffer exists.
+- Recording settings opens the existing full editor. Preserve pending edits when
+  opening/closing controls; only Apply changes commits recording settings.
+- Escape, Close and primary-button outside press dismiss. Restore previous-window
+  focus when F10 still owns focus; do not steal focus after a user switches away.
+- Keyboard open/close is immediate. Initial focus is Save when available, otherwise
+  Screenshot. Opening controls never pauses an active buffer.
+
+Notices
+- One passive 360-DIP card, flush right and 105 DIP from monitor top when space
+  allows. Use a 5-DIP emerald rail and original simple status artwork. Longer
+  messages use a taller card; retain full text in accessibility metadata.
+- Keep success/info at four seconds and warnings at six. Saving persists until
+  result. Each replacement gets its own lifetime; stale timers/fade callbacks
+  cannot hide newer notices.
+- Fade opacity for 160ms; replacements do not replay entrance. Screenshot
+  preparation hides synchronously so F10 controls/notices are excluded.
+- Notices do not activate windows or intercept input. Confirm completion from the
+  worker, never from a command acknowledgment alone.
+- On Windows 10 build19041+, request native capture exclusion before showing all
+  F10 surfaces: Settings, controls, backdrop and notices; reapply on opening.
+  Log rejected requests and retain the older screenshot-hide handshake. Earlier
+  Windows must not receive a value that falls back to an opaque black mask.
+- NVIDIA's seven-second ordinary notices and shorter overlap sequences inform the
+  reference. F10 deliberately retains its dwell policy with fresh replacement
+  timeouts. Do not ship vendor fonts, icons or binary resources.
+
+Settings
+- Native resolution/no scaling and Windows default audio are implemented policies,
+  not resolution/device selectors. Do not invent detected dimensions/device names
+  or equate Avalonia screen order with DXGI adapter-output indices.
+- Label configured output FPS separately from measured source-picture cadence.
+- AAC/stereo/48kHz/192kbps describes output conversion. Pending audio OFF shows no
+  audio track and marks the default endpoint unused.
+- Cache estimate uses pending duration/video bitrate plus audio only when enabled.
+  Label it as an estimate, not actual disk usage; update before Apply.
+- Preserve encoder probing, shortcut validation/rollback, persisted pause, worker
+  ownership and current-user control-channel restrictions.
+
+Acceptance
+Migration checks cover pending audio summary/estimate, preserved edits/pause,
+Apply rollback, shortcuts, passive input/focus, notice replacement lifetime,
+screenshots and save continuity. These use a controlled fixture/in-process
+recorder and are distinct from production-worker acceptance.
+Then use a real isolated worker/profile over CS2 for save/screenshot/Apply/pause,
+overlay dismissal/focus and continuous buffering. Preserve installed recorder,
+startup, NVIDIA/game settings and original media. Retain exact run identities,
+results and rejected attempts in ignored artifacts; no performance-parity claim.
+
+Boundaries
+NVIDIA's sidebar was visible in native game captures but was not independently
+targetable through Computer Use. Game-targeted input reactivated the game and
+dismissed it. Source Escape/Back/focus rules are not native runtime acceptance.
+Two sampled NVIDIA recording frames excluded the visible sidebar. Highlights,
+HDR/error variants, persistent HUD runtime details and legacy exclusive fullscreen
+remain unverified. Capture exclusion is checked against real Desktop Duplication
+PNGs and H264 replay video using visible positive controls and underlying-pixel
+assertions. This is a Windows composition feature, not a universal capture or
+exclusive-fullscreen guarantee; screenshot preparation still hides F10 surfaces.

@@ -18,6 +18,7 @@ internal sealed class SettingsPanel : UserControl
     readonly ShortcutEditor saveShortcut = new("Save", false), overlayShortcut = new("Overlay", true), screenshotShortcut = new("Screenshot", true);
     readonly ToggleSwitch recording = new() { Name = "RecordingEnabled", OnContent = "On", OffContent = "Off" };
     readonly TextBlock state = Ui.Label("Paused", 15, Ui.Warning, FontWeight.SemiBold), stateDetail = Ui.Label("", 12, Ui.Muted), estimate = Ui.Label("", 12, Ui.Muted), error = Ui.Label("", 13, Ui.Warning), codecStatus = Ui.Label("Checking your GPU…", 12, Ui.Muted);
+    readonly TextBlock audioFormat = Ui.Label("", 13, Ui.Muted), playbackDevice = Ui.Label("Windows default · automatic", 13, Ui.Muted);
     readonly Button apply;
     readonly ContentControl page = new();
     readonly List<StackPanel> pages = [];
@@ -36,9 +37,11 @@ internal sealed class SettingsPanel : UserControl
         minutes.Value = config.ReplayMinutes; bitrate.Value = config.BitrateMbps; display.Value = config.DisplayIndex; fps.SelectedItem = config.FramesPerSecond;
         audio.IsChecked = config.SystemAudio; startup.IsChecked = WindowsStartup.Enabled; clips.Text = config.OutputDirectory; screenshots.Text = config.ScreenshotDirectory;
         saveShortcut.Load(config.SaveKey, config.SaveModifiers); overlayShortcut.Load(config.OverlayKey, config.OverlayModifiers); screenshotShortcut.Load(config.ScreenshotKey, config.ScreenshotModifiers);
-        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Margin = new Thickness(28, 22) };
+        estimate.Name = "RollingCacheEstimate"; audioFormat.Name = "AudioFormat"; playbackDevice.Name = "PlaybackDevicePolicy";
+        ToolTip.SetTip(estimate, "Estimate from the selected duration and bitrates, including 10 seconds of cache headroom. Actual disk usage varies.");
+        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Margin = new Thickness(28, 24) };
         var heading = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 0, 0, 22) };
-        var title = new StackPanel { Spacing = 5 }; title.Children.Add(Ui.Label("F10 Recorder", 27, null, FontWeight.SemiBold)); title.Children.Add(Ui.Label("Your recent moments, ready to save.", 13, Ui.Muted)); heading.Children.Add(title);
+        var title = new StackPanel { Spacing = 5 }; title.Children.Add(Ui.Label("F10 Recorder", 27, null, FontWeight.SemiBold)); title.Children.Add(Ui.Label("Keep the moment. Save it when it matters.", 13, Ui.Muted)); heading.Children.Add(title);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
         var quickScreenshot = Ui.Button("Screenshot", recorder.TakeScreenshot); quickScreenshot.Name = "QuickScreenshot"; actions.Children.Add(quickScreenshot);
         var quickSave = Ui.Button("Save replay", recorder.SaveReplay, true); quickSave.Name = "QuickSaveReplay"; actions.Children.Add(quickSave); Grid.SetColumn(actions, 1); heading.Children.Add(actions); root.Children.Add(heading);
@@ -46,11 +49,13 @@ internal sealed class SettingsPanel : UserControl
         var statusGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
         var statusText = new StackPanel { Spacing = 5 }; statusText.Children.Add(state); statusText.Children.Add(stateDetail); statusGrid.Children.Add(statusText);
         recording.VerticalAlignment = VerticalAlignment.Center; AutomationProperties.SetName(recording, "Replay recording"); Grid.SetColumn(recording, 1); statusGrid.Children.Add(recording);
-        header.Children.Add(new Border { Background = Ui.Surface, CornerRadius = new CornerRadius(8), Padding = new Thickness(18, 14), Child = statusGrid });
-        var tabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(0, 0, 0, 12) };
+        header.Children.Add(new Border { Background = Ui.Surface, BorderBrush = Ui.Border, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(18, 16), Child = statusGrid });
+        var tabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(0, 0, 0, 8) };
         foreach (string name in new[] { "Capture", "Audio", "Controls", "Storage" })
         {
-            int index = navigation.Count; var button = Ui.Button(name, () => SelectPage(index)); button.Name = name + "Tab"; navigation.Add(button); tabs.Children.Add(button);
+            int index = navigation.Count; var button = Ui.Button(name, () => SelectPage(index)); button.Name = name + "Tab";
+            button.MinHeight = 42; button.Padding = new Thickness(18, 10); button.BorderThickness = new Thickness(1);
+            AutomationProperties.SetName(button, name + " settings"); navigation.Add(button); tabs.Children.Add(button);
         }
         header.Children.Add(tabs); Grid.SetRow(header, 1); root.Children.Add(header);
         pages.Add(CapturePage()); pages.Add(AudioPage()); pages.Add(ControlsPage()); pages.Add(StoragePage());
@@ -65,17 +70,19 @@ internal sealed class SettingsPanel : UserControl
         footer.Children.Add(footerGrid); Grid.SetRow(footer, 3); root.Children.Add(footer); Content = root;
         recording.PropertyChanged += (_, e) => { if (!updating && e.Property == ToggleButton.IsCheckedProperty) recorder.Pause(recording.IsChecked != true); };
         minutes.PropertyChanged += (_, e) => { if (e.Property == NumericUpDown.ValueProperty) Estimate(); }; bitrate.PropertyChanged += (_, e) => { if (e.Property == NumericUpDown.ValueProperty) Estimate(); };
-        SelectPage(0); Estimate(); UpdateState(); AttachedToVisualTree += async (_, _) => { if (!loaded) { loaded = true; await ProbeAsync(); } };
+        audio.PropertyChanged += (_, e) => { if (e.Property == ToggleButton.IsCheckedProperty) UpdateAudioSummary(); };
+        SelectPage(0); UpdateAudioSummary(); UpdateState(); AttachedToVisualTree += async (_, _) => { if (!loaded) { loaded = true; await ProbeAsync(); } };
     }
     static NumericUpDown Number(string name, decimal minimum, decimal maximum) => new() { Name = name, Minimum = minimum, Maximum = maximum, Increment = 1, FormatString = "0", HorizontalAlignment = HorizontalAlignment.Stretch };
     static StackPanel Page(string title, string description)
     {
-        var body = new StackPanel { Spacing = 0, Margin = new Thickness(0, 4, 12, 4) }; body.Children.Add(Ui.Label(title, 20, null, FontWeight.SemiBold));
-        var hint = Ui.Label(description, 13, Ui.Muted); hint.Margin = new Thickness(0, 6, 0, 18); body.Children.Add(hint); return body;
+        var body = new StackPanel { Spacing = 0, Margin = new Thickness(0, 8, 12, 8) }; body.Children.Add(Ui.Label(title, 21, null, FontWeight.SemiBold));
+        var hint = Ui.Label(description, 13, Ui.Muted); hint.Margin = new Thickness(0, 7, 0, 16); body.Children.Add(hint); return body;
     }
     static void Row(StackPanel body, string title, string description, Control control)
     {
         AutomationProperties.SetName(control, title);
+        AutomationProperties.SetHelpText(control, description);
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,280"), ColumnSpacing = 20, Margin = new Thickness(0, 14) };
         var labels = new StackPanel { Spacing = 5, VerticalAlignment = VerticalAlignment.Center }; labels.Children.Add(Ui.Label(title, 14, null, FontWeight.SemiBold)); labels.Children.Add(Ui.Label(description, 12, Ui.Muted)); grid.Children.Add(labels);
         control.VerticalAlignment = VerticalAlignment.Center; control.HorizontalAlignment = HorizontalAlignment.Stretch; Grid.SetColumn(control, 1); grid.Children.Add(control);
@@ -83,26 +90,27 @@ internal sealed class SettingsPanel : UserControl
     }
     StackPanel CapturePage()
     {
-        var body = Page("Capture", "Choose the replay you want to keep. Applying changes rebuilds the buffer.");
+        var body = Page("Capture", "Set the length and quality of your next replays. Applying changes starts a new buffer.");
         Row(body, "Replay length", "Last 1–30 minutes; the cache uses disk storage.", minutes);
         Row(body, "Video codec", "Only encoders that initialize on your GPU are offered.", codec); body.Children.Add(codecStatus);
-        Row(body, "Frame rate", "Frames per second at the display's native resolution.", fps);
+        Row(body, "Output frame rate", "Configured FPS for saved video, not a live capture measurement.", fps);
         Row(body, "Video bitrate", "5–100 Mbps. Higher values need more cache space.", bitrate);
         Row(body, "Capture display", "−1 selects the primary display; 0–31 are adapter output indices.", display);
-        Row(body, "Resolution", "Capture keeps the display's native dimensions.", Ui.Label("Native display resolution", 13, Ui.Muted)); return body;
+        var resolution = Ui.Label("Native · no resizing", 13, Ui.Muted); resolution.Name = "NativeResolutionPolicy";
+        Row(body, "Resolution", "Uses the selected display's native dimensions. Resolution is automatic.", resolution); return body;
     }
     StackPanel AudioPage()
     {
-        var body = Page("Audio", "Record the sound playing through your default output device.");
+        var body = Page("Audio", "Include the sound playing on your PC. Apply changes to update recording.");
         Row(body, "System audio", "Includes continuous silence when nothing is playing.", audio);
-        Row(body, "Playback device", "Follows the default Windows playback output.", Ui.Label("Default output", 13, Ui.Muted));
-        Row(body, "Audio format", "Mixed system audio saved with the video.", Ui.Label("AAC · stereo · 48 kHz · 192 kbps", 13, Ui.Muted)); return body;
+        Row(body, "Playback device", "Automatically follows Windows' default output; choose that device in Windows.", playbackDevice);
+        Row(body, "Saved audio", "Fixed output format when system audio is enabled. Microphone capture is not available.", audioFormat); return body;
     }
     StackPanel ControlsPage()
     {
         var body = Page("Controls", "Global shortcuts remain available while another application has focus.");
         Row(body, "Save replay", "Save the buffered footage as an MP4.", saveShortcut);
-        Row(body, "Open overlay", "Open Settings over desktop or borderless fullscreen apps.", overlayShortcut);
+        Row(body, "Open overlay", "Open replay controls over desktop or borderless fullscreen apps.", overlayShortcut);
         Row(body, "Take screenshot", "Save a PNG of the capture display, even while paused.", screenshotShortcut);
         body.Children.Add(startup); startup.Margin = new Thickness(0, 24, 0, 0); return body;
     }
@@ -132,7 +140,13 @@ internal sealed class SettingsPanel : UserControl
     public void SelectPage(int index)
     {
         SelectedPage = index; page.Content = pages[index];
-        for (int i = 0; i < navigation.Count; i++) { navigation[i].Background = i == index ? Ui.Input : Brushes.Transparent; navigation[i].Foreground = i == index ? Ui.Accent : Ui.Muted; }
+        for (int i = 0; i < navigation.Count; i++)
+        {
+            bool selected = i == index; var button = navigation[i];
+            button.Background = selected ? Ui.Input : Brushes.Transparent; button.Foreground = selected ? Ui.Text : Ui.Muted;
+            button.BorderBrush = selected ? Ui.Accent : Brushes.Transparent; button.FontWeight = selected ? FontWeight.SemiBold : FontWeight.Normal;
+            AutomationProperties.SetHelpText(button, selected ? "Current settings section." : "Open this settings section.");
+        }
     }
     async Task ProbeAsync()
     {
@@ -154,7 +168,19 @@ internal sealed class SettingsPanel : UserControl
         apply.IsEnabled = !probing && codec.SelectedItem != null && !recorder.Applying;
         apply.Content = recorder.Applying ? "Applying…" : "Apply changes"; recording.IsEnabled = !recorder.Applying;
     }
-    void Estimate() { estimate.Text = "Rolling cache ≈ " + (((minutes.Value ?? 5) * 60 + 10) * ((bitrate.Value ?? 20) + 0.192m) / 8).ToString("0") + " MB"; }
+    void UpdateAudioSummary()
+    {
+        bool enabled = audio.IsChecked == true;
+        audioFormat.Text = enabled ? "AAC · stereo · 48 kHz · 192 kbps" : "Off · no audio track";
+        playbackDevice.Text = enabled ? "Windows default · automatic" : "Not used · system audio is off";
+        Estimate();
+    }
+    void Estimate()
+    {
+        decimal audioMbps = audio.IsChecked == true ? 0.192m : 0;
+        decimal megabytes = ((minutes.Value ?? 5) * 60 + 10) * ((bitrate.Value ?? 20) + audioMbps) / 8;
+        estimate.Text = "Estimated cache ≈ " + megabytes.ToString("0") + " MB";
+    }
     internal async Task<bool> ApplyAsync()
     {
         try

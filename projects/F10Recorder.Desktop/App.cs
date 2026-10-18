@@ -76,14 +76,14 @@ public sealed class App : Application
     }
     internal void Update()
     {
-        SettingsWindow.Panel.UpdateState(); statusItem.Header = Recorder.State;
+        SettingsWindow.UpdateState(); statusItem.Header = Recorder.State;
         pauseItem.Header = Recorder.Paused ? "Resume recording" : "Pause recording";
         tray.ToolTipText = "F10 Recorder · " + Recorder.State; tray.Icon = Ui.TrayIcon(Recorder.Ready && Recorder.SaveRegistered);
         WriteStatus();
     }
     void WriteStatus()
     {
-        try { File.WriteAllText(Path.Combine(DataDirectory, "status.json"), new JavaScriptSerializer().Serialize(new { Ui = "Avalonia", UiProcessId = Environment.ProcessId, WorkerProcessId = Recorder.Metrics?.WorkerProcessId ?? 0, CaptureProcessId = Recorder.CaptureProcessId, CaptureMetrics = Recorder.Metrics, ControlTitle = ControlTitle, Paused = Recorder.Paused, CaptureState = Recorder.State, CaptureReady = Recorder.Ready, SettingsVisible = SettingsWindow.IsVisible, SettingsWindow = SettingsWindow.TryGetPlatformHandle()?.Handle.ToInt64() ?? 0, OverlayVisible = SettingsWindow.OverlayVisible, OverlayWindow = SettingsWindow.OverlayVisible ? SettingsWindow.TryGetPlatformHandle()?.Handle.ToInt64() ?? 0 : 0, OverlayShortcutRegistered = Recorder.OverlayRegistered, OverlayShortcut = Recorder.Config.OverlayHotkeyText, NotificationVisible = Notice.IsVisible, NotificationTitle = Notice.Heading, ScreenshotShortcutRegistered = Recorder.ScreenshotRegistered, ScreenshotShortcut = Recorder.Config.ScreenshotHotkeyText, ScreenshotInProgress = Recorder.ScreenshotInProgress, LastScreenshot = Recorder.LastScreenshot, CurrentApplication = Recorder.ApplicationName, ApplicationFolder = ApplicationFolders.FolderName(Recorder.ApplicationName) })); } catch (IOException) { }
+        try { File.WriteAllText(Path.Combine(DataDirectory, "status.json"), new JavaScriptSerializer().Serialize(new { Ui = "Avalonia", UiProcessId = Environment.ProcessId, WorkerProcessId = Recorder.Metrics?.WorkerProcessId ?? 0, CaptureProcessId = Recorder.CaptureProcessId, CaptureMetrics = Recorder.Metrics, ControlTitle = ControlTitle, Paused = Recorder.Paused, CaptureState = Recorder.State, CaptureReady = Recorder.Ready, SettingsVisible = SettingsWindow.IsVisible, SettingsWindow = SettingsWindow.TryGetPlatformHandle()?.Handle.ToInt64() ?? 0, OverlayVisible = SettingsWindow.OverlayVisible, OverlayWindow = SettingsWindow.OverlaySurface?.TryGetPlatformHandle()?.Handle.ToInt64() ?? 0, OverlayShortcutRegistered = Recorder.OverlayRegistered, OverlayShortcut = Recorder.Config.OverlayHotkeyText, NotificationVisible = Notice.IsVisible, NotificationTitle = Notice.Heading, ScreenshotShortcutRegistered = Recorder.ScreenshotRegistered, ScreenshotShortcut = Recorder.Config.ScreenshotHotkeyText, ScreenshotInProgress = Recorder.ScreenshotInProgress, LastScreenshot = Recorder.LastScreenshot, CurrentApplication = Recorder.ApplicationName, ApplicationFolder = ApplicationFolders.FolderName(Recorder.ApplicationName) })); } catch (IOException) { }
     }
     void OpenFolder(string path) { try { WindowsRecorder.OpenFolder(path); } catch (Exception ex) { PresentNotice("Folder could not open", ex.Message, NotificationKind.Warning, 6000); } }
     internal async void Quit()
