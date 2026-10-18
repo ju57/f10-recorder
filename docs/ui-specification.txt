@@ -70,3 +70,15 @@ remain unverified. Capture exclusion is checked against real Desktop Duplication
 PNGs and H264 replay video using visible positive controls and underlying-pixel
 assertions. This is a Windows composition feature, not a universal capture or
 exclusive-fullscreen guarantee; screenshot preparation still hides F10 surfaces.
+
+Capture coexistence gate
+A controlled standalone window comparison found that visible Windows capture
+exclusion triggered NVIDIA protected-content notifications and stopped Instant
+Replay, without F10 recording or a Computer Use helper. Ordinary-window controls
+kept it enabled. Treat this as a local native compatibility finding, not a
+universal driver claim. Exclusion pixel checks alone are insufficient acceptance;
+qualify other active capture clients and restore their authorized state.
+Do not promote the integrated candidate until a coexistence policy or alternative
+capture design is agreed. Window-targeted capture changes monitor-wide replay
+semantics and needs separate worker/clock/recovery qualification. It does not by
+itself establish interactive exclusive-fullscreen support.
