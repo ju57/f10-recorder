@@ -10,7 +10,8 @@ Real system audio uses QPC positions on one session epoch. A streaming Matroska
 PCM pipe preserves those positions at microsecond resolution while retaining the
 100 ms audio delivery cushion. Video uses a one-time UTC bridge into the same
 epoch, then retains ddagrab's timestamp intervals. Separate bounded input queues
-allow acquisition to continue while audio delivery waits. The existing `fps`
+still share FFmpeg's scheduler; delayed audio can throttle video acquisition.
+The existing `fps`
 filter supplies CFR pictures; a second output CFR conversion must not fabricate
 frames before the first acquisition.
 
