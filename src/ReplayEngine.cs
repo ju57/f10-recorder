@@ -98,7 +98,7 @@ namespace F10Recorder
                     args.AddRange(new[] { "-thread_queue_size", "32", "-f", "lavfi", "-i", source + "," + mediaClock.VideoTimestampFilter + ",fps=fps=" + settings.FramesPerSecond + ":round=near" });
                 }
                 args.AddRange(new[] { "-map", synthetic ? "0:v:0" : mediaClock == null ? "[video]" : "1:v:0" });
-                if (synthetic || settings.SystemAudio) args.AddRange(new[] { "-map", synthetic ? "1:a:0" : "0:a:0", "-af", synthetic ? "aresample=async=1:first_pts=0" : "aresample=async=1", "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "192k" });
+                if (synthetic || settings.SystemAudio) args.AddRange(new[] { "-map", synthetic ? "1:a:0" : "0:a:0", "-af", synthetic ? "aresample=async=1:first_pts=0" : AudioPacketClock.ResamplerFilter, "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "192k" });
                 else args.Add("-an");
                 if (!synthetic && mediaClock == null) args.AddRange(new[] { "-r", settings.FramesPerSecond.ToString(), "-fps_mode", "cfr" });
                 else if (mediaClock != null) args.AddRange(new[] { "-fps_mode", "passthrough" });

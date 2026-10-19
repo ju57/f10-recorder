@@ -11,6 +11,7 @@ namespace F10Recorder
         readonly Stream output;
         readonly int sampleRate, blockAlign;
         long nextSample = -1;
+        long lastPacketStart = -1;
         internal TimestampedAudio(Stream output, int rate, int channels, string format)
         {
             this.output = output; sampleRate = rate;
@@ -27,13 +28,22 @@ namespace F10Recorder
         }
         internal void Write(byte[] data, int offset, int count, long samplePosition)
         {
-            if (samplePosition < 0 || count <= 0 || count % blockAlign != 0 || offset < 0 || offset > data.Length - count) throw new ArgumentException("Invalid PCM block.");
             if (nextSample >= 0 && samplePosition != nextSample) throw new IOException("PCM timeline must be contiguous; fill gaps with silence before transport.");
+            WriteAcquired(data, offset, count, samplePosition);
+        }
+        // Complete native packets may have slightly different PTS spacing from
+        // their nominal duration. Preserve their bytes; let the resampler follow
+        // acquisition time rather than manufacturing per-packet silence here.
+        internal void WriteAcquired(byte[] data, int offset, int count, long samplePosition)
+        {
+            if (data == null || samplePosition < 0 || count <= 0 || count % blockAlign != 0 || offset < 0 || offset > data.Length - count) throw new ArgumentException("Invalid PCM block.");
+            if (lastPacketStart >= 0 && samplePosition <= lastPacketStart) throw new IOException("PCM acquisition timestamps must advance.");
             long microseconds = checked(samplePosition * 1000000) / sampleRate;
             byte[] time = UInt(0xE7, microseconds), block = Join(Id(0xA3), Size(count + 4), new byte[] { 0x81, 0, 0, 0x80 });
             byte[] header = Join(Id(0x1F43B675), Size(time.Length + block.Length + count), time, block);
             output.Write(header, 0, header.Length); output.Write(data, offset, count);
             nextSample = samplePosition + count / blockAlign;
+            lastPacketStart = samplePosition;
         }
         static byte[] Id(uint value) { int length = value > 0xFFFFFF ? 4 : value > 0xFFFF ? 3 : value > 0xFF ? 2 : 1; var b = new byte[length]; for (int i = length - 1; i >= 0; i--) { b[i] = (byte)value; value >>= 8; } return b; }
         static byte[] Size(long value) { int length = 1; while (value >= (1L << (7 * length)) - 1) length++; var b = new byte[length]; long encoded = value | (1L << (7 * length)); for (int i = length - 1; i >= 0; i--) { b[i] = (byte)encoded; encoded >>= 8; } return b; }

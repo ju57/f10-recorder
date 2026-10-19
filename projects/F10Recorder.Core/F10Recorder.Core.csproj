@@ -10,6 +10,8 @@
     <Compile Include="../../src/RecorderMetrics.cs" Link="RecorderMetrics.cs" />
     <Compile Include="../../src/ReplayStatus.cs" Link="ReplayStatus.cs" />
     <Compile Include="../../src/MediaClock.cs" Link="MediaClock.cs" />
+    <Compile Include="../../src/AudioPacketClock.cs" Link="AudioPacketClock.cs" />
+    <Compile Include="../../src/AudioPacketBuffer.cs" Link="AudioPacketBuffer.cs" />
     <Compile Include="../../src/ReplaySaveClock.cs" Link="ReplaySaveClock.cs" />
     <Compile Include="../../src/TimestampedAudio.cs" Link="TimestampedAudio.cs" />
     <Compile Include="../../src/ReplaySelection.cs" Link="ReplaySelection.cs" />

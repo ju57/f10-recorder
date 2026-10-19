@@ -50,6 +50,7 @@ foreach (string format in new[] { "u8", "s16le", "s24le", "s32le", "f32le" })
     Require(File.ReadAllBytes(Path.Combine(data, format + "-normal.mka")).SequenceEqual(File.ReadAllBytes(Path.Combine(data, format + "-delayed.mka"))), "Delivery delay must not change audio timestamps or samples.");
 }
 Console.WriteLine("Passed: replay boundaries, incomplete manifests, path containment, configuration migration, invalid-file preservation, and common audio/video epoch mapping.");
+AudioPacketChecks.Run(data);
 // Save cutoffs use the existing media epoch, not copyts-relative display progress.
 var saveEpoch = new MediaClock(7_000_000_000, 10_000_000, 1_800_000_000_000_000, 0);
 var saveClock = new ReplaySaveClock(saveEpoch);

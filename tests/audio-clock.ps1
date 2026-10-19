@@ -21,6 +21,31 @@ foreach($format in 'u8','s16le','s24le','s32le','f32le'){
     $json | Set-Content (Join-Path $data ($format+'-probe.json'))
 }
 $results=@()
+# Decode actual packet-delivery fixtures without timestamp compensation: native
+# PCM must survive jitter, silence flags and timestamp uncertainty bit-for-bit.
+foreach($format in 'u8','s16le','s24le','s32le','f32le'){
+    $input=Join-Path $data ('packet-'+$format+'.mka')
+    $output=Join-Path $data ('packet-'+$format+'-decoded.pcm')
+    & $Ffmpeg -hide_banner -v error -xerror -i $input -map '0:a:0' -c:a ('pcm_'+$format) -f $format $output
+    if($LASTEXITCODE -ne 0 -or (Get-FileHash $output).Hash -ne (Get-FileHash (Join-Path $data ('packet-'+$format+'-expected.pcm'))).Hash){throw "Native packet payload was padded/trimmed/changed: $format"}
+}
+foreach($case in 'idle','gap','negative'){
+    $format=if($case -eq 'idle'){'u8'}else{'s16le'}
+    $input=Join-Path $data ('packet-'+$case+'.mka')
+    $output=Join-Path $data ('packet-'+$case+'-decoded.pcm')
+    & $Ffmpeg -hide_banner -v error -xerror -i $input -map '0:a:0' -c:a ('pcm_'+$format) -f $format $output
+    if($LASTEXITCODE -ne 0 -or (Get-FileHash $output).Hash -ne (Get-FileHash (Join-Path $data ('packet-'+$case+'-expected.pcm'))).Hash){throw "Packet boundary policy failed: $case"}
+}
+$resampler=(Get-Content (Join-Path $data 'audio-resampler-filter.txt') -Raw).Trim()
+foreach($delta in -53,-43,43,53,4752,4848){
+    $input=Join-Path $data ('resampler-step'+$delta+'.mka')
+    $output=Join-Path $data ('resampler-step'+$delta+'.pcm')
+    & $Ffmpeg -hide_banner -v error -xerror -copyts -i $input -af $resampler -ar 48000 -c:a pcm_f32le -f f32le $output
+    if($LASTEXITCODE -ne 0){throw 'Audio compensation threshold check failed to decode.'}
+    $extra=(Get-Item -LiteralPath $output).Length/8-960000
+    $ok=if([Math]::Abs($delta)-eq43){$extra-eq0}elseif($delta-eq-53){$extra-gt-100-and$extra-lt0}elseif($delta-eq53){$extra-gt0-and$extra-lt100}elseif($delta-eq4752){$extra-gt0-and$extra-lt1100}else{$extra-gt4600-and$extra-lt5000}
+    if(-not$ok){throw "Audio compensation changed at threshold $delta samples: $extra output frames"}
+}
 foreach($delayUs in 300000,400000){
     # A deterministic acquisition time on the first frame, followed by an RTC
     # step. Actual FFmpeg evaluation must preserve the source intervals.

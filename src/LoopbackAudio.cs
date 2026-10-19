@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -155,15 +154,10 @@ namespace F10Recorder
                 Log.Write("Audio clock: session QPC=" + mediaClock.QpcEpoch + "; client start QPC=" + ticks + "; sample offset=" + audioStartSample + "; delivery cushion=100ms");
                 Check(client.Start());
                 started = true;
-                Queue<Packet> packets = new Queue<Packet>();
-                byte[] silence = new byte[Math.Max(blockAlign, (SampleRate / 100) * blockAlign)];
-                FillSilence(silence);
-                var transport = new TimestampedAudio(destination, SampleRate, Channels, FfmpegFormat);
-                long written = Math.Max(0, audioStartSample);
+                var buffer = new AudioPacketBuffer(destination, SampleRate, Channels, FfmpegFormat, audioStartSample);
                 long nextDeviceCheck = SampleRate;
                 // Hold output 100 ms behind capture so packet jitter does not erase real sound.
                 long cushion = SampleRate / 10;
-                bool firstBlock = true;
                 while (!stopping)
                 {
                     uint frames;
@@ -180,26 +174,15 @@ namespace F10Recorder
                                 throw new IOException("Unexpectedly large audio packet.");
                             int bytes = checked((int)frames * blockAlign);
                             byte[] copy = new byte[bytes];
-                            if ((flags & Silent) != 0) FillSilence(copy);
                             if ((flags & Silent) == 0 && bytes > 0)
                             {
                                 if (data == IntPtr.Zero) throw new IOException("Audio packet has no sample data.");
                                 Marshal.Copy(data, copy, 0, bytes);
                             }
-                            double packetClock;
-                            if ((flags & TimestampError) == 0 && qpc != 0)
-                                packetClock = qpc;
-                            else
-                            {
-                                QueryPerformanceCounter(out ticks);
-                                packetClock = ticks * (10000000.0 / frequency) - frames * (10000000.0 / SampleRate);
-                            }
-                            long start = mediaClock.SamplesAtReferenceTime(packetClock, SampleRate);
-                            // A negative start can occur for the first engine packet.
-                            if (start + frames > written)
-                                packets.Enqueue(new Packet { Start = start, Frames = (int)frames, Data = copy });
-                            if (packets.Count > 1000)
-                                throw new IOException("Audio output cannot keep up with capture.");
+                            bool timestampValid = (flags & TimestampError) == 0 && qpc != 0;
+                            if (frames > 0) buffer.Add(copy, devicePosition,
+                                timestampValid ? mediaClock.SamplesAtReferenceTime(qpc, SampleRate) : 0,
+                                flags, timestampValid);
                         }
                         finally { Check(capture.ReleaseBuffer(frames)); }
                         Check(capture.GetNextPacketSize(out frames));
@@ -208,32 +191,7 @@ namespace F10Recorder
                     QueryPerformanceCounter(out ticks);
                     long elapsed = mediaClock.SamplesAtQpc(ticks, SampleRate);
                     long target = Math.Max(0, elapsed - cushion);
-                    // Do not synthesize a huge burst after suspension or a blocked destination.
-                    // The client may start after the session epoch. Its initial
-                    // offset is not a blocked-output discontinuity.
-                    if (target - Math.Max(written, audioStartSample) > SampleRate * 2L)
-                        throw new IOException("Audio capture fell behind the system clock; capture must restart.");
-                    while (written < target && !stopping)
-                    {
-                        if (firstBlock) { firstBlock = false; Log.Write("Audio first block: session sample=" + written + "; timestamp us=" + (written * 1000000L / SampleRate)); }
-                        while (packets.Count > 0 && packets.Peek().Start + packets.Peek().Frames <= written)
-                            packets.Dequeue();
-                        Packet packet = packets.Count > 0 ? packets.Peek() : null;
-                        if (packet == null || packet.Start > written)
-                        {
-                            long end = packet == null ? target : Math.Min(target, packet.Start);
-                            int count = (int)Math.Min(end - written, silence.Length / blockAlign);
-                            transport.Write(silence, 0, count * blockAlign, written);
-                            written += count;
-                        }
-                        else
-                        {
-                            int offset = (int)(written - packet.Start);
-                            int count = (int)Math.Min(target - written, packet.Frames - offset);
-                            transport.Write(packet.Data, offset * blockAlign, count * blockAlign, written);
-                            written += count;
-                        }
-                    }
+                    buffer.Advance(target);
                     if (elapsed >= nextDeviceCheck)
                     {
                         if (DefaultEndpointChanged())
@@ -255,15 +213,7 @@ namespace F10Recorder
             }
         }
 
-        private sealed class Packet { public long Start; public int Frames; public byte[] Data; }
         private sealed class MixFormat { public int Rate, Channels, BlockAlign; public string Format; }
-
-        private void FillSilence(byte[] samples)
-        {
-            // Unsigned 8-bit PCM uses 128 for zero amplitude; every other supported format uses zero.
-            if (FfmpegFormat == "u8")
-                for (int i = 0; i < samples.Length; i++) samples[i] = 128;
-        }
 
         private static MixFormat ReadFormat(IntPtr pointer)
         {

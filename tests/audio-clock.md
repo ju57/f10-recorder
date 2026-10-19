@@ -6,6 +6,45 @@ FFmpeg timestamp expression. A delayed PCM write must preserve acquisition PTS.
 The expression test checks a 100 ms acquisition-origin change and a later RTC
 change without changing source frame intervals.
 
+Native device positions order complete PCM packets. Continuous packets retain
+their bytes even when individual QPC observations jitter; there is no padding or
+trimming at those boundaries. The first trustworthy observation anchors this
+stream to the existing session epoch. Subsequent observations update phase at
+roughly one-second intervals, with a 0.1 smoothing factor and at most one
+millisecond of correction per update. The declared modeled envelope is +/-500
+ppm with +/-0.6 ms alternating timestamp jitter: thirty-minute core checks bound
+settled timing error to 8 ms. This is a model, not live hardware acceptance.
+
+Acquisition packet PTS may differ slightly from nominal PCM duration. The real
+FFmpeg audio path uses `aresample=async=100:min_comp=0.001:min_hard_comp=0.1:comp_duration=1:flags=res`
+to reconcile gradual drift without inserting zeros per packet. Soft compensation
+can stretch/squeeze up to 100 samples/second; hard compensation remains possible
+at an actual 100 ms discontinuity. Bit-exact decoding before that filter and
+signal/marker checks after the actual filter/AAC encode establish different facts.
+The synthetic source retains its existing filter.
+Resampling initializes even when input/output rates match. A lazy initialization
+at the first positive correction can reanchor PTS instead of continuing gradual
+compensation; threshold fixtures cover both signs around 1 ms and positive steps
+below/above the 100 ms hard threshold using the actual production filter constant.
+
+Declared silence and actual inactivity have format-correct silence heartbeats.
+Counter gaps/discontinuities establish a marked, trustworthy acquisition boundary.
+Overlapping reset ranges, unmarked backwards counters, unexplained clock jumps
+over 100 ms, initial timestamp errors or more than five seconds of timestamp
+uncertainty fail capture for worker recovery. For a short timestamp-error run,
+counted frames predict continuity and the next trustworthy counter reconciles it;
+ignoring the reported counter during that run is a conservative policy. Negative
+initial frames are explicitly clipped at the session origin. Late packets cannot
+overwrite emitted idle audio. These policies do not silently discard a reset's
+payload or reset the video/save epoch.
+
+`tests/audio-clock.ps1` also decodes the actual portable packet-delivery fixtures
+in all five supported formats, requiring bit-exact native payload after jitter,
+silent flags and timestamp-error recovery. Separate fixtures verify true gaps,
+idle-to-audio, pre-epoch clipping and overlapping-reset rejection. Live validation
+still needs ordinary named-pipe/FFmpeg backpressure, coded A/V markers, repeated
+five-minute exports and current CS2 listening before promotion.
+
 Real system audio uses QPC positions on one session epoch. A streaming Matroska
 PCM pipe preserves those positions at microsecond resolution while retaining the
 100 ms audio delivery cushion. Video uses a one-time UTC bridge into the same
