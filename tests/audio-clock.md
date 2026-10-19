@@ -11,7 +11,7 @@ their bytes even when individual QPC observations jitter; there is no padding or
 trimming at those boundaries. The first trustworthy observation anchors this
 stream to the existing session epoch. Subsequent observations update phase at
 roughly one-second intervals, with a 0.1 smoothing factor and at most one
-millisecond of correction per update. The declared modeled envelope is +/-500
+millisecond of correction per update. At 48 kHz the declared modeled envelope is +/-500
 ppm with +/-0.6 ms alternating timestamp jitter: thirty-minute core checks bound
 settled timing error to 8 ms. This is a model, not live hardware acceptance.
 
@@ -30,6 +30,8 @@ below/above the 100 ms hard threshold using the actual production filter constan
 Declared silence and actual inactivity have format-correct silence heartbeats.
 After emitted inactivity, resumed packets reanchor to trustworthy QPC even on
 endpoints whose device frame counter pauses and resumes without a counter gap.
+Padding up to an already queued resume does not arm another idle transition;
+subsequent queued native packets retain their continuous clock despite QPC jitter.
 Counter gaps/discontinuities establish a marked, trustworthy acquisition boundary.
 Overlapping reset ranges, unmarked backwards counters, unexplained clock jumps
 over 100 ms, initial timestamp errors or more than five seconds of timestamp

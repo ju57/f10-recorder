@@ -110,11 +110,19 @@ internal static class AudioPacketChecks
         {
             var buffer = new AudioPacketBuffer(pausedCounter, rate, 1, "s16le", 0);
             byte[] payload = Enumerable.Repeat((byte)1, 960).ToArray();
+            var resumed = Enumerable.Range(2, 4).Select(v => Enumerable.Repeat((byte)v, 960).ToArray()).ToArray();
             buffer.Add(payload, 1000, 0, 1, true); buffer.Advance(0);
             buffer.Advance(24000);
-            buffer.Add(payload, 1480, 28800, 0, true); buffer.Advance(28800);
+            buffer.Add(resumed[0], 1480, 28800, 0, true);
+            buffer.Advance(24500); // Resume queued, but not delivery-due yet.
+            buffer.Add(resumed[1], 1960, 29280 - 27, 0, true);
+            buffer.Advance(25000);
+            buffer.Add(resumed[2], 2440, 29760 + 29, 0, true);
+            buffer.Advance(26000);
+            buffer.Add(resumed[3], 2920, 30240 - 27, 0, true);
+            buffer.Advance(30240);
             File.WriteAllBytes(Path.Combine(directory, "packet-paused-counter.mka"), pausedCounter.ToArray());
-            File.WriteAllBytes(Path.Combine(directory, "packet-paused-counter-expected.pcm"), payload.Concat(new byte[(28800 - frames) * 2]).Concat(payload).ToArray());
+            File.WriteAllBytes(Path.Combine(directory, "packet-paused-counter-expected.pcm"), payload.Concat(new byte[(28800 - frames) * 2]).Concat(resumed.SelectMany(p => p)).ToArray());
         }
         using (var negative = new MemoryStream())
         {

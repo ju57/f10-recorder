@@ -38,7 +38,7 @@ namespace F10Recorder
             // Some loopback endpoints pause their device frame counter while
             // idle. Once idle PCM has been emitted, a trustworthy QPC must
             // reanchor resumed audio even if the counter resumes contiguously.
-            var time = clock.Map(devicePosition, data.Length / align, qpcSample, timestampValid, (flags & 1) != 0 || emittedIdle);
+            var time = clock.Map(devicePosition, data.Length / align, qpcSample, timestampValid, (flags & 1) != 0 || (emittedIdle && packets.Count == 0));
             emittedIdle = false;
             if ((flags & 2) != 0) FillSilence(data);
             packets.Enqueue(new Packet { Start = time.Start, Data = data, Boundary = time.Boundary });
@@ -65,7 +65,9 @@ namespace F10Recorder
             {
                 WriteSilence(silenceTarget);
                 idleEnd = written;
-                emittedIdle = true;
+                // Padding before an already queued resume does not establish
+                // another idle transition. Its acquisition anchor is known.
+                emittedIdle = packets.Count == 0;
             }
         }
 
