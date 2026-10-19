@@ -26,6 +26,7 @@ namespace F10Recorder
         LoopbackAudio audio;
         NamedPipeServerStream pipe;
         double progress, progressAt;
+        ReplaySaveClock saveClock;
         double lastSegmentEnd, lastSegmentAt;
         long encodedFrames, reportedDrops, reportedDuplicates, cacheBytes;
         double encodingSpeed, metricsAt, cpuSeconds, cpuPercent;
@@ -36,6 +37,18 @@ namespace F10Recorder
         internal int ProcessId { get { return process == null || stopped || process.HasExited ? 0 : process.Id; } }
         public bool HasExited { get { return process == null || process.HasExited; } }
         public double Position { get { lock (gate) return progress > 0 ? progress + Math.Min(0.5, clock.Elapsed.TotalSeconds - progressAt) : 0; } }
+        internal double SaveCutoffAt(long triggerQpc)
+        {
+            lock (gate)
+            {
+                double cutoff = saveClock == null ? Position : saveClock.PositionAt(triggerQpc);
+                Log.Write("Replay save trigger: QPC=" + triggerQpc + "; session=" + directory + "; cutoff=" + cutoff.ToString("R", CultureInfo.InvariantCulture)
+                    + "; timeline=" + (saveClock == null ? "reported-progress" : "media-clock")
+                    + "; epoch=" + (saveClock == null ? 0 : saveClock.EpochQpc) + "; frequency=" + (saveClock == null ? 0 : saveClock.Frequency)
+                    + "; reported progress=" + progress.ToString("R", CultureInfo.InvariantCulture));
+                return cutoff;
+            }
+        }
         public double BufferedSeconds { get { lock (gate) { var list = ReadSegments(); return list.Count == 0 ? 0 : Math.Min(settings.ReplayMinutes * 60, list.Last().End - list.First().Start); } } }
         public bool Healthy
         {
@@ -59,6 +72,7 @@ namespace F10Recorder
                 if (settings.CaptureMode == "window" && !synthetic && (target == null || !target.Available)) throw new InvalidOperationException("A validated window target is required; monitor fallback is disabled.");
                 if (!synthetic && settings.SystemAudio) audio = new LoopbackAudio();
                 MediaClock mediaClock = audio == null ? null : MediaClock.Capture();
+                if (mediaClock != null) saveClock = new ReplaySaveClock(mediaClock);
                 if (mediaClock != null) Log.Write("Media clock: QPC=" + mediaClock.QpcEpoch + "; frequency=" + mediaClock.QpcFrequency + "; UTC microseconds=" + mediaClock.UnixMicroseconds + "; bridge bracket ticks=" + mediaClock.BridgeUncertaintyTicks);
                 var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-stats_period", "0.25", "-progress", "pipe:1" };
                 string source = settings.CaptureMode == "window" && !synthetic ? WindowVideoSource(target, settings.FramesPerSecond)
@@ -156,6 +170,8 @@ namespace F10Recorder
         internal void StopCapture()
         {
             if (stopped) return;
+            // Freeze the source session at stop request, before process draining.
+            lock (gate) if (saveClock != null) saveClock.StopAt(Stopwatch.GetTimestamp());
             if (process != null)
             {
                 try { if (!process.HasExited) { process.StandardInput.WriteLine("q"); process.StandardInput.Flush(); if (!process.WaitForExit(1500)) { process.Kill(); process.WaitForExit(5000); } } }
@@ -483,11 +499,12 @@ namespace F10Recorder
         }
         public void Save(string applicationName = null)
         {
+            long triggerQpc = Stopwatch.GetTimestamp();
             if (closing) { NotifySave("Recorder is stopping.", false); return; }
             if (paused) { NotifySave("Replay recording is paused. Resume recording before saving.", false); return; }
             if (Interlocked.CompareExchange(ref saving, 1, 0) != 0) { NotifySave("A replay is already being saved.", false); return; }
             CaptureSession current; double end;
-            lock (gate) { current = session; end = current == null ? 0 : current.Position; }
+            lock (gate) { current = session; end = current == null ? 0 : current.SaveCutoffAt(triggerQpc); }
             if (current == null || end <= 0) { Interlocked.Exchange(ref saving, 0); NotifySave("The replay buffer is warming up or recovering.", false); return; }
             var started = SaveStarted; if (started != null) started();
             Task.Run(delegate

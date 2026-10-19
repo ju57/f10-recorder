@@ -35,3 +35,19 @@ References: [FFmpeg9.0.2 ddagrab source](https://github.com/FFmpeg/FFmpeg/blob/n
 [Matroska PCM mappings](https://www.matroska.org/technical/codec_specs.html), and
 [Matroska element specification](https://www.matroska.org/technical/elements.html).
 
+
+Save cutoffs on the common-clock system-audio path use the capture session's
+existing QPC media epoch, sampled once when Save is handled before async work.
+FFmpeg's `-copyts` progress reports can subtract a first-report origin; they
+remain liveness/metrics only and must not be compared directly with manifest
+times. Source stop freezes the first stop request; retained exports still clamp
+to the same session's last completed segment. A trigger older than a replacement
+epoch cannot save that replacement's footage. Synthetic/audio-off paths retain
+their existing progress-based behavior.
+
+Portable checks cover nonzero origins, report-origin differences, fractional
+selection/export bounds, UTC independence, concurrent repeated stop, stale
+generation and the five-minute/keyframe allowance. Live endpoint checks must
+retain actual selected TS/snapshot inputs and exact trigger/epoch/cutoff receipts;
+source submission age remains a bounded proxy, not acquisition/scanout or a
+physical hotkey latency qualification. No constant offset should be fitted.

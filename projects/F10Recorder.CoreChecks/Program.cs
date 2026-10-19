@@ -50,6 +50,35 @@ foreach (string format in new[] { "u8", "s16le", "s24le", "s32le", "f32le" })
     Require(File.ReadAllBytes(Path.Combine(data, format + "-normal.mka")).SequenceEqual(File.ReadAllBytes(Path.Combine(data, format + "-delayed.mka"))), "Delivery delay must not change audio timestamps or samples.");
 }
 Console.WriteLine("Passed: replay boundaries, incomplete manifests, path containment, configuration migration, invalid-file preservation, and common audio/video epoch mapping.");
+// Save cutoffs use the existing media epoch, not copyts-relative display progress.
+var saveEpoch = new MediaClock(7_000_000_000, 10_000_000, 1_800_000_000_000_000, 0);
+var saveClock = new ReplaySaveClock(saveEpoch);
+long triggerQpc = saveEpoch.QpcEpoch + 328_500_000;
+double cutoff = saveClock.PositionAt(triggerQpc);
+var mediaSegments = Enumerable.Range(0, 34).Select(i => new Segment { Path = i + ".ts", Start = 2.05 + i, End = 3.05 + i }).ToList();
+var atTrigger = ReplaySelection.Select(mediaSegments, cutoff, 300);
+Require(Math.Abs(cutoff - 32.85) < 1e-9 && atTrigger.Last().Start == 32.05, "A nonzero media epoch must select through the trigger's fractional media position.");
+foreach (double displayOrigin in new[] { .3, 1.335, 2.6 })
+{
+    var fromDisplayProgress = ReplaySelection.Select(mediaSegments, cutoff - displayOrigin, 300);
+    Require(cutoff - displayOrigin - fromDisplayProgress.First().Start < cutoff - atTrigger.First().Start, "A shifted display origin would trim an earlier endpoint even when it selects the same last segment.");
+    Require(saveClock.PositionAt(triggerQpc) == cutoff, "Display-report startup offsets must not alter the frozen trigger cutoff.");
+}
+var utcStep = new ReplaySaveClock(new MediaClock(saveEpoch.QpcEpoch, saveEpoch.QpcFrequency, saveEpoch.UnixMicroseconds + 999_000_000, 0));
+Require(utcStep.PositionAt(triggerQpc) == cutoff, "A later UTC clock step must not move a monotonic save trigger.");
+var fullSegments = Enumerable.Range(0, 352).Select(i => new Segment { Path = i + ".ts", Start = i, End = i + 1 }).ToList();
+double fullEnd = saveClock.PositionAt(saveEpoch.QpcEpoch + 3_503_000_000);
+var fullSelection = ReplaySelection.Select(fullSegments, fullEnd, 300);
+Require(fullSelection.First().Start == 51 && fullSelection.Last().Start == 350 && fullEnd - fullSelection.First().Start > 299 && fullEnd - fullSelection.First().Start <= 300, "A five-minute cutoff must preserve the one-keyframe start policy and the requested media endpoint.");
+saveClock.StopAt(triggerQpc);
+Parallel.For(1, 20, i => saveClock.StopAt(triggerQpc + i * 10_000_000));
+Require(saveClock.PositionAt(triggerQpc + 9_000_000_000) == cutoff, "Retained stopped footage must freeze at the first stop request.");
+Require(Math.Abs(saveClock.PositionAt(triggerQpc - 5_000_000) - 32.35) < 1e-9, "A pre-stop trigger must not move forward to stop time.");
+var replacement = new ReplaySaveClock(new MediaClock(triggerQpc + 10_000_000, saveEpoch.QpcFrequency, saveEpoch.UnixMicroseconds, 0));
+Require(replacement.PositionAt(triggerQpc) == 0 && replacement.PositionAt(triggerQpc + 20_000_000) == 1, "A stale trigger must not select a replacement session; its new epoch must start independently.");
+Require(ReplaySelection.Select(mediaSegments, new ReplaySaveClock(saveEpoch).PositionAt(saveEpoch.QpcEpoch + 500_000), 300).Count == 0, "A trigger before the first eligible segment must remain warming up.");
+File.WriteAllText(Path.Combine(data, "save-timeline.json"), JsonSerializer.Serialize(new { result = "passed", cutoff, fullEnd, first = fullSelection.First().Start, last = fullSelection.Last().Start, stopped = saveClock.PositionAt(triggerQpc + 9_000_000_000), staleTrigger = replacement.PositionAt(triggerQpc) }));
+
 // Readiness is independent of enabled intent, saved footage and an in-flight save.
 var minimized = ReplayPresentation.Describe(CapturePhase.TargetMinimized, "Restore the window.", false, false, true, false, false, true, 12);
 Require(minimized.CanSave && !minimized.Healthy && minimized.Heading.Contains("minimized") && minimized.Detail.Contains("Previously buffered"), "A minimized target must retain save access without advertising live recording.");
