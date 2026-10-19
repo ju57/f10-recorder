@@ -28,6 +28,8 @@ compensation; threshold fixtures cover both signs around 1 ms and positive steps
 below/above the 100 ms hard threshold using the actual production filter constant.
 
 Declared silence and actual inactivity have format-correct silence heartbeats.
+After emitted inactivity, resumed packets reanchor to trustworthy QPC even on
+endpoints whose device frame counter pauses and resumes without a counter gap.
 Counter gaps/discontinuities establish a marked, trustworthy acquisition boundary.
 Overlapping reset ranges, unmarked backwards counters, unexplained clock jumps
 over 100 ms, initial timestamp errors or more than five seconds of timestamp

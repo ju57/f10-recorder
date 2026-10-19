@@ -29,7 +29,7 @@ foreach($format in 'u8','s16le','s24le','s32le','f32le'){
     & $Ffmpeg -hide_banner -v error -xerror -i $input -map '0:a:0' -c:a ('pcm_'+$format) -f $format $output
     if($LASTEXITCODE -ne 0 -or (Get-FileHash $output).Hash -ne (Get-FileHash (Join-Path $data ('packet-'+$format+'-expected.pcm'))).Hash){throw "Native packet payload was padded/trimmed/changed: $format"}
 }
-foreach($case in 'idle','gap','negative'){
+foreach($case in 'idle','gap','negative','paused-counter'){
     $format=if($case -eq 'idle'){'u8'}else{'s16le'}
     $input=Join-Path $data ('packet-'+$case+'.mka')
     $output=Join-Path $data ('packet-'+$case+'-decoded.pcm')

@@ -17,6 +17,7 @@ namespace F10Recorder
         readonly byte[] silence;
         readonly bool unsigned;
         long written, idleEnd;
+        bool emittedIdle;
 
         internal AudioPacketBuffer(Stream output, int sampleRate, int channels, string format, long initialSample)
         {
@@ -34,7 +35,11 @@ namespace F10Recorder
         internal void Add(byte[] data, ulong devicePosition, long qpcSample, uint flags, bool timestampValid)
         {
             if (data == null || data.Length == 0 || data.Length % align != 0) throw new IOException("Invalid native PCM payload.");
-            var time = clock.Map(devicePosition, data.Length / align, qpcSample, timestampValid, (flags & 1) != 0);
+            // Some loopback endpoints pause their device frame counter while
+            // idle. Once idle PCM has been emitted, a trustworthy QPC must
+            // reanchor resumed audio even if the counter resumes contiguously.
+            var time = clock.Map(devicePosition, data.Length / align, qpcSample, timestampValid, (flags & 1) != 0 || emittedIdle);
+            emittedIdle = false;
             if ((flags & 2) != 0) FillSilence(data);
             packets.Enqueue(new Packet { Start = time.Start, Data = data, Boundary = time.Boundary });
             if (packets.Count > 1000) throw new IOException("Audio output cannot keep up with capture.");
@@ -60,6 +65,7 @@ namespace F10Recorder
             {
                 WriteSilence(silenceTarget);
                 idleEnd = written;
+                emittedIdle = true;
             }
         }
 

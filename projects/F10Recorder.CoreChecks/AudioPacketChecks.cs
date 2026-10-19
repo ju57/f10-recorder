@@ -106,6 +106,16 @@ internal static class AudioPacketChecks
             File.WriteAllBytes(Path.Combine(directory, "packet-gap.mka"), gaps.ToArray());
             File.WriteAllBytes(Path.Combine(directory, "packet-gap-expected.pcm"), payload.Concat(new byte[960]).Concat(payload).ToArray());
         }
+        using (var pausedCounter = new MemoryStream())
+        {
+            var buffer = new AudioPacketBuffer(pausedCounter, rate, 1, "s16le", 0);
+            byte[] payload = Enumerable.Repeat((byte)1, 960).ToArray();
+            buffer.Add(payload, 1000, 0, 1, true); buffer.Advance(0);
+            buffer.Advance(24000);
+            buffer.Add(payload, 1480, 28800, 0, true); buffer.Advance(28800);
+            File.WriteAllBytes(Path.Combine(directory, "packet-paused-counter.mka"), pausedCounter.ToArray());
+            File.WriteAllBytes(Path.Combine(directory, "packet-paused-counter-expected.pcm"), payload.Concat(new byte[(28800 - frames) * 2]).Concat(payload).ToArray());
+        }
         using (var negative = new MemoryStream())
         {
             var buffer = new AudioPacketBuffer(negative, rate, 1, "s16le", 0);
