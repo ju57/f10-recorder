@@ -60,7 +60,9 @@ namespace F10Recorder
             settings = config;
             timestampedAudio = !synthetic && settings.SystemAudio;
             recordAudio = synthetic || settings.SystemAudio;
-            captureRateLimit = synthetic || settings.CaptureMode == "window" ? settings.FramesPerSecond : settings.FramesPerSecond * 4;
+            // Leave window acquisition headroom before the downstream output-FPS filter.
+            // The requested rate is a ceiling, not a guarantee of fresh pictures.
+            captureRateLimit = synthetic ? settings.FramesPerSecond : settings.FramesPerSecond * (settings.CaptureMode == "window" ? 2 : 4);
             directory = Path.Combine(root, "session-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
             manifest = Path.Combine(directory, "segments.csv");
@@ -75,7 +77,7 @@ namespace F10Recorder
                 if (mediaClock != null) saveClock = new ReplaySaveClock(mediaClock);
                 if (mediaClock != null) Log.Write("Media clock: QPC=" + mediaClock.QpcEpoch + "; frequency=" + mediaClock.QpcFrequency + "; UTC microseconds=" + mediaClock.UnixMicroseconds + "; bridge bracket ticks=" + mediaClock.BridgeUncertaintyTicks);
                 var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-stats_period", "0.25", "-progress", "pipe:1" };
-                string source = settings.CaptureMode == "window" && !synthetic ? WindowVideoSource(target, settings.FramesPerSecond)
+                string source = settings.CaptureMode == "window" && !synthetic ? WindowVideoSource(target, captureRateLimit)
                     : "ddagrab=framerate=" + captureRateLimit + ":output_idx=" + (synthetic ? 0 : settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1";
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=" + settings.FramesPerSecond });
                 // ddagrab's rate is a polling ceiling, not a guaranteed output clock.

@@ -36,6 +36,36 @@ startup. The live test closes only its owned fixture/UI/worker processes.
   peers; stop an older build before reusing the same profile. Existing profile
   ownership and current-user pipe restrictions remain.
 
+## Acquisition and output rates
+
+Window capture requests an acquisition ceiling twice the selected output frame
+rate. The downstream `fps` filter still produces the selected output rate, with
+or without system audio. For example, 60 FPS output requests up to 120 FPS from
+`gfxcapture`; it does not create a 120 FPS replay.
+
+| Selected output FPS | Window acquisition ceiling |
+| --- | --- |
+| 24 | 48 |
+| 30 | 60 |
+| 60 | 120 |
+| 120 | 240 |
+
+The headroom gives the output sampler more opportunities to select a recent
+picture instead of asking two independent clocks to run at the same rate. It
+cannot guarantee a fresh picture on every output tick. Windows/FFmpeg capability,
+source presentation and system load can limit acquisition, and additional capture
+work can increase resource use. Verify each claimed hardware/output-rate mode;
+validation at 60 FPS does not qualify 120 FPS output.
+
+Monitor acquisition retains its existing four-times-output ceiling. Synthetic
+sources retain the selected frame rate. The configured-rate diagnostics describe
+the requested policy, not measured source-picture throughput. Window screenshots
+keep their separate one-frame capture request.
+
+This policy does not change output bitrate, codec, audio timing, replay length or
+saved preferences. Assess bitrate/image quality separately from motion cadence;
+a high-bitrate profile used during testing does not change the 20 Mbps default.
+
 ## Clock boundary and acceptance
 
 The assessed FFmpeg is Gyan git **7fd2be97b9**, not an inferred numbered release.
