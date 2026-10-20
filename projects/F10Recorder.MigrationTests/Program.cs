@@ -22,26 +22,113 @@ internal static class MigrationChecks
     static string data;
     static readonly Dictionary<string, object> report = new();
     static bool failStartup;
+    static int shortcutModifiers = 7;
     [STAThread]
     static int Main(string[] args)
     {
         data = args[0]; Directory.CreateDirectory(data);
         if (args.Contains("--fixture")) { Fixture(); return 0; }
+        int modifiersIndex = Array.IndexOf(args, "--shortcut-modifiers");
+        if (modifiersIndex >= 0)
+        {
+            shortcutModifiers = int.Parse(args[modifiersIndex + 1]);
+            if (shortcutModifiers < 1 || shortcutModifiers > 7) throw new ArgumentOutOfRangeException(nameof(shortcutModifiers));
+        }
+        report["testShortcutModifiers"] = shortcutModifiers;
         WindowsRecorder.Initialize(data);
         report["mediaEngine"] = MediaDependency.ResolveExecutable();
-        var config = new Settings { ReplayMinutes = 1, FramesPerSecond = 30, BitrateMbps = 5, OutputDirectory = Path.Combine(data, "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots"), SaveKey = 114, SaveModifiers = 7, OverlayKey = 117, OverlayModifiers = 7, ScreenshotKey = 118, ScreenshotModifiers = 7 };
+        var config = new Settings { ReplayMinutes = 1, FramesPerSecond = 30, BitrateMbps = 5, OutputDirectory = Path.Combine(data, "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots"), SaveKey = 114, SaveModifiers = shortcutModifiers, OverlayKey = 117, OverlayModifiers = shortcutModifiers, ScreenshotKey = 118, ScreenshotModifiers = shortcutModifiers };
+        if (args.Contains("--presentation-only")) config.CaptureMode = "window";
         config.Save(Path.Combine(data, "settings.json"));
         App.DataDirectory = data; App.Arguments = ["--paused", "--settings"]; App.ControlTitle = "F10Recorder.MigrationCheck." + Guid.NewGuid();
         App.RecorderFactory = (root, post, paused, title) => new WindowsRecorder(root, post, paused, title, true, enabled => { if (failStartup) { failStartup = false; throw new IOException("Controlled startup-write failure."); } report["startupChoiceSubmitted"] = enabled; });
-        App.Started = app => _ = CheckAsync(app);
+        App.Started = app => _ = args.Contains("--presentation-only") ? CheckPresentationAsync(app, args.Contains("--render-only")) : args.Contains("--focus-only") ? CheckFocusAsync(app) : CheckAsync(app);
         try { Program.BuildAvaloniaApp().StartWithClassicDesktopLifetime([]); }
         catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); File.WriteAllText(Path.Combine(data, "verification.json"), JsonSerializer.Serialize(report)); }
         return report.TryGetValue("result", out var result) && (string)result == "passed" ? 0 : 1;
     }
     static void Require(bool condition, string error) { if (!condition) throw new Exception(error); }
+    [DllImport("user32.dll")] static extern bool GetWindowDisplayAffinity(IntPtr window, out uint affinity);
+    // No recording, screenshot, settings Apply, startup write or input injection.
+    static async Task CheckPresentationAsync(App app, bool renderOnly)
+    {
+        Window other = null;
+        try
+        {
+            var panel = app.SettingsWindow.Panel;
+            await Until(() => panel.CodecCheckFinished, "GPU codec check did not finish.");
+            Require(app.Recorder.Paused && app.Recorder.CaptureProcessId == 0, "Presentation check started capture.");
+            Require(GetWindowDisplayAffinity(app.SettingsWindow.TryGetPlatformHandle().Handle, out uint settingsAffinity) && settingsAffinity == 0, "Window-mode Settings requested capture exclusion.");
+            Require(!Control<NumericUpDown>(panel, "DisplayIndex").IsEnabled && Control<TextBlock>(panel, "NativeResolutionPolicy").Text.Contains("fit on resize"), "Window-mode resolution/display policy is misleading.");
+            Require(!Control<Button>(panel, "QuickSaveReplay").IsEnabled, "Paused Settings advertised Save as available.");
+            for (int i = 0; i < 4; i++) { panel.SelectPage(i); await Task.Delay(100); Render(app.SettingsWindow, "settings-" + i); }
+            panel.SelectPage(0); Control<ComboBox>(panel, "CaptureMode").SelectedIndex = 0;
+            Require(Control<NumericUpDown>(panel, "DisplayIndex").IsEnabled && app.Recorder.Config.CaptureMode == "window", "Pending monitor selection changed the applied source.");
+            Control<ComboBox>(panel, "CaptureMode").SelectedIndex = 1;
+            app.ToggleOverlay(); await Task.Delay(150);
+            Require(app.SettingsWindow.OverlayVisible && !app.SettingsWindow.Overlay.SaveAction.IsEnabled, "Paused sidebar actions were misleading.");
+            Require(GetWindowDisplayAffinity(app.SettingsWindow.OverlaySurface.TryGetPlatformHandle().Handle, out uint renderedAffinity) && renderedAffinity == 0, "Window-mode sidebar requested capture exclusion.");
+            Render(app.SettingsWindow.OverlaySurface, "sidebar-paused"); app.SettingsWindow.Dismiss();
+            report["renderedAllPagesAndPausedSidebar"] = true;
+            if (renderOnly)
+            {
+                report["captureStarted"] = false; report["result"] = "incomplete";
+                report["reason"] = "Rendering checks passed; focus acceptance not run after the earlier Windows foreground denial.";
+                return;
+            }
+            other = new Window { Title = "F10 window-mode focus target", Width = 480, Height = 240 };
+            other.Show(); other.Activate();
+            Native.ShowWindow(other.TryGetPlatformHandle().Handle, 9);
+            report["foregroundRequestAccepted"] = Native.SetForegroundWindow(other.TryGetPlatformHandle().Handle);
+            await Until(() => Native.GetForegroundWindow() == other.TryGetPlatformHandle().Handle, "Windows did not grant foreground activation to the owned focus fixture.");
+            app.ToggleOverlay(); await Task.Delay(150);
+            Require(app.SettingsWindow.OverlayVisible && !app.SettingsWindow.Overlay.SaveAction.IsEnabled, "Paused sidebar actions were misleading.");
+            Require(GetWindowDisplayAffinity(app.SettingsWindow.OverlaySurface.TryGetPlatformHandle().Handle, out uint overlayAffinity) && overlayAffinity == 0, "Window-mode sidebar requested capture exclusion.");
+            Require(GetWindowDisplayAffinity(app.SettingsWindow.OverlayBackdrop.TryGetPlatformHandle().Handle, out uint backdropAffinity) && backdropAffinity == 0, "Window-mode backdrop requested capture exclusion.");
+            Render(app.SettingsWindow.OverlaySurface, "sidebar-paused"); app.SettingsWindow.Dismiss();
+            Require(Native.GetForegroundWindow() == other.TryGetPlatformHandle().Handle, "Dismissal failed to restore the previous task-owned window.");
+            Require(app.Recorder.Paused && app.Recorder.CaptureProcessId == 0, "Presentation or focus checks changed recording intent.");
+            report["ordinaryWindowModeSurfacesAndFocus"] = true; report["pendingSourceDoesNotApply"] = true; report["disabledPausedSaveActions"] = true;
+            report["captureStarted"] = false; report["result"] = "passed";
+        }
+        catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); }
+        finally { other?.Close(); File.WriteAllText(Path.Combine(data, "verification.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true })); app.Quit(); }
+    }
     static async Task Until(Func<bool> condition, string error, int milliseconds = 15000)
     {
         var timer = Stopwatch.StartNew(); while (!condition() && timer.ElapsedMilliseconds < milliseconds) await Task.Delay(50); Require(condition(), error);
+    }
+    // Focus regression only: paused, no capture/screenshot/settings submission or input injection.
+    static async Task CheckFocusAsync(App app)
+    {
+        Window other = null;
+        try
+        {
+            await Until(() => app.SettingsWindow.Panel.CodecCheckFinished, "GPU codec check did not complete.");
+            other = new Window { Title = "F10 focus verification target", Width = 480, Height = 240 };
+            other.Show(); other.Activate();
+            await Until(() => Native.GetForegroundWindow() == other.TryGetPlatformHandle().Handle, "Focus target could not activate.");
+            app.OpenSettings(); app.ToggleOverlay();
+            other.Activate();
+            await Until(() => Native.GetForegroundWindow() == other.TryGetPlatformHandle().Handle, "Focus target could not regain focus.");
+            app.SettingsWindow.Dismiss(); await Task.Delay(200);
+            Require(app.SettingsWindow.IsVisible && Native.GetForegroundWindow() == other.TryGetPlatformHandle().Handle, "Restoring Settings stole focus after switching away.");
+            Require(app.SettingsWindow.ShowActivated, "Temporary nonactivating restore changed future Settings behavior.");
+            report["restoredSettingsDoesNotStealFocus"] = true;
+            app.OpenSettings();
+            await Until(() => Native.GetForegroundWindow() == app.SettingsWindow.TryGetPlatformHandle().Handle, "Explicit Settings open no longer activates.");
+            app.ToggleOverlay(); app.SettingsWindow.Dismiss(); await Task.Delay(200);
+            Require(app.SettingsWindow.IsVisible && Native.GetForegroundWindow() == app.SettingsWindow.TryGetPlatformHandle().Handle, "Dismissal did not restore previously focused Settings.");
+            Require(app.Recorder.Paused && app.Recorder.CaptureProcessId == 0, "Focus-only check started recording.");
+            report["explicitSettingsActivationAndOwnedFocusRestoration"] = true;
+            report["captureStarted"] = false; report["result"] = "passed";
+        }
+        catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); Environment.ExitCode = 1; }
+        finally
+        {
+            other?.Close();
+            File.WriteAllText(Path.Combine(data, "verification.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true })); app.Quit();
+        }
     }
     static T Control<T>(SettingsPanel panel, string name) where T : Avalonia.Controls.Control => panel.GetLogicalDescendants().OfType<T>().Single(c => c.Name == name);
     static void Render(Avalonia.Controls.Control control, string name)
@@ -67,13 +154,21 @@ internal static class MigrationChecks
             Control<NumericUpDown>(panel, "ReplayMinutes").Value = 7; Control<NumericUpDown>(panel, "BitrateMbps").Value = 31; Control<ComboBox>(panel, "FramesPerSecond").SelectedItem = 120;
             Control<ComboBox>(panel, "VideoCodec").SelectedItem = available.Last();
             panel.SelectPage(1); Control<CheckBox>(panel, "SystemAudio").IsChecked = false;
+            Require(Control<TextBlock>(panel, "AudioFormat").Text.Contains("no audio track") && Control<TextBlock>(panel, "PlaybackDevicePolicy").Text.Contains("Not used") && Control<TextBlock>(panel, "RollingCacheEstimate").Text.Contains("1666"), "Disabled audio still claims an audio track or consumes estimated cache.");
+            Control<CheckBox>(panel, "SystemAudio").IsChecked = true;
+            Require(Control<TextBlock>(panel, "AudioFormat").Text.Contains("AAC") && Control<TextBlock>(panel, "RollingCacheEstimate").Text.Contains("1677"), "Audio summary/estimate did not update before Apply.");
+            Control<CheckBox>(panel, "SystemAudio").IsChecked = false; report["pendingAudioSummaryAndEstimate"] = true;
             panel.SelectPage(2); Control<CheckBox>(panel, "StartWithWindows").IsChecked = false;
             Control<ComboBox>(panel, "SaveKey").SelectedIndex = 3; Control<ComboBox>(panel, "OverlayKey").SelectedIndex = 3;
             Require(!await panel.ApplyAsync() && panel.Error.Contains("different shortcuts"), "Duplicate shortcuts were accepted.");
             Control<ComboBox>(panel, "OverlayKey").SelectedIndex = 4; Control<ComboBox>(panel, "ScreenshotKey").SelectedIndex = 7;
             panel.SelectPage(3); Control<TextBox>(panel, "ScreenshotDirectory").Text = Path.Combine(data, "custom screenshots");
             // Dismissing and reopening the overlay must preserve pending edits and pause.
-            app.ToggleOverlay(); await Task.Delay(100); Require(app.SettingsWindow.OverlayVisible, "Overlay did not open."); app.ToggleOverlay(); await Task.Delay(100);
+            var editorSize = new Avalonia.Size(app.SettingsWindow.Width, app.SettingsWindow.Height);
+            app.ToggleOverlay(); await Task.Delay(100); Require(app.SettingsWindow.OverlayVisible, "Overlay did not open.");
+            Require(app.SettingsWindow.OverlaySurface.Content is OverlayPanel && !app.SettingsWindow.Overlay.SaveAction.IsEnabled, "Paused overlay did not show honest quick actions.");
+            Render(app.SettingsWindow.OverlaySurface, "quick-overlay-paused"); app.ToggleOverlay(); await Task.Delay(100);
+            Require(Math.Abs(app.SettingsWindow.Width - editorSize.Width) < 1 && Math.Abs(app.SettingsWindow.Height - editorSize.Height) < 1, "Overlay changed the editor's size."); report["overlayPreservesEditorGeometry"] = true;
             panel.SelectPage(0); Require(Control<NumericUpDown>(panel, "ReplayMinutes").Value == 7 && recorder.Paused, "Overlay lost edits or changed pause."); report["overlayPreservesEditsAndPause"] = true;
             failStartup = true; Require(!await panel.ApplyAsync() && recorder.Config.ReplayMinutes == 1 && Settings.Load(Path.Combine(data, "settings.json")).ReplayMinutes == 1 && recorder.Paused, "A failed startup update changed live or persisted capture configuration."); report["failedApplyRollback"] = true;
             Require(await panel.ApplyAsync(), "Settings submission failed: " + panel.Error);
@@ -84,7 +179,8 @@ internal static class MigrationChecks
             fixture = Process.Start(new ProcessStartInfo(Environment.ProcessPath, CaptureSession.Quote(data) + " --fixture") { UseShellExecute = false, CreateNoWindow = true });
             await Until(() => fixture.MainWindowHandle != IntPtr.Zero, "External fixture window did not appear."); ActivateFixture(fixture);
             recorder.SampleForeground(); string expectedApplication = recorder.ApplicationName;
-            SendKey(116, 7); await Until(() => app.SettingsWindow.OverlayVisible, "Registered overlay shortcut failed.");
+            report["captureExclusion"] = await CaptureExclusionChecks.Run(app, data, () => ActivateFixture(fixture));
+            SendKey(116, shortcutModifiers); await Until(() => app.SettingsWindow.OverlayVisible, "Registered overlay shortcut failed.");
             SendKey(27, 0); await Until(() => !app.SettingsWindow.OverlayVisible, "Escape did not dismiss the overlay.");
             Require(Native.GetForegroundWindow() == fixture.MainWindowHandle, "Overlay did not return focus."); report["globalOverlayShortcutAndFocus"] = true;
             app.Notice.Present("Migration check", "Passive notification", NotificationKind.Success, 1200, app.SettingsWindow); await Task.Delay(150);
@@ -93,20 +189,28 @@ internal static class MigrationChecks
             var point = new Point { X = app.Notice.Position.X + 60, Y = app.Notice.Position.Y + 50 };
             Require(WindowFromPoint(point) == fixture.MainWindowHandle, "Notification intercepts mouse hit testing.");
             Render(app.Notice, "notification"); await Until(() => !app.Notice.IsVisible, "Notification did not dismiss.", 3000); report["passiveNotificationAndDismissal"] = true;
-            SendKey(119, 7); await Until(() => recorder.LastScreenshot != null, "Screenshot shortcut did not save.", 20000);
+            app.Notice.Present("Short notice", "Replaced by saving", NotificationKind.Info, 120, app.SettingsWindow); await Task.Delay(50);
+            app.Notice.Present("Saving replay…", "Recording continues.", NotificationKind.Info, 0, app.SettingsWindow); await Task.Delay(400);
+            Require(app.Notice.IsVisible && app.Notice.Heading == "Saving replay…", "An old timeout hid persistent saving.");
+            app.Notice.Present("Replay saved", "Replacement gets its own dwell.", NotificationKind.Success, 500, app.SettingsWindow); await Task.Delay(250);
+            Require(app.Notice.IsVisible, "Replacement inherited the previous notice timeout.");
+            await Until(() => !app.Notice.IsVisible, "Replacement notice never dismissed.", 2500); report["notificationReplacementLifetime"] = true;
+            SendKey(119, shortcutModifiers); await Until(() => recorder.LastScreenshot != null, "Screenshot shortcut did not save.", 20000);
             using (var image = System.Drawing.Image.FromFile(recorder.LastScreenshot)) Require(image.Width == Forms.Screen.PrimaryScreen.Bounds.Width && image.Height == Forms.Screen.PrimaryScreen.Bounds.Height, "Screenshot lost native resolution.");
             Require(recorder.Paused && recorder.LastScreenshot.StartsWith(recorder.Config.ScreenshotDirectory), "Screenshot destination or paused state changed."); report["pausedScreenshotShortcut"] = recorder.LastScreenshot;
-            string firstScreenshot = recorder.LastScreenshot; app.ToggleOverlay(); Control<Button>(panel, "QuickScreenshot").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            string firstScreenshot = recorder.LastScreenshot; app.ToggleOverlay(); app.SettingsWindow.Overlay.ScreenshotAction.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             await Until(() => recorder.LastScreenshot != firstScreenshot, "Overlay screenshot action failed.", 20000);
             Require(!app.SettingsWindow.OverlayVisible && File.Exists(firstScreenshot), "Screenshot lost the previous image or left the overlay open."); report["overlayScreenshot"] = recorder.LastScreenshot;
             // Replay action shares the production engine and native save shortcut.
             Control<ToggleSwitch>(panel, "RecordingEnabled").IsChecked = true; await Until(() => recorder.Ready, "Replay switch did not resume capture.", 25000); await Task.Delay(5500);
             string saved = null; bool? success = null; recorder.Saved += (file, ok) => { saved = file; success = ok; };
-            ActivateFixture(fixture); recorder.SampleForeground(); expectedApplication = recorder.ApplicationName; SendKey(115, 7);
+            ActivateFixture(fixture); recorder.SampleForeground(); expectedApplication = recorder.ApplicationName; SendKey(115, shortcutModifiers);
             await Until(() => success != null, "Replay shortcut did not finish saving.", 20000); Require(success == true, "Replay failed: " + saved);
             Require(Path.GetFileName(Path.GetDirectoryName(saved)) == ApplicationFolders.FolderName(expectedApplication), "Save lost the foreground application folder.");
             report["hotkeyReplayClip"] = saved; report["applicationName"] = expectedApplication; int capture = recorder.CaptureProcessId; await Task.Delay(1000); Require(capture != 0 && recorder.CaptureProcessId == capture, "Capture did not continue after save.");
-            success = null; ActivateFixture(fixture); app.ToggleOverlay(); Control<Button>(panel, "QuickSaveReplay").RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); app.ToggleOverlay();
+            success = null; ActivateFixture(fixture); app.ToggleOverlay();
+            Require(app.SettingsWindow.Overlay.SaveAction.IsEnabled, "Ready overlay Save action stayed disabled.");
+            Render(app.SettingsWindow.OverlaySurface, "quick-overlay-ready"); app.SettingsWindow.Overlay.SaveAction.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); app.ToggleOverlay();
             await Until(() => success != null, "Overlay Save replay did not finish.", 20000);
             Require(success == true && Path.GetFileName(Path.GetDirectoryName(saved)) == ApplicationFolders.FolderName(expectedApplication), "Overlay save lost the foreground application."); report["overlayReplayClip"] = saved;
             // Recovery must replace only this test recorder's encoder.

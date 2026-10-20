@@ -105,15 +105,20 @@ namespace F10Recorder
                 string output;
                 if (!Run(path, "-version", out output) || !output.StartsWith("ffmpeg version ")) return false;
                 version = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).First();
-                if (!Run(path, "-filters", out output) || !HasWord(output, "ddagrab") || !HasWord(output, "aresample") || !HasWord(output, "hwdownload")) return false;
+                if (!Run(path, "-filters", out output) || !SupportsCaptureFilters(output)) return false;
                 if (!Run(path, "-encoders", out output) || !HasWord(output, "h264_nvenc") || !HasWord(output, "aac") || !HasWord(output, "png")) return false;
                 if (!Run(path, "-muxers", out output) || !new[] { "segment", "mp4", "mpegts", "matroska" }.All(name => HasWord(output, name))) return false;
-                if (!Run(path, "-demuxers", out output) || !HasWord(output, "concat")) return false;
+                if (!Run(path, "-demuxers", out output) || !new[] { "concat", "matroska", "lavfi" }.All(name => HasWord(output, name))) return false;
                 if (!Run(path, "-bsfs", out output) || !HasWord(output, "setts")) return false;
                 if (!Run(path, new[] { "-h", "bsf=setts" }, out output) || !HasWord(output, "prescale")) return false;
                 return true;
             }
             catch (Exception ex) { Log.Write("FFmpeg candidate rejected: " + path + "; " + ex.Message); return false; }
+        }
+        internal static bool SupportsCaptureFilters(string output)
+        {
+            // Match filter names in inventory rows, not words in descriptions.
+            return new[] { "ddagrab", "aresample", "hwdownload", "fps", "setpts" }.All(name => Regex.IsMatch(output, @"(?m)^\s*[A-Z.]+\s+" + Regex.Escape(name) + @"\s+[AVN|]+->[AVN|]+\s+"));
         }
         static bool HasWord(string output, string word) { return Regex.IsMatch(output, @"\b" + Regex.Escape(word) + @"\b"); }
         static bool Run(string path, string option, out string output)

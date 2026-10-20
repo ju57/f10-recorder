@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0-windows7.0": {
+      "f10recorder.core": {
+        "type": "Project"
+      },
+      "f10recorder.windows": {
+        "type": "Project",
+        "dependencies": {
+          "F10Recorder.Core": "[1.0.0, )"
+        }
+      }
+    }
+  }
+}

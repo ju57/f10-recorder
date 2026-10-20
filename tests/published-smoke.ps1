@@ -36,6 +36,7 @@ function Wait-State([scriptblock]$Condition) {
         Start-Sleep -Milliseconds 100
         if ($process.HasExited) { throw "Published application exited: $($process.ExitCode)" }
         try { $script:probeState = Get-Content -LiteralPath $statusFile -Raw | ConvertFrom-Json } catch { continue }
+        if ($probeState.UiProcessId -ne $process.Id) { continue }
         if (& $Condition) { return }
     } while ([DateTime]::UtcNow -lt $deadline)
     throw 'Published application did not reach the requested state.'

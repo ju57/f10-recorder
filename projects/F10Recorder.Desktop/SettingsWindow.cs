@@ -8,53 +8,68 @@ namespace F10Recorder;
 internal sealed class SettingsWindow : Window
 {
     internal SettingsPanel Panel { get; }
-    internal bool OverlayVisible { get; private set; }
+    internal OverlayPanel Overlay { get; }
+    internal bool OverlayVisible => overlay?.IsVisible == true;
+    internal Window OverlaySurface => overlay;
+    internal Window OverlayBackdrop => backdrop;
     internal event Action VisibilityChanged;
-    Window backdrop;
-    PixelPoint oldPosition;
-    double oldWidth, oldHeight;
-    bool wasVisible, exiting;
+    Window backdrop, overlay;
+    bool wasVisible, exiting, dismissingOverlay;
     IntPtr previousWindow;
     public SettingsWindow(WindowsRecorder recorder)
     {
         Title = "F10 Recorder"; Width = 900; Height = 820; MinWidth = 780; MinHeight = 620;
         Background = Ui.Background; Icon = Ui.TrayIcon(true); WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Panel = new SettingsPanel(recorder); Panel.CloseRequested = Dismiss; Content = Panel;
+        Overlay = new OverlayPanel(recorder, Dismiss, () => { Dismiss(); ShowSettings(); });
+        CaptureVisibility.Exclude(this);
         Closing += (_, e) => { if (!exiting) { e.Cancel = true; Dismiss(); } };
-        KeyDown += (_, e) => { if (OverlayVisible && e.Key == Key.Escape) { e.Handled = true; Dismiss(); } };
     }
     internal void ShowSettings()
     {
-        if (!IsVisible) Show(); BringForward(); Panel.UpdateState(); VisibilityChanged?.Invoke();
+        if (OverlayVisible) Dismiss();
+        Content = Panel;
+        if (!IsVisible) Show(); BringForward(this); UpdateState(); VisibilityChanged?.Invoke();
     }
-    void BringForward()
+    internal void UpdateState() { Panel.UpdateState(); Overlay.UpdateState(); }
+    static void BringForward(Window window)
     {
-        WindowState = WindowState.Normal;
-        var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
-        if (handle != IntPtr.Zero) { Native.ShowWindow(handle, 9); Native.SetForegroundWindow(handle); } Activate();
+        window.WindowState = WindowState.Normal;
+        var handle = window.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (handle != IntPtr.Zero) { Native.ShowWindow(handle, 9); Native.SetForegroundWindow(handle); } window.Activate();
     }
     internal void ToggleOverlay()
     {
         if (OverlayVisible) { Dismiss(); return; }
-        previousWindow = Native.GetForegroundWindow(); wasVisible = IsVisible; oldPosition = Position; oldWidth = Width; oldHeight = Height;
+        previousWindow = Native.GetForegroundWindow(); wasVisible = IsVisible;
         var area = Native.DisplayBounds(previousWindow);
         double scale = Screens.ScreenFromPoint(new PixelPoint(area.Left, area.Top))?.Scaling ?? 1;
-        Hide(); OverlayVisible = true; WindowStartupLocation = WindowStartupLocation.Manual; WindowDecorations = WindowDecorations.None; ShowInTaskbar = false; Topmost = true;
-        Width = Math.Min(900, (area.Width - 32) / scale); Height = Math.Min(948, (area.Height - 32) / scale);
-        MinWidth = Math.Min(780, Width); MinHeight = Math.Min(620, Height);
-        Position = new PixelPoint(area.Right - (int)(Width * scale) - 16, area.Top + (area.Height - (int)(Height * scale)) / 2);
-        backdrop = new Window { Title = "F10 Recorder Overlay Backdrop", WindowDecorations = WindowDecorations.None, ShowInTaskbar = false, Topmost = true, ShowActivated = false, Background = Brushes.Black, Opacity = 0.48, Width = area.Width / scale, Height = area.Height / scale, Position = new PixelPoint(area.Left, area.Top), CanResize = false };
-        backdrop.PointerPressed += (_, _) => Dismiss(); backdrop.Show(); Show(); BringForward(); VisibilityChanged?.Invoke();
+        Hide();
+        overlay = new Window { Title = "F10 Recorder Replay Controls", WindowDecorations = WindowDecorations.None, ShowInTaskbar = false, Topmost = true, CanResize = false, Background = Ui.Background, WindowStartupLocation = WindowStartupLocation.Manual, Width = Math.Min(440, area.Width / scale), Height = area.Height / scale, Position = new PixelPoint(area.Left, area.Top), Content = Overlay };
+        overlay.KeyDown += (_, e) => { if (e.Key == Key.Escape) { e.Handled = true; Dismiss(); } };
+        overlay.Closing += (_, e) => { if (!dismissingOverlay) { e.Cancel = true; Dismiss(); } };
+        UpdateState();
+        backdrop = new Window { Title = "F10 Recorder Overlay Backdrop", WindowDecorations = WindowDecorations.None, ShowInTaskbar = false, Topmost = true, ShowActivated = false, Background = Brushes.Black, Opacity = 0.16, Width = area.Width / scale, Height = area.Height / scale, Position = new PixelPoint(area.Left, area.Top), CanResize = false };
+        backdrop.PointerPressed += (_, e) => { if (e.GetCurrentPoint(backdrop).Properties.IsLeftButtonPressed) Dismiss(); };
+        CaptureVisibility.Exclude(backdrop); CaptureVisibility.Exclude(overlay);
+        backdrop.Show(); overlay.Show(); BringForward(overlay); Overlay.FocusInitial(); VisibilityChanged?.Invoke();
     }
     internal void Dismiss()
     {
         if (!OverlayVisible) { Hide(); VisibilityChanged?.Invoke(); return; }
-        var current = Native.GetForegroundWindow(); var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        var current = Native.GetForegroundWindow(); var handle = overlay.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
         bool restoreFocus = current == handle || current == backdrop?.TryGetPlatformHandle()?.Handle;
-        Hide(); backdrop?.Close(); backdrop = null; OverlayVisible = false;
-        Topmost = false; WindowDecorations = WindowDecorations.Full; ShowInTaskbar = true; MinWidth = 780; MinHeight = 620;
-        Width = oldWidth; Height = oldHeight; Position = oldPosition;
-        if (wasVisible) Show();
+        var closing = overlay; overlay = null; closing.Content = null;
+        dismissingOverlay = true;
+        try { closing.Close(); } finally { dismissingOverlay = false; }
+        backdrop?.Close(); backdrop = null;
+        if (wasVisible)
+        {
+            // Restoring the editor must not activate it after the user switches away.
+            // The previous foreground window is restored explicitly below when owned.
+            bool activate = ShowActivated; ShowActivated = false;
+            try { Show(); } finally { ShowActivated = activate; }
+        }
         if (restoreFocus && Native.IsWindow(previousWindow)) Native.SetForegroundWindow(previousWindow);
         VisibilityChanged?.Invoke();
     }
@@ -64,5 +79,5 @@ internal sealed class SettingsWindow : Window
         // A previously visible Settings window is also excluded from the screenshot.
         if (IsVisible) Hide(); VisibilityChanged?.Invoke();
     }
-    internal void PrepareExit() { exiting = true; backdrop?.Close(); backdrop = null; }
+    internal void PrepareExit() { exiting = true; wasVisible = false; Dismiss(); }
 }

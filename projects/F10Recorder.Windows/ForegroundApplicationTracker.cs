@@ -6,6 +6,7 @@ namespace F10Recorder
     {
 
         readonly int excludedProcessId;
+        int uiProcessId;
         IntPtr lastWindow;
         IntPtr lastExternalWindow;
         uint lastExternalProcess;
@@ -23,11 +24,14 @@ namespace F10Recorder
             if (lastExternalWindow != IntPtr.Zero && (!Native.IsWindow(lastExternalWindow) || Native.GetWindowThreadProcessId(lastExternalWindow, out owner) == 0 || owner != lastExternalProcess)) { lastExternalWindow = IntPtr.Zero; Update("Desktop"); }
             if (window == lastWindow && window != IntPtr.Zero) return ApplicationName;
             lastWindow = window;
+            Native.GetWindowThreadProcessId(window, out uint foregroundProcess);
+            if (uiProcessId != 0 && foregroundProcess == uiProcessId) return ApplicationName;
             string name = ApplicationFolders.WindowApplication(window, excludedProcessId);
             if (name != null) { lastExternalWindow = window; Native.GetWindowThreadProcessId(window, out lastExternalProcess); Update(name); }
             return ApplicationName;
         }
         void Update(string name) { if (ApplicationName == name) return; ApplicationName = name; var callback = Changed; if (callback != null) callback(); }
         public void Dispose() { }
+        internal void ExcludeProcess(int id) { uiProcessId = id; lastWindow = IntPtr.Zero; }
     }
 }
