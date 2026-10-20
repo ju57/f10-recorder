@@ -1,5 +1,12 @@
 # Native CS2 recorder benchmark
 
+Before claiming source-picture preservation, controlled gaming overhead or parity,
+apply the source, identity, observer and paired-run gates in
+[frame-lineage.md](frame-lineage.md). The procedure below documents the collection
+harness; its resume marker is not proof of actual game-source phase. Qualify the
+current replay scene separately. A diagnostic result alone does not authorize
+installation.
+
 Run the rebuilt independent worker on a separate data directory. Do not install
 the test build or apply startup preferences. Preserve the installed application,
 game video settings, key bindings and FPS cap, and restore temporary game changes
