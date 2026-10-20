@@ -65,5 +65,7 @@ Required independent gates:
 6. User-coordinated sign-in/reboot acceptance, preserving deliberate pause.
 
 Local machine-specific reports and third-party source extracts remain in ignored
-`artifacts/`. Promotion stays held until clean-footage/coexistence and applicable
-acceptance gates are met.
+`artifacts/`. Binary release and installation acceptance remain incomplete until
+clean-footage/coexistence and applicable acceptance gates are met. Early prototype
+source integration does not assert those gates passed; see
+[prototype status](../docs/prototype-status.md).

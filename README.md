@@ -1,10 +1,12 @@
 # F10 Recorder
 
-This UI integration branch includes experimental selected-window video capture
+This early prototype includes experimental selected-window video capture
 and separate live-readiness/save-availability states. Existing profiles retain
-monitor capture; installation and promotion remain held. See
+monitor capture. Source integration does not qualify a binary release. See
 [the window capture contract and checks](tests/window-capture.md) for lifecycle,
 clock uncertainty, NVIDIA coexistence and remaining acceptance gates.
+See [prototype scope and limitations](docs/prototype-status.md) for the bounded
+gameplay evidence and remaining release work.
 
 A local replay recorder that starts buffering at sign-in and saves recent footage with a global hotkey. Defaults: **five minutes, primary monitor, system audio, Ctrl+Shift+F10, native display resolution at 60 FPS, H.264 at 20 Mbps**.
 
@@ -117,7 +119,7 @@ System-audio capture uses one acquisition clock for WASAPI and Desktop Duplicati
 
 The acquisition ceiling is four times output FPS (240 Hz at 60 FPS). [FFmpeg documents ddagrab as a maximum polling rate with no background buffering](https://ffmpeg.org/ffmpeg-filters.html#ddagrab), so that ceiling does not promise fresh pictures. GPU frames pass through an FPS filter with nearest-frame rounding. `ConfiguredCaptureRateLimit` and `ConfiguredOutputFramesPerSecond` describe the configured policy; decoded picture identities establish actual cadence. UI integration and controlled fixtures do not establish real-game performance, audible audio quality, perceptual A/V alignment or installation readiness.
 
-Saving waits for the current segment to finish, snapshots the selected completed segments with local hard links (copy fallback), and remuxes them into MP4 while recording continues. Explicit segment durations avoid AAC padding accumulating into timing drift. Clips start on a keyframe and may be up to one second shorter than the chosen replay length; the endpoint is trimmed to the estimated hotkey time, within capture/progress/frame scheduling accuracy. A save typically completes after the next one-second segment boundary.
+Saving waits for the current segment to finish, snapshots the selected completed segments with local hard links (copy fallback), and remuxes them into MP4 while recording continues. Explicit segment durations avoid AAC padding accumulating into timing drift. Clips start on a keyframe and may be up to one second shorter than the chosen replay length; the endpoint is trimmed to the estimated hotkey time, within capture/progress/frame scheduling accuracy. Completion also includes snapshotting and remuxing: the latest bounded five-minute gameplay exports took about 16–17 seconds. Wait for the save result before quitting.
 
 The rolling buffer uses disk, not RAM. At 20 Mbps, five minutes is about 760 MB plus approximately ten seconds of retention headroom. A bounded segment manifest, time pruning, a byte limit, per-session cache directories, and Windows process jobs control temporary storage and encoder lifetime. Clips are never automatically deleted. No recording or telemetry is uploaded.
 

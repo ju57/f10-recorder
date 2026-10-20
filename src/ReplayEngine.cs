@@ -81,8 +81,8 @@ namespace F10Recorder
                 // ddagrab's rate is a polling ceiling, not a guaranteed output clock.
                 // Allow acquisition headroom, then pace the GPU frames in the graph.
                 // Output-only CFR resampling still showed intermittent motion loss.
-                // Audio capture uses independent input queues so its delivery
-                // cushion cannot stall video acquisition on the shared clock.
+                // Audio/video use independent input queues but still share the
+                // FFmpeg scheduler; delayed audio can throttle video acquisition.
                 else if (mediaClock == null) args.AddRange(new[] { "-filter_complex", source + ",fps=fps=" + settings.FramesPerSecond + ":round=near[video]" });
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000" });
                 else if (settings.SystemAudio)
@@ -90,8 +90,8 @@ namespace F10Recorder
                     string name = "F10Recorder-" + Guid.NewGuid().ToString("N");
                     pipe = new NamedPipeServerStream(name, PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 65536, 65536);
                     args.AddRange(new[] { "-copyts", "-thread_queue_size", "64", "-probesize", "32", "-analyzeduration", "0", "-f", "matroska", "-i", @"\\.\pipe\" + name });
-                    // The independent video input thread keeps acquisition moving
-                    // while audio's jitter buffer deliberately delays delivery.
+                    // A separate video input queues frames while the audio jitter
+                    // buffer delays delivery, subject to shared scheduler limits.
                     // gfxcapture 7fd2be97b9 subtracts its first SystemRelativeTime.
                     // Re-anchor that relative timeline once at first delivery;
                     // its unknown first-frame delivery delay needs live A/V qualification.
