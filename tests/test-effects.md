@@ -40,3 +40,11 @@ registration before the check reaches engine preflight.
 The check verifies rejection before proposed-shortcut admission, transaction
 notifications, preference persistence or capture startup. Portable CoreChecks
 exercise preference validation without engine initialization separately.
+
+`./tests/replay-ownership.ps1 -Plan` previews the dedicated replay ownership
+route without building or writing evidence. Running it exercises the same replay
+module interface used by capture supervision, with local manifest/file fixtures
+and controlled export outcomes. It opens no windows, registers no shortcuts,
+launches no recording engine, uses no GPU, captures no pixels/audio, changes no
+startup setting and installs nothing. Fixture output is not playable media and
+does not establish live capture, A/V alignment or performance acceptance.

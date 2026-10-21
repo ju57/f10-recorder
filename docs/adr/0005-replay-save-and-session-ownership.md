@@ -1,0 +1,5 @@
+# Give the replay module ownership of accepted saves and session retirement
+
+The replay cache/save module owns accepted replay saves and delays disposal of a capture session's files and process resources until its accepted save finishes or fails. Capture supervision decides when acquisition stops or a session is replaced; callers do not coordinate pins, snapshots or save polling before cleanup. Keeping the entire old session until export ends uses temporary storage for longer than early reclamation, but makes the lifetime rule straightforward and prevents session disposal from killing an export that still shares its process job.
+
+Stopping acquisition preserves completed footage; retirement rejects new requests and reclaims it after outstanding work finishes. Monitor capture remains continuous across application changes, while restored selected-window capture starts an independent timeline. Publication of the final MP4 establishes save success; notification and temporary-cleanup failures are separate diagnostics. One save runs at a time per recording profile, with no queue or automatic retry.

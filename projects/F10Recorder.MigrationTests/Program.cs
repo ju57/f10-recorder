@@ -270,16 +270,24 @@ internal static class MigrationChecks
         foreach (var choice in choices)
         {
             var config = new Settings { ReplayMinutes = 1, FramesPerSecond = choice.Codec == "h264_nvenc" ? 24 : 60, BitrateMbps = 5, VideoCodec = choice.Codec };
-            using var session = new CaptureSession(config, Path.Combine(root, "codec-cache"), true);
-            for (int i = 0; i < 14; i++) { Thread.Sleep(500); session.Maintain(); Require(!session.HasExited, session.ErrorTail); }
-            files.Add(session.Save(session.Position, Path.Combine(root, "codec-clips", choice.Codec)));
+            using var replays = new ReplayCache();
+            var session = new CaptureSession(config, Path.Combine(root, "codec-cache"), true);
+            var sessionId = replays.RegisterSession(session);
+            for (int i = 0; i < 14; i++) { Thread.Sleep(500); replays.Maintain(sessionId); Require(!session.HasExited, session.ErrorTail); }
+            var save = replays.TrySave(sessionId, Stopwatch.GetTimestamp(), Path.Combine(root, "codec-clips", choice.Codec));
+            Require(save.Accepted, save.Rejection); var result = save.Completion.GetAwaiter().GetResult();
+            Require(result.Succeeded, result.Error); files.Add(result.File);
         }
         // Exercise .NET 10's COM/WASAPI interop with real display + system audio.
         var actual = new Settings { ReplayMinutes = 1, FramesPerSecond = 30, BitrateMbps = 5, SystemAudio = true };
-        using (var session = new CaptureSession(actual, Path.Combine(root, "desktop-cache"), false))
+        using (var replays = new ReplayCache())
         {
-            for (int i = 0; i < 22; i++) { Thread.Sleep(500); session.Maintain(); Require(!session.HasExited, session.ErrorTail); }
-            files.Add(session.Save(session.Position, Path.Combine(root, "desktop-clip")));
+            var session = new CaptureSession(actual, Path.Combine(root, "desktop-cache"), false);
+            var sessionId = replays.RegisterSession(session);
+            for (int i = 0; i < 22; i++) { Thread.Sleep(500); replays.Maintain(sessionId); Require(!session.HasExited, session.ErrorTail); }
+            var save = replays.TrySave(sessionId, Stopwatch.GetTimestamp(), Path.Combine(root, "desktop-clip"));
+            Require(save.Accepted, save.Rejection); var result = save.Completion.GetAwaiter().GetResult();
+            Require(result.Succeeded, result.Error); files.Add(result.File);
         }
         return files;
     }

@@ -7,6 +7,26 @@ namespace F10Recorder;
 
 internal static class FramePacingChecks
 {
+    static bool SameTrace(string original, string retained)
+    {
+        if (!File.Exists(retained)) return false;
+        using var left = File.OpenRead(original); using var right = File.OpenRead(retained);
+        return System.Security.Cryptography.SHA256.HashData(left).SequenceEqual(System.Security.Cryptography.SHA256.HashData(right));
+    }
+    sealed class EvidenceFiles(string evidence, Dictionary<string, object> report) : ReplayFiles
+    {
+        internal override void DeleteDirectory(string path)
+        {
+            if (Directory.Exists(path))
+                foreach (string trace in Directory.GetFiles(path, "ffmpeg-*.log"))
+                    if (!SameTrace(trace, Path.Combine(evidence, Path.GetFileName(trace))))
+                    {
+                        report["retainedSessionDiagnostics"] = path;
+                        throw new IOException("Uncopied or unverified diagnostic trace retained in " + path);
+                    }
+            base.DeleteDirectory(path);
+        }
+    }
     internal static int Run(string data, int seconds, int fps, string mode, bool audio, string variant, int ceiling, int sourceFps, string codec)
     {
         data = Path.GetFullPath(data); Directory.CreateDirectory(data); RecorderHost.Initialize(data);
@@ -89,6 +109,25 @@ internal static class FramePacingChecks
             report["captureArguments"] = args.ToArray(); return args;
         };
         Process fixture = null; CaptureSession capture = null;
+        var replays = new ReplayCache(new EvidenceFiles(data, report)); ReplaySessionId sessionId = default;
+        RecorderMetrics CaptureMetrics()
+        {
+            var metrics = capture.Metrics; var buffer = replays.GetStatus(sessionId);
+            metrics.BufferedSeconds = buffer.BufferedSeconds; metrics.CacheBytes = buffer.CacheBytes;
+            return metrics;
+        }
+        void RetainDiagnostics()
+        {
+            if (capture == null || variant is not ("debug-timestamps" or "trace-production")) return;
+            replays.StopAcquisitionAsync(sessionId).GetAwaiter().GetResult();
+            foreach (string trace in Directory.GetFiles(capture.DirectoryPath, "ffmpeg-*.log"))
+            {
+                string retained = Path.Combine(data, Path.GetFileName(trace));
+                if (!File.Exists(retained)) File.Copy(trace, retained);
+                Require(SameTrace(trace, retained), "Retained diagnostic trace differs from the original.");
+                report["timestampTrace"] = retained;
+            }
+        }
         try
         {
             var info = new ProcessStartInfo(Environment.ProcessPath) { UseShellExecute = false, CreateNoWindow = true };
@@ -100,17 +139,20 @@ internal static class FramePacingChecks
             var settings = new Settings { ReplayMinutes = 1, FramesPerSecond = fps, BitrateMbps = 20, VideoCodec = codec, SystemAudio = audio, OutputDirectory = Path.Combine(data, "clips") };
             report["mediaEngine"] = MediaDependency.ResolveExecutable(); report["fixture"] = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(data, "pacing-ready.json")));
             capture = new CaptureSession(settings, Path.Combine(data, "buffer"), false);
+            sessionId = replays.RegisterSession(capture);
             wait.Restart(); var samples = new List<RecorderMetrics>();
             while (wait.Elapsed.TotalSeconds < seconds)
             {
                 Require(!fixture.HasExited, "Controlled source closed during capture.");
-                capture.Maintain(); Require(capture.Healthy, capture.ErrorTail); samples.Add(capture.Metrics); Thread.Sleep(200);
+                replays.Maintain(sessionId); Require(capture.Healthy, capture.ErrorTail); samples.Add(CaptureMetrics()); Thread.Sleep(200);
             }
-            string clip = capture.Save(capture.Position, settings.OutputDirectory);
-            report["clip"] = clip; report["samples"] = samples; report["finalMetrics"] = capture.Metrics;
+            var save = replays.TrySave(sessionId, Stopwatch.GetTimestamp(), settings.OutputDirectory);
+            Require(save.Accepted, save.Rejection); var result = save.Completion.GetAwaiter().GetResult();
+            Require(result.Succeeded, result.Error); string clip = result.File;
+            report["clip"] = clip; report["samples"] = samples; report["finalMetrics"] = CaptureMetrics();
             report["encoderErrorTail"] = capture.ErrorTail;
-            if (variant is "debug-timestamps" or "trace-production") report["timestampTrace"] = Directory.GetFiles(capture.DirectoryPath, "ffmpeg-*.log").Single();
-            capture.Dispose(); capture = null;
+            RetainDiagnostics();
+            replays.RetireSessionAsync(sessionId).GetAwaiter().GetResult(); capture = null;
             fixture.CloseMainWindow(); Require(fixture.WaitForExit(5000), "Source did not close cleanly.");
             if (mode == "dxgi-static")
             {
@@ -125,7 +167,8 @@ internal static class FramePacingChecks
         finally
         {
             RecorderRuntime.CaptureArgumentProbe = null;
-            capture?.Dispose();
+            try { RetainDiagnostics(); } catch (Exception ex) { report["traceRetentionError"] = ex.ToString(); }
+            replays.Dispose();
             if (fixture != null) { if (!fixture.HasExited) fixture.Kill(); fixture.Dispose(); }
             File.WriteAllText(Path.Combine(data, "pacing.json"), JsonSerializer.Serialize(report, WorkerProtocol.Json));
         }
