@@ -48,3 +48,11 @@ and controlled export outcomes. It opens no windows, registers no shortcuts,
 launches no recording engine, uses no GPU, captures no pixels/audio, changes no
 startup setting and installs nothing. Fixture output is not playable media and
 does not establish live capture, A/V alignment or performance acceptance.
+
+`./tests/capture-status.ps1 -Plan` previews deterministic capture-status checks.
+The dedicated `--capture-status` route exits before recorder initialization and
+uses the production status/owner-dispatch modules with controlled process liveness
+and delayed queue delivery. It creates no windows, shortcuts, recorder or encoder;
+it captures no pixels/audio, uses no GPU, changes no startup setting and installs
+nothing. Its only runtime output is a local verification report. See
+[capture status checks](capture-status.md) for coverage and limits.

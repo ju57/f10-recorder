@@ -26,3 +26,7 @@ Rejected { Start-VerificationLaunchPlan $worker }
 $live.Effects.SystemAudio=$false
 Rejected { Start-VerificationLaunchPlan $live }
 Write-Host 'Passed: actual script previews, explicit UI/capture effects, and contradictory launches rejected before Start-Process.'
+
+$status = & (Join-Path $PSScriptRoot 'capture-status.ps1') -Plan
+Require ($status.Arguments[0] -eq '--capture-status') 'Capture status route changed.'
+foreach ($effect in $status.Effects.Values) { Require (-not $effect) 'Capture status check acquired native side effects.' }

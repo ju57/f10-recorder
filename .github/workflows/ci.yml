@@ -49,6 +49,8 @@ jobs:
         run: dotnet build projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
       - name: Verify replay ownership without capture or GPU
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-ownership artifacts/replay-ownership-ci
+      - name: Verify capture status without capture or GPU
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --capture-status artifacts/capture-status-ci
       - name: Verify test launch effects without UI or capture
         shell: pwsh
         run: ./tests/verification-launch-checks.ps1

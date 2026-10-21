@@ -23,6 +23,7 @@ internal static class WorkerChecks
     static int Main(string[] args)
     {
         if (args.Length == 2 && args[0] == "--replay-ownership") return ReplayOwnershipChecks.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--capture-status") return CaptureStatusChecks.Run(Path.GetFullPath(args[1]));
         int engineRootIndex = Array.IndexOf(args, "--engine-root");
         if (engineRootIndex >= 0) MediaDependency.RootDirectory = Path.GetFullPath(args[engineRootIndex + 1]);
         int ownershipRootIndex = Array.IndexOf(args, "--ownership-root");

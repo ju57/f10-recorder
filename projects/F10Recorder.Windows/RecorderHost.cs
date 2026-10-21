@@ -7,7 +7,7 @@ namespace F10Recorder;
 // NativeWindow is used only for its Win32 message dispatch, never visual controls.
 internal sealed class RecorderHost : IWindowsRecorder
 {
-    readonly Action<Action> post;
+    readonly RecorderDispatch owner;
     readonly string settingsPath;
     readonly bool synthetic;
     readonly Func<int, string, string> captureScreenshot;
@@ -19,7 +19,6 @@ internal sealed class RecorderHost : IWindowsRecorder
     ReplayEngine engine;
     WindowCaptureTarget windowTarget;
     bool disposed;
-    int generation;
     public Settings Config { get; private set; }
     public string DataDirectory { get; }
     public bool Paused { get; private set; }
@@ -56,7 +55,7 @@ internal sealed class RecorderHost : IWindowsRecorder
     public RecorderHost(string data, Action<Action> dispatch, bool paused, string controlTitle, bool syntheticSource = false, Action<bool> setStartup = null, Func<int, string, string> screenshotSource = null)
     {
         data = WorkerIdentity.DataPath(data);
-        Initialize(data); post = dispatch; synthetic = syntheticSource; customStartupWriter = setStartup != null; startupWriter = setStartup ?? WindowsStartup.SetEnabled; captureScreenshot = screenshotSource ?? ScreenshotCapture.Capture;
+        Initialize(data); owner = new RecorderDispatch(dispatch); synthetic = syntheticSource; customStartupWriter = setStartup != null; startupWriter = setStartup ?? WindowsStartup.SetEnabled; captureScreenshot = screenshotSource ?? ScreenshotCapture.Capture;
         DataDirectory = data; settingsPath = Path.Combine(data, "settings.json"); Config = Settings.Load(settingsPath); Paused = paused;
         shortcuts = new HotkeyWindow(controlTitle); foreground = new ForegroundApplicationTracker();
         notices = new RecorderNotifications((title, message, kind, duration) => Notification?.Invoke(title, message, kind, duration));
@@ -73,38 +72,35 @@ internal sealed class RecorderHost : IWindowsRecorder
     }
     void StartEngine()
     {
-        int current = ++generation;
+        var Dispatch = owner.NextGeneration();
         windowTarget?.Dispose(); windowTarget = null;
         if (Config.CaptureMode == "window" && !synthetic) windowTarget = new WindowCaptureTarget(Config);
         engine = new ReplayEngine(Config, DataDirectory, Paused, synthetic, windowTarget == null ? null : windowTarget.Read);
-        void Dispatch(Action action) => post(() => { if (!disposed && generation == current) action(); });
-        engine.CaptureStateChanged += (phase, message, ready) =>
-        {
-            int capture = engine.CaptureProcessId;
-            Dispatch(() =>
-            {
-                // A queued ready event cannot revive a retired or restarting source.
-                if (ready && (Paused || engine.RestartPending || capture == 0 || capture != engine.CaptureProcessId)) return;
-                State = ready && !shortcuts.SaveRegistered ? "Buffering · save shortcut unavailable" : message;
-                Phase = phase; Ready = ready; notices.CaptureChanged(phase, message, Ready, Paused, Config, shortcuts.SaveRegistered); Changed?.Invoke();
-            });
-        };
+        var current = engine;
+        current.CaptureStatusChanged += () => Dispatch(() => PresentCaptureStatus(current.ReadCaptureStatus()));
+        PresentCaptureStatus(current.ReadCaptureStatus());
         engine.SaveStarted += () => Dispatch(notices.SaveStarted);
         engine.SaveFinished += (message, success) => Dispatch(() => { notices.SaveFinished(message, success); Saved?.Invoke(message, success); Changed?.Invoke(); });
+    }
+    void PresentCaptureStatus(CaptureStatus status)
+    {
+        State = status.Ready && !shortcuts.SaveRegistered ? "Buffering · save shortcut unavailable" : status.Message;
+        Phase = status.Phase; Ready = status.Ready;
+        notices.CaptureChanged(status.Phase, status.Message, Ready, Paused, Config, shortcuts.SaveRegistered);
+        Changed?.Invoke();
     }
     public void SampleForeground() => foreground.Sample();
     public void SaveReplay() { if (!Applying && !disposed) engine.Save(Config.CaptureMode == "window" ? ApplicationName : foreground.Sample()); }
     public void Pause(bool value)
     {
         if (Applying || disposed || Paused == value) return;
-        Paused = value; Ready = false; Phase = value ? CapturePhase.Paused : CapturePhase.Starting; State = value ? "Paused" : "Starting replay buffer…";
-        engine.Pause(value); notices.PauseChanged(value); Changed?.Invoke();
+        Paused = value; engine.Pause(value);
+        PresentCaptureStatus(engine.ReadCaptureStatus()); notices.PauseChanged(value);
     }
     public void Restart()
     {
         if (Applying || disposed) return;
-        Ready = false; Phase = Paused ? CapturePhase.Paused : CapturePhase.Starting; State = Paused ? "Paused" : "Restarting replay buffer…";
-        engine.Restart(); Changed?.Invoke();
+        engine.Restart(); PresentCaptureStatus(engine.ReadCaptureStatus());
     }
     public async Task ApplyAsync(Settings next, bool startup)
     {
@@ -131,7 +127,6 @@ internal sealed class RecorderHost : IWindowsRecorder
                 throw;
             }
             finally { StartEngine(); }
-            Ready = false; Phase = Paused ? CapturePhase.Paused : CapturePhase.Starting; State = Paused ? "Paused" : "Starting replay buffer…";
         }
         finally { Applying = false; Register(Config); Changed?.Invoke(); }
     }
@@ -177,7 +172,7 @@ internal sealed class RecorderHost : IWindowsRecorder
     public static void OpenFolder(string path) { Directory.CreateDirectory(path); Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
     public void Dispose()
     {
-        if (disposed) return; disposed = true;
+        if (disposed) return; disposed = true; owner.Dispose();
         shortcuts.Dispose(); foreground.Dispose(); engine.Dispose(); windowTarget?.Dispose();
     }
     public Task StopAsync()
