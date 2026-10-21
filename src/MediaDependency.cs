@@ -24,74 +24,58 @@ namespace F10Recorder
         internal const string PackageVersion = "9.0.2";
         internal const string PackageUrl = "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip";
         internal const string PackageSha256 = "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba";
-        internal static string RootDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "F10Recorder");
+        // This is never assigned from --data-dir, settings, manifests or PATH.
+        internal static string RootDirectory = TrustedStorage.DefaultRoot;
+        internal const string ExecutableSha256 = "3256173f3f8bffd7df12227c68adf68025edb1832273a9530688a7bb1ed8edec";
+        internal const string ProbeSha256 = "f0d36ecbbdd3bcfac3efa078c96c7271c2e68b3810595552ac3b7f17e9a65c52";
+        internal static string ExecutablePath { get { return Path.Combine(RootDirectory, "ffmpeg-" + PackageVersion, "bin", "ffmpeg.exe"); } }
         static readonly object Gate = new object();
-        static string cacheRoot, cacheExecutable;
-        static long cacheLength, cacheWriteTicks;
 
         internal static string ResolveExecutable()
         {
             lock (Gate)
             {
-                if (cacheRoot == RootDirectory && File.Exists(cacheExecutable))
+                try { using (OpenVerifiedExecutable(ExecutablePath)) return ExecutablePath; }
+                catch (Exception ex)
                 {
-                    var file = new FileInfo(cacheExecutable);
-                    if (file.Length == cacheLength && file.LastWriteTimeUtc.Ticks == cacheWriteTicks) return cacheExecutable;
-                }
-                var installation = FindCompatible(RootDirectory, DiscoverCandidates(), true);
-                if (installation == null) throw new FileNotFoundException("The recording engine is unavailable. Run F10 Recorder's installer to repair it.");
-                Remember(installation); return installation.Executable;
-            }
-        }
-        static void Remember(MediaInstallation installation)
-        {
-            var file = new FileInfo(installation.Executable); cacheRoot = RootDirectory; cacheExecutable = file.FullName; cacheLength = file.Length; cacheWriteTicks = file.LastWriteTimeUtc.Ticks;
-        }
-        internal static IEnumerable<string> DiscoverCandidates()
-        {
-            var paths = new List<string>();
-            foreach (string directory in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
-                if (!string.IsNullOrWhiteSpace(directory)) try { paths.Add(Path.Combine(directory.Trim().Trim('"'), "ffmpeg.exe")); } catch (ArgumentException) { }
-            paths.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "ffmpeg", "bin", "ffmpeg.exe"));
-            paths.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "ffmpeg", "bin", "ffmpeg.exe"));
-            paths.Add(@"C:\ffmpeg\bin\ffmpeg.exe");
-            string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            paths.Add(Path.Combine(local, "Microsoft", "WinGet", "Links", "ffmpeg.exe"));
-            paths.Add(Path.Combine(local, "Programs", "ffmpeg", "bin", "ffmpeg.exe"));
-            string scoop = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "scoop", "apps");
-            foreach (string name in new[] { "ffmpeg", "ffmpeg-essentials" }) paths.Add(Path.Combine(scoop, name, "current", "bin", "ffmpeg.exe"));
-            string winget = Path.Combine(local, "Microsoft", "WinGet", "Packages");
-            if (Directory.Exists(winget))
-            {
-                foreach (string package in Directory.GetDirectories(winget, "Gyan.FFmpeg*"))
-                {
-                    paths.Add(Path.Combine(package, "bin", "ffmpeg.exe"));
-                    foreach (string child in Directory.GetDirectories(package)) paths.Add(Path.Combine(child, "bin", "ffmpeg.exe"));
+                    if (!(ex is IOException) && !(ex is UnauthorizedAccessException) && !(ex is System.ComponentModel.Win32Exception)) throw;
+                    throw new IOException("The approved recording engine is unavailable or failed verification. Choose Repair recording engine from the tray menu.", ex);
                 }
             }
-            return paths.Distinct(StringComparer.OrdinalIgnoreCase).Where(File.Exists).ToArray();
         }
-        internal static MediaInstallation FindCompatible(string root, IEnumerable<string> candidates, bool includePrivate)
+        internal static IDisposable OpenVerifiedExecutable(string path)
         {
-            var all = new List<string>(candidates);
-            // Installer-owned metadata is separate from user recording preferences.
-            string manifest = Path.Combine(root, "media-engine.json");
-            try { if (File.Exists(manifest)) { var saved = new JavaScriptSerializer().Deserialize<MediaInstallation>(File.ReadAllText(manifest)); if (saved != null && !string.IsNullOrEmpty(saved.Executable) && (includePrivate || !IsPrivate(root, saved.Executable))) all.Add(saved.Executable); } } catch (Exception ex) { Log.Write("Media engine metadata ignored: " + ex.Message); }
-            if (includePrivate && Directory.Exists(Path.Combine(root, "runtime"))) all.AddRange(Directory.GetFiles(Path.Combine(root, "runtime"), "ffmpeg.exe", SearchOption.AllDirectories).Where(path => !path.Contains(Path.DirectorySeparatorChar + ".install-")));
-            foreach (string candidate in all.Distinct(StringComparer.OrdinalIgnoreCase))
+            string full = Path.GetFullPath(path);
+            CheckOwned(RootDirectory, full);
+            string name = Path.GetFileName(full);
+            string expectedHash = name.Equals("ffmpeg.exe", StringComparison.OrdinalIgnoreCase) ? ExecutableSha256
+                : name.Equals("ffprobe.exe", StringComparison.OrdinalIgnoreCase) ? ProbeSha256 : null;
+            if (expectedHash == null) throw new IOException("Only approved recording-engine tools may run.");
+            var lease = new ExecutableLease();
+            try
             {
-                string version;
-                if (!TryValidate(candidate, out version)) continue;
-                return new MediaInstallation { Executable = Path.GetFullPath(candidate), Version = version, Source = IsPrivate(root, candidate) ? "private" : "existing", Sha256 = Hash(candidate), PackageUrl = IsPrivate(root, candidate) ? PackageUrl : null };
+                lease.Root = TrustedStorage.Acquire(RootDirectory);
+                lease.Parents = TrustedStorage.PinDirectories(Path.GetDirectoryName(full));
+                lease.File = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
+                TrustedStorage.ValidateFile(full);
+                using (var sha = SHA256.Create())
+                    if (!BitConverter.ToString(sha.ComputeHash(lease.File)).Replace("-", "").Equals(expectedHash, StringComparison.OrdinalIgnoreCase)) throw new IOException("The recording engine failed verification. Choose Repair recording engine.");
+                return lease;
             }
-            return null;
+            catch { lease.Dispose(); throw; }
         }
-        static bool IsPrivate(string root, string path) { return Path.GetFullPath(path).StartsWith(Path.GetFullPath(Path.Combine(root, "runtime")) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase); }
+        sealed class ExecutableLease : IDisposable
+        {
+            internal IDisposable Root, Parents;
+            internal FileStream File;
+            public void Dispose() { if (File != null) File.Dispose(); if (Parents != null) Parents.Dispose(); if (Root != null) Root.Dispose(); }
+        }
         internal static bool TryValidate(string path, out string version)
         {
             version = null;
             try
             {
+                using (OpenVerifiedExecutable(path)) { }
                 if (!File.Exists(path) || !Path.GetFileName(path).Equals("ffmpeg.exe", StringComparison.OrdinalIgnoreCase)) return false;
                 // Reject malformed/non-console carriers before Windows can display a loader error dialog.
                 using (var reader = new BinaryReader(File.OpenRead(path)))
@@ -138,52 +122,65 @@ namespace F10Recorder
         {
             try
             {
-                var installation = Ensure(root, DiscoverCandidates(), allowDownload, new Uri(PackageUrl), PackageSha256, Download);
-                // Remove the old editable engine location while preserving recording preferences.
-                string preferences = Path.Combine(root, "settings.json");
-                if (File.Exists(preferences))
-                {
-                    var fields = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(preferences));
-                    if (fields != null && fields.ContainsKey("FfmpegPath")) { fields.Remove("FfmpegPath"); string temporary = preferences + ".tmp"; File.WriteAllText(temporary, new JavaScriptSerializer().Serialize(fields)); File.Replace(temporary, preferences, null); }
-                }
+                var installation = Ensure(allowDownload, Download);
+                CaptureSession.TryDeleteFile(Path.Combine(root, "media-install-error.txt"));
                 Log.Write("Media engine ready (" + installation.Source + "): " + installation.Executable); return 0;
             }
             catch (Exception ex) { Directory.CreateDirectory(root); File.WriteAllText(Path.Combine(root, "media-install-error.txt"), ex.Message); Log.Write(ex.ToString()); return 1; }
         }
         internal static MediaInstallation DownloadForVerification(string root)
         {
-            return Ensure(root, new string[0], true, new Uri(PackageUrl), PackageSha256, Download);
+            return Ensure(true, Download);
         }
-        internal static MediaInstallation Ensure(string root, IEnumerable<string> candidates, bool allowDownload, Uri package, string expectedHash, Action<Uri, string> acquire)
+        internal static MediaInstallation Ensure(bool allowDownload, Action<Uri, string> acquire)
         {
-            Directory.CreateDirectory(root);
-            var found = FindCompatible(root, candidates, true);
-            if (found != null) { SaveManifest(root, found); return found; }
-            if (!allowDownload) throw new FileNotFoundException("No compatible FFmpeg installation was found.");
-            string runtime = Path.Combine(root, "runtime"); Directory.CreateDirectory(runtime);
-            string staging = Path.Combine(runtime, ".install-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(staging);
-            try
+            lock (Gate)
             {
-                string archive = Path.Combine(staging, "package.zip"); acquire(package, archive);
-                if (!Hash(archive).Equals(expectedHash, StringComparison.OrdinalIgnoreCase)) throw new IOException("The downloaded recording engine failed checksum verification.");
-                string extracted = Path.Combine(staging, "extracted"); ExtractArchive(archive, extracted);
-                var installation = FindCompatible(staging, Directory.GetFiles(extracted, "ffmpeg.exe", SearchOption.AllDirectories), false);
-                if (installation == null) throw new IOException("The downloaded FFmpeg package does not support this recorder.");
-                // Use a unique private directory so a failed update never overwrites a working engine.
-                string destination = Path.Combine(runtime, "ffmpeg-" + PackageVersion + "-" + Guid.NewGuid().ToString("N").Substring(0, 8));
-                string relative = installation.Executable.Substring(Path.GetFullPath(extracted).Length + 1);
-                CheckOwned(runtime, extracted); CheckOwned(runtime, destination); Directory.Move(extracted, destination);
-                installation.Executable = Path.Combine(destination, relative); installation.Source = "private"; installation.PackageUrl = package.AbsoluteUri;
-                SaveManifest(root, installation); return installation;
+                TrustedStorage.CreatePrivateDirectory(RootDirectory);
+                using (TrustedStorage.Acquire(RootDirectory))
+                using (var setupLock = new FileStream(Path.Combine(RootDirectory, "setup.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+                {
+                    string version;
+                    if (TryValidate(ExecutablePath, out version)) return Installation(version);
+                    if (!allowDownload) throw new FileNotFoundException("The approved recording engine is unavailable. Choose Repair recording engine when online.");
+                    string staging = Path.Combine(RootDirectory, ".install-" + Guid.NewGuid().ToString("N"));
+                    TrustedStorage.CreatePrivateDirectory(staging);
+                    try
+                    {
+                        string archive = Path.Combine(staging, "package.zip"); acquire(new Uri(PackageUrl), archive);
+                        if (!Hash(archive).Equals(PackageSha256, StringComparison.OrdinalIgnoreCase)) throw new IOException("The downloaded recording engine failed checksum verification. Retry setup.");
+                        string extracted = Path.Combine(staging, "extracted"); ExtractArchive(archive, extracted);
+                        string binary = Path.Combine(extracted, "ffmpeg-" + PackageVersion + "-essentials_build", "bin", "ffmpeg.exe");
+                        if (!TryValidate(binary, out version)) throw new IOException("The approved FFmpeg package does not support this recorder.");
+                        string packageRoot = Path.GetDirectoryName(Path.GetDirectoryName(binary));
+                        string installedPackage = Path.Combine(RootDirectory, "ffmpeg-" + PackageVersion);
+                        TrustedStorage.CreatePrivateDirectory(installedPackage);
+                        string destination = Path.GetDirectoryName(ExecutablePath); TrustedStorage.CreatePrivateDirectory(destination);
+                        using (TrustedStorage.PinDirectories(destination))
+                        {
+                            // Keep the authenticated package's licenses, documentation,
+                            // presets and inspection tool alongside its engine.
+                            foreach (string file in Directory.GetFiles(packageRoot, "*", SearchOption.AllDirectories))
+                            {
+                                if (string.Equals(file, binary, StringComparison.OrdinalIgnoreCase)) continue;
+                                string target = Path.Combine(installedPackage, file.Substring(packageRoot.Length + 1));
+                                CheckOwned(installedPackage, target); Directory.CreateDirectory(Path.GetDirectoryName(target)); File.Copy(file, target, true);
+                            }
+                            // Preserve an existing engine until a fully verified replacement exists.
+                            string replacement = Path.Combine(destination, ".replacement-" + Guid.NewGuid().ToString("N"));
+                            try { File.Copy(binary, replacement); if (File.Exists(ExecutablePath)) File.Replace(replacement, ExecutablePath, null); else File.Move(replacement, ExecutablePath); }
+                            finally { CaptureSession.TryDeleteFile(replacement); }
+                        }
+                        using (OpenVerifiedExecutable(ExecutablePath)) { }
+                        return Installation(version);
+                    }
+                    finally { CheckOwned(RootDirectory, staging); CaptureSession.TryDeleteDirectory(staging); }
+                }
             }
-            finally { CheckOwned(runtime, staging); CaptureSession.TryDeleteDirectory(staging); }
         }
-        static void SaveManifest(string root, MediaInstallation installation)
+        static MediaInstallation Installation(string version)
         {
-            string path = Path.Combine(root, "media-engine.json"), temporary = path + ".tmp";
-            File.WriteAllText(temporary, new JavaScriptSerializer().Serialize(installation));
-            if (File.Exists(path)) File.Replace(temporary, path, null); else File.Move(temporary, path);
-            CaptureSession.TryDeleteFile(Path.Combine(root, "media-install-error.txt"));
+            return new MediaInstallation { Executable = ExecutablePath, Version = version, Source = "managed", Sha256 = ExecutableSha256, PackageUrl = PackageUrl };
         }
         internal static string Hash(string path) { using (var sha = SHA256.Create()) using (var file = File.OpenRead(path)) return BitConverter.ToString(sha.ComputeHash(file)).Replace("-", "").ToLowerInvariant(); }
         static void CheckOwned(string root, string target) { if (!Path.GetFullPath(target).StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new IOException("Media package path is outside its installation directory."); }

@@ -221,9 +221,9 @@ internal sealed class SettingsPanel : UserControl
         {
             if (probing || codec.SelectedItem is not EncoderOption chosen) throw new InvalidOperationException("Wait for an available GPU encoder.");
             var next = new Settings { CaptureMode = captureMode.SelectedIndex == 1 ? "window" : "monitor", WindowExecutable = selectedExecutable, WindowClass = selectedClass, ReplayMinutes = (int)(minutes.Value ?? 5), BitrateMbps = (int)(bitrate.Value ?? 20), DisplayIndex = (int)(display.Value ?? -1), FramesPerSecond = (int)fps.SelectedItem, VideoCodec = chosen.Codec, SystemAudio = audio.IsChecked == true, OutputDirectory = clips.Text, ScreenshotDirectory = screenshots.Text, SaveKey = saveShortcut.Key, SaveModifiers = saveShortcut.Modifiers, OverlayKey = overlayShortcut.Key, OverlayModifiers = overlayShortcut.Modifiers, ScreenshotKey = screenshotShortcut.Key, ScreenshotModifiers = screenshotShortcut.Modifiers };
-            next.Validate(); error.Text = ""; CaptureVisibility.Configure(next); await recorder.ApplyAsync(next, startup.IsChecked == true); Submitted = next; CloseRequested?.Invoke(); return true;
+            next.Validate(); error.Text = ""; CaptureVisibility.Configure(null); await recorder.ApplyAsync(next, startup.IsChecked == true); CaptureVisibility.Configure(recorder.Config, recorder.CaptureModeKnown); Submitted = next; CloseRequested?.Invoke(); return true;
         }
-        catch (Exception ex) { CaptureVisibility.Configure(recorder.Config); error.Text = ex.Message; return false; }
+        catch (Exception ex) { CaptureVisibility.Configure(recorder.Config, recorder.CaptureModeKnown); error.Text = ex.Message; return false; }
     }
 }
 

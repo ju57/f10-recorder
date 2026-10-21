@@ -6,9 +6,9 @@ internal static class CaptureVisibility
 {
     static readonly List<WeakReference<Window>> windows = [];
     static bool exclude = true;
-    internal static void Configure(Settings settings)
+    internal static void Configure(Settings settings, bool known = true)
     {
-        bool next = settings.CaptureMode != "window";
+        bool next = !known || settings == null || settings.CaptureMode != "window";
         if (exclude == next) return;
         exclude = next;
         windows.RemoveAll(reference => !reference.TryGetTarget(out _));

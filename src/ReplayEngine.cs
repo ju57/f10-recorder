@@ -90,7 +90,7 @@ namespace F10Recorder
                 else if (settings.SystemAudio)
                 {
                     string name = "F10Recorder-" + Guid.NewGuid().ToString("N");
-                    pipe = new NamedPipeServerStream(name, PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 65536, 65536);
+                    pipe = AudioPipe.Create(name);
                     args.AddRange(new[] { "-copyts", "-thread_queue_size", "64", "-probesize", "32", "-analyzeduration", "0", "-f", "matroska", "-i", @"\\.\pipe\" + name });
                     // A separate video input queues frames while the audio jitter
                     // buffer delays delivery, subject to shared scheduler limits.
@@ -150,14 +150,7 @@ namespace F10Recorder
                 process.BeginOutputReadLine(); process.BeginErrorReadLine();
                 if (pipe != null)
                 {
-                    var connected = pipe.BeginWaitForConnection(null, null);
-                    var timeout = Stopwatch.StartNew();
-                    while (!connected.AsyncWaitHandle.WaitOne(100))
-                    {
-                        if (cancelled != null && cancelled()) throw new OperationCanceledException();
-                        if (process.HasExited || timeout.Elapsed.TotalSeconds > 10) throw new IOException("FFmpeg did not connect to system audio. " + ErrorTail);
-                    }
-                    pipe.EndWaitForConnection(connected); connected.AsyncWaitHandle.Close();
+                    AudioPipe.Accept(pipe, process, cancelled, 10000);
                     audio.Start(pipe, mediaClock);
                 }
                 Log.Write("Capture started; PID " + process.Id + "; " + directory);
@@ -327,7 +320,14 @@ namespace F10Recorder
         public static Process StartProcess(string executable, IEnumerable<string> args, string workDirectory)
         {
             var info = new ProcessStartInfo(executable, string.Join(" ", args.Select(Quote))) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardError = true, RedirectStandardOutput = true, WorkingDirectory = workDirectory };
-            return Process.Start(info);
+            // Every FFmpeg sink authenticates bytes and retains a read-only lease
+            // through CreateProcess, including callers that retained an older path.
+            using (MediaDependency.OpenVerifiedExecutable(executable))
+            {
+                info.WorkingDirectory = Path.GetDirectoryName(Path.GetFullPath(executable));
+                info.EnvironmentVariables["PATH"] = Environment.SystemDirectory;
+                return Process.Start(info);
+            }
         }
         public static string Quote(string argument)
         {

@@ -10,6 +10,7 @@ internal interface IWindowsRecorder : IDisposable
     bool CanSave { get; }
     bool Saving { get; }
     bool Applying { get; }
+    bool CaptureModeKnown { get; }
     bool ScreenshotInProgress { get; }
     string LastScreenshot { get; }
     string State { get; }
@@ -27,6 +28,7 @@ internal interface IWindowsRecorder : IDisposable
     void Pause(bool value);
     void Restart();
     Task ApplyAsync(Settings next, bool startup);
+    Task RepairMediaAsync();
     void TakeScreenshot();
     Task StopAsync();
 }
@@ -51,6 +53,7 @@ internal sealed class WindowsRecorder : IWindowsRecorder
     public bool CanSave => backend.CanSave;
     public bool Saving => backend.Saving;
     public bool Applying => backend.Applying;
+    public bool CaptureModeKnown => backend.CaptureModeKnown;
     public bool ScreenshotInProgress => backend.ScreenshotInProgress;
     public string LastScreenshot => backend.LastScreenshot;
     public string State => backend.State;
@@ -72,6 +75,7 @@ internal sealed class WindowsRecorder : IWindowsRecorder
     public void Pause(bool value) => backend.Pause(value);
     public void Restart() => backend.Restart();
     public Task ApplyAsync(Settings next, bool startup) => backend.ApplyAsync(next, startup);
+    public Task RepairMediaAsync() => backend.RepairMediaAsync();
     public void TakeScreenshot() => backend.TakeScreenshot();
     public Task StopAsync() => backend.StopAsync();
     public void Dispose() => backend.Dispose();

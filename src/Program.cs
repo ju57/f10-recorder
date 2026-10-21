@@ -15,14 +15,19 @@ namespace F10Recorder
         [STAThread]
         static int Main(string[] args)
         {
+            if (args.Length == 2 && args[0] == "--dependency-marker") { File.WriteAllText(args[1], "Unapproved engine executed"); return 0; }
+            if (args.Length == 3 && args[0] == "--dependency-pipe")
+            {
+                using (var pipe = new System.IO.Pipes.NamedPipeClientStream(".", args[1], System.IO.Pipes.PipeDirection.In))
+                { pipe.Connect(5000); File.WriteAllText(args[2], pipe.ReadByte().ToString()); return 0; }
+            }
             RecorderRuntime.MediaEngineResolver = MediaDependency.ResolveExecutable;
             string data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "F10Recorder");
             int index = Array.IndexOf(args, "--data-dir");
             if (index >= 0 && index + 1 < args.Length) data = Path.GetFullPath(args[index + 1]);
-            Directory.CreateDirectory(data); Log.DirectoryPath = data;
-            MediaDependency.RootDirectory = data;
+            Directory.CreateDirectory(data); data = Native.FinalDirectoryPath(data); Log.DirectoryPath = data;
             if (args.Contains("--ensure-media")) return MediaDependency.Install(data, !args.Contains("--no-download"));
-            if (args.Contains("--dependency-test")) return DependencyVerification.Run(data, args.Contains("--download"));
+            if (args.Contains("--dependency-test")) { int packageIndex = Array.IndexOf(args, "--package"); return DependencyVerification.Run(data, args.Contains("--download"), packageIndex >= 0 ? args[packageIndex + 1] : null); }
             if (args.Contains("--settings-test")) return Verification.SettingsWindow(data);
             if (args.Contains("--overlay-test")) return OverlayVerification.Run(data);
             if (args.Contains("--notification-test")) return NotificationVerification.Run(data);
@@ -34,10 +39,9 @@ namespace F10Recorder
             if (args.Contains("--codec-test")) { int codecArgument = Array.IndexOf(args, "--codec"); return Verification.CodecMedia(data, codecArgument >= 0 && codecArgument + 1 < args.Length ? args[codecArgument + 1] : null); }
             if (args.Contains("--resilience-test")) return Verification.Resilience(data);
             if (args.Contains("--self-test") || args.Contains("--smoke-test")) return Verification.Run(data, args.Contains("--self-test"));
-            bool first;
-            using (var mutex = new Mutex(true, @"Local\F10Recorder-Interactive-" + Environment.UserName, out first))
+            using (var ownership = TrustedStorage.TryAcquireLock(TrustedStorage.DefaultRoot, "legacy-ui-" + Process.GetCurrentProcess().SessionId))
             {
-                if (!first)
+                if (ownership == null)
                 {
                     int command = args.Contains("--quit") ? 4 : args.Contains("--pause") ? 2 : args.Contains("--resume") ? 3 : args.Contains("--overlay") ? 5 : args.Contains("--screenshot") ? 6 : 1;
                     IntPtr window = Native.FindWindow(null, HotkeyWindow.ControlTitle);
@@ -45,7 +49,7 @@ namespace F10Recorder
                 }
                 Native.SetProcessDPIAware();
                 Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
-                try { using (var app = new TrayApplication(data, args.Contains("--paused"), args.Contains("--settings"))) { if (args.Contains("--overlay")) app.ToggleOverlay(); if (args.Contains("--screenshot")) app.TakeScreenshot(); Application.Run(app); } }
+                try { using (TrustedStorage.AcquireLock(TrustedStorage.DefaultRoot, "profile", data, out data)) using (var app = new TrayApplication(data, args.Contains("--paused"), args.Contains("--settings"))) { if (args.Contains("--overlay")) app.ToggleOverlay(); if (args.Contains("--screenshot")) app.TakeScreenshot(); Application.Run(app); } }
                 catch (Exception ex) { Log.Write(ex.ToString()); MessageBox.Show(ex.Message, "F10 Recorder", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
             }
             return 0;
@@ -93,6 +97,13 @@ namespace F10Recorder
             menu.Items.Add("Open overlay", null, delegate { ToggleOverlay(); });
             pauseItem = new ToolStripMenuItem(paused ? "Resume recording" : "Pause recording"); pauseItem.Click += delegate { SetPaused(!paused); }; menu.Items.Add(pauseItem);
             menu.Items.Add("Restart buffer", null, delegate { engine.Restart(); });
+            menu.Items.Add("Repair recording engine", null, async delegate
+            {
+                if (engine.IsSaving || takingScreenshot) { Notify("Repair unavailable", "Wait for saving to finish.", NotificationKind.Warning, 6000); return; }
+                int result = await Task.Run(delegate { return MediaDependency.Install(data, true); });
+                if (result == 0) { engine.Restart(); Notify("Recording engine ready", "The approved recording engine is available.", NotificationKind.Success, 4000); }
+                else Notify("Recording engine repair failed", "Check the connection and retry. Details are in media-install-error.txt.", NotificationKind.Warning, 6000);
+            });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Quit", null, delegate { ExitThread(); });
             tray.ContextMenuStrip = menu;

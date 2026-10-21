@@ -36,19 +36,53 @@ internal static class MigrationChecks
         }
         report["testShortcutModifiers"] = shortcutModifiers;
         WindowsRecorder.Initialize(data);
+        int engineRootIndex = Array.IndexOf(args, "--engine-root");
+        if (engineRootIndex >= 0) MediaDependency.RootDirectory = Path.GetFullPath(args[engineRootIndex + 1]);
         report["mediaEngine"] = MediaDependency.ResolveExecutable();
         var config = new Settings { ReplayMinutes = 1, FramesPerSecond = 30, BitrateMbps = 5, OutputDirectory = Path.Combine(data, "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots"), SaveKey = 114, SaveModifiers = shortcutModifiers, OverlayKey = 117, OverlayModifiers = shortcutModifiers, ScreenshotKey = 118, ScreenshotModifiers = shortcutModifiers };
         if (args.Contains("--presentation-only")) config.CaptureMode = "window";
         config.Save(Path.Combine(data, "settings.json"));
         App.DataDirectory = data; App.Arguments = ["--paused", "--settings"]; App.ControlTitle = "F10Recorder.MigrationCheck." + Guid.NewGuid();
         App.RecorderFactory = (root, post, paused, title) => new WindowsRecorder(root, post, paused, title, true, enabled => { if (failStartup) { failStartup = false; throw new IOException("Controlled startup-write failure."); } report["startupChoiceSubmitted"] = enabled; });
-        App.Started = app => _ = args.Contains("--presentation-only") ? CheckPresentationAsync(app, args.Contains("--render-only")) : args.Contains("--focus-only") ? CheckFocusAsync(app) : CheckAsync(app);
+        App.Started = app => _ = args.Contains("--security-ui") ? CheckSecurityUiAsync(app) : args.Contains("--presentation-only") ? CheckPresentationAsync(app, args.Contains("--render-only")) : args.Contains("--focus-only") ? CheckFocusAsync(app) : CheckAsync(app);
         try { Program.BuildAvaloniaApp().StartWithClassicDesktopLifetime([]); }
         catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); File.WriteAllText(Path.Combine(data, "verification.json"), JsonSerializer.Serialize(report)); }
         return report.TryGetValue("result", out var result) && (string)result == "passed" ? 0 : 1;
     }
     static void Require(bool condition, string error) { if (!condition) throw new Exception(error); }
     [DllImport("user32.dll")] static extern bool GetWindowDisplayAffinity(IntPtr window, out uint affinity);
+    // Explicitly coordinated native UI check: paused, fake startup writer, no
+    // recording/screenshots/input injection. Exclusion can affect NVIDIA replay.
+    static async Task CheckSecurityUiAsync(App app)
+    {
+        try
+        {
+            await Until(() => app.SettingsWindow.Panel.CodecCheckFinished, "Codec probing did not finish.");
+            void Affinity(uint expected)
+            {
+                Require(GetWindowDisplayAffinity(app.SettingsWindow.TryGetPlatformHandle().Handle, out uint actual) && actual == expected, "Settings capture affinity was " + actual + ", expected " + expected);
+            }
+            Settings Next(string mode) => new()
+            {
+                CaptureMode = mode, WindowExecutable = Environment.ProcessPath, WindowClass = "ControlledSecurityFixture",
+                OutputDirectory = app.Recorder.Config.OutputDirectory, ScreenshotDirectory = app.Recorder.Config.ScreenshotDirectory,
+                SaveKey = 114, SaveModifiers = shortcutModifiers, OverlayKey = 117, OverlayModifiers = shortcutModifiers, ScreenshotKey = 118, ScreenshotModifiers = shortcutModifiers
+            };
+            Affinity(0x11);
+            failStartup = true;
+            var change = app.Recorder.ApplyAsync(Next("window"), WindowsStartup.Enabled);
+            Affinity(0x11);
+            try { await change; throw new Exception("Controlled rejection did not occur."); } catch (IOException) { }
+            Require(app.Recorder.Config.CaptureMode == "monitor", "Rejected transition changed capture mode."); Affinity(0x11);
+            change = app.Recorder.ApplyAsync(Next("window"), WindowsStartup.Enabled); Affinity(0x11); await change; Affinity(0);
+            change = app.Recorder.ApplyAsync(Next("monitor"), WindowsStartup.Enabled); Affinity(0x11); await change; Affinity(0x11);
+            Require(app.Recorder.Paused && app.Recorder.CaptureProcessId == 0, "Security UI check started recording.");
+            report["pendingRejectedAndSuccessfulNativeCaptureExclusion"] = true;
+            report["captureStarted"] = false; report["result"] = "passed";
+        }
+        catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); }
+        finally { File.WriteAllText(Path.Combine(data, "verification.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true })); app.Quit(); }
+    }
     // No recording, screenshot, settings Apply, startup write or input injection.
     static async Task CheckPresentationAsync(App app, bool renderOnly)
     {

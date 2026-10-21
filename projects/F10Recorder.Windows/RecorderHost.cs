@@ -27,6 +27,7 @@ internal sealed class RecorderHost : IWindowsRecorder
     public CapturePhase Phase { get; private set; } = CapturePhase.Starting;
     public bool CanSave => !Applying && !Paused && engine.CanSave;
     public bool Applying { get; private set; }
+    public bool CaptureModeKnown => !Applying;
     public bool ScreenshotInProgress { get; private set; }
     public string LastScreenshot { get; private set; }
     public string State { get; private set; } = "Starting replay buffer…";
@@ -50,12 +51,12 @@ internal sealed class RecorderHost : IWindowsRecorder
     internal static void Initialize(string data)
     {
         Directory.CreateDirectory(data); Log.DirectoryPath = data;
-        MediaDependency.RootDirectory = data;
         RecorderRuntime.MediaEngineResolver = MediaDependency.ResolveExecutable;
     }
 
     public RecorderHost(string data, Action<Action> dispatch, bool paused, string controlTitle, bool syntheticSource = false, Action<bool> setStartup = null, Func<int, string, string> screenshotSource = null)
     {
+        data = WorkerIdentity.DataPath(data);
         Initialize(data); post = dispatch; synthetic = syntheticSource; customStartupWriter = setStartup != null; startupWriter = setStartup ?? WindowsStartup.SetEnabled; captureScreenshot = screenshotSource ?? ScreenshotCapture.Capture;
         DataDirectory = data; settingsPath = Path.Combine(data, "settings.json"); Config = Settings.Load(settingsPath); Paused = paused;
         shortcuts = new HotkeyWindow(controlTitle); foreground = new ForegroundApplicationTracker();
@@ -132,12 +133,28 @@ internal sealed class RecorderHost : IWindowsRecorder
         }
         finally { Applying = false; Register(Config); Changed?.Invoke(); }
     }
+    public async Task RepairMediaAsync()
+    {
+        if (Applying || disposed || engine.IsSaving || ScreenshotInProgress) throw new InvalidOperationException("Wait for settings or saving to finish before repairing the recording engine.");
+        Applying = true; Ready = false; Changed?.Invoke();
+        try
+        {
+            await Task.Run(engine.Dispose);
+            try
+            {
+                if (await Task.Run(() => MediaDependency.Install(DataDirectory, true)) != 0)
+                    throw new IOException("Recording engine repair failed. Check the connection and retry. Details are in media-install-error.txt.");
+            }
+            finally { StartEngine(); }
+        }
+        finally { Applying = false; Changed?.Invoke(); }
+    }
     public async void TakeScreenshot()
     {
         if (disposed || ScreenshotInProgress || Applying) return;
         ScreenshotInProgress = true; PreparingScreenshot?.Invoke(); Changed?.Invoke();
         int display = Config.DisplayIndex; string folder = Config.ScreenshotDirectory;
-        var selected = Config.CaptureMode == "window" ? windowTarget?.Read() : null;
+        var selected = Config.CaptureMode == "window" ? windowTarget?.ReadForScreenshot() : null;
         try
         {
             if (PrepareRemoteScreenshot != null) await PrepareRemoteScreenshot();
@@ -145,9 +162,10 @@ internal sealed class RecorderHost : IWindowsRecorder
             string file = await Task.Run(() =>
             {
                 if (Config.CaptureMode != "window") return captureScreenshot(display, folder);
-                var verified = windowTarget?.Read();
-                if (selected == null || !selected.Available || verified == null || !verified.Available || selected.Generation != verified.Generation) throw new IOException("The selected window is unavailable. No desktop screenshot was taken.");
-                return ScreenshotCapture.CaptureSource(CaptureSession.WindowVideoSource(verified, 1).Replace(":capture_cursor=1", ":capture_cursor=0"), folder, true);
+                var verified = windowTarget?.ReadForScreenshot();
+                if (!ScreenshotCapture.SameTarget(selected, verified)) throw new IOException("No screenshot was saved. " + (selected != null && !selected.Available ? selected.Reason : verified != null && !verified.Available ? verified.Reason : "The selected window changed."));
+                return ScreenshotCapture.CaptureSource(CaptureSession.WindowVideoSource(verified, 1).Replace(":capture_cursor=1", ":capture_cursor=0"), folder, true,
+                    () => !disposed && ScreenshotCapture.SameTarget(verified, windowTarget?.ReadForScreenshot()));
             });
             if (!disposed) { LastScreenshot = file; Notification?.Invoke("Screenshot saved", Path.GetFileName(file), NotificationKind.Success, 4000); }
         }

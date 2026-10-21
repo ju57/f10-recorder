@@ -22,6 +22,17 @@ internal static class WorkerChecks
     [STAThread]
     static int Main(string[] args)
     {
+        int engineRootIndex = Array.IndexOf(args, "--engine-root");
+        if (engineRootIndex >= 0) MediaDependency.RootDirectory = Path.GetFullPath(args[engineRootIndex + 1]);
+        int ownershipRootIndex = Array.IndexOf(args, "--ownership-root");
+        if (ownershipRootIndex >= 0) ProfileOwnership.RootDirectory = Path.GetFullPath(args[ownershipRootIndex + 1]);
+        if (args[0] == "--security-checks") return SecurityChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
+        if (args[0] == "--screenshot-binding") return ScreenshotBindingChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
+        if (args[0] == "--screenshot-binding-fixture") { ScreenshotBindingFixture.Run(args[1]); return 0; }
+        if (args[0] == "--security-live-audio") return SecurityChecks.LiveAudio(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
+        if (args[0] == "--security-account-server") return CrossAccountChecks.Server(Path.GetFullPath(args[1]));
+        if (args[0] == "--security-account-client") return CrossAccountChecks.Client(Path.GetFullPath(args[1]));
+        if (args[0] == "--security-child") return SecurityChecks.Child(args);
         if (args[0] == "--window-fixture") { WindowCaptureChecks.Fixture(args[1]); return 0; }
         if (args[0] == "--window-checks") return WindowCaptureChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
         if (args[0] == "--headless-status") return HeadlessStatusChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
@@ -355,14 +366,12 @@ internal static class WorkerChecks
         Directory.CreateDirectory(Path.GetDirectoryName(sentinel)); File.WriteAllText(sentinel, "Preserve another session's active buffer");
         // Hold the session-independent profile lock without the session worker lock.
         // This exercises the same rejection path as a worker in another session.
-        using (var owner = new Mutex(true, WorkerIdentity.ProfileMutexName(otherProfile), out bool first))
+        using (var owner = ProfileOwnership.Acquire(otherProfile))
         {
-            Require(first, "Ownership-check profile was already in use.");
             using var blocked = Launch(desktop, "--recorder-worker", "--data-dir", otherProfile, "--paused");
             // Keep mutex ownership and disposal on this STA thread; do not await here.
             Require(blocked.WaitForExit(5000) && blocked.ExitCode == 1, "A second session was not refused before opening the profile.");
             Require(File.ReadAllText(sentinel) == "Preserve another session's active buffer", "Blocked worker changed the active session's buffer.");
-            owner.ReleaseMutex();
         }
         using var replacement = Launch(desktop, "--recorder-worker", "--data-dir", otherProfile, "--paused");
         try

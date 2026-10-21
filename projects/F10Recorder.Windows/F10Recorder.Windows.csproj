@@ -13,6 +13,8 @@
     <Compile Include="../../src/WindowCaptureTarget.cs" Link="WindowCaptureTarget.cs" />
     <Compile Include="../../src/LoopbackAudio.cs" Link="LoopbackAudio.cs" />
     <Compile Include="../../src/MediaDependency.cs" Link="MediaDependency.cs" />
+    <Compile Include="../../src/TrustedStorage.cs" Link="TrustedStorage.cs" />
+    <Compile Include="../../src/AudioPipe.cs" Link="AudioPipe.cs" />
     <Compile Include="../../src/EncoderCapabilities.cs" Link="EncoderCapabilities.cs" />
     <Compile Include="../../src/ApplicationFolders.cs" Link="ApplicationFolders.cs" />
     <Compile Include="../../src/ScreenshotCapture.cs" Link="ScreenshotCapture.cs" />
