@@ -29,3 +29,14 @@ headless flag or effect declaration is rejected before `Start-Process`.
 negative cases without launching UI, GPU work or capture. Windows CI runs it.
 This protects known dispatch behavior; it cannot infer every indirect effect
 inside arbitrary native code. Review the mapping when changing a test entry point.
+
+`./tests/settings-validation.ps1` exercises a paused direct recorder host with
+missing and untrusted engines in isolated storage. It creates hidden shortcut
+windows and temporarily registers Ctrl+Alt+Shift+F1–F6; an occupied shortcut fails
+the check without stopping its owner. It shows no capture-excluded UI, records
+no pixels/audio, probes no GPU, changes no startup setting and installs nothing.
+Use an ordinary Windows desktop token; a restricted sandbox can deny shortcut
+registration before the check reaches engine preflight.
+The check verifies rejection before proposed-shortcut admission, transaction
+notifications, preference persistence or capture startup. Portable CoreChecks
+exercise preference validation without engine initialization separately.

@@ -70,7 +70,7 @@ namespace F10Recorder
             {
                 // Resolve/validate the engine and audio format before taking the
                 // epoch so dependency discovery is not part of media startup.
-                string executable = settings.FfmpegPath;
+                string executable = MediaDependency.ResolveExecutable();
                 if (settings.CaptureMode == "window" && !synthetic && (target == null || !target.Available)) throw new InvalidOperationException("A validated window target is required; monitor fallback is disabled.");
                 if (!synthetic && settings.SystemAudio) audio = new LoopbackAudio();
                 MediaClock mediaClock = audio == null ? null : MediaClock.Capture();
@@ -300,7 +300,7 @@ namespace F10Recorder
                 arguments.Add(partial);
                 try
                 {
-                    using (Process mux = StartProcess(settings.FfmpegPath, arguments, snapshot))
+                    using (Process mux = StartProcess(MediaDependency.ResolveExecutable(), arguments, snapshot))
                     {
                         job.Add(mux);
                         Task<string> errors = mux.StandardError.ReadToEndAsync();

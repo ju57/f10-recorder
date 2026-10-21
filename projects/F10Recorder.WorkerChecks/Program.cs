@@ -33,6 +33,7 @@ internal static class WorkerChecks
             return DependencyVerification.Run(Path.GetFullPath(args[1]), args.Contains("--download"), packageIndex >= 0 ? Path.GetFullPath(args[packageIndex + 1]) : null);
         }
         if (args[0] == "--security-checks") return SecurityChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
+        if (args[0] == "--settings-validation") return SettingsValidationChecks.Run(Path.GetFullPath(args[1]));
         if (args[0] == "--screenshot-binding") return ScreenshotBindingChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
         if (args[0] == "--screenshot-binding-fixture") { ScreenshotBindingFixture.Run(args[1]); return 0; }
         if (args[0] == "--security-live-audio") return SecurityChecks.LiveAudio(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
@@ -74,7 +75,7 @@ internal static class WorkerChecks
         int fpsIndex = Array.IndexOf(args, "--fps"); if (fpsIndex >= 0) liveFps = int.Parse(args[fpsIndex + 1]);
         Require(!gpuFixture || live, "GPU fixture requires live desktop capture.");
         startupBefore = ReadStartup(); report["startupEnabledBefore"] = startupBefore.Value != null;
-        Directory.CreateDirectory(data); WindowsRecorder.Initialize(data);
+        Directory.CreateDirectory(data); RecorderHost.Initialize(data);
         var settings = new Settings { ReplayMinutes = 1, FramesPerSecond = 30, BitrateMbps = 5, OutputDirectory = Path.Combine(data, "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots"), SaveKey = 121, SaveModifiers = 7, OverlayKey = 122, OverlayModifiers = 7, ScreenshotKey = 123, ScreenshotModifiers = 7 };
         if (args.Contains("--alternate-shortcuts")) { settings.SaveKey = 117; settings.OverlayKey = 118; settings.ScreenshotKey = 119; }
         if (live) { settings.FramesPerSecond = liveFps; settings.BitrateMbps = 20; }

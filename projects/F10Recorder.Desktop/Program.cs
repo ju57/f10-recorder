@@ -11,7 +11,7 @@ internal static class Program
     {
         string defaultData = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "F10Recorder")));
         string data = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Argument(args, "--data-dir") ?? defaultData));
-        WindowsRecorder.Initialize(data);
+        RecorderHost.Initialize(data);
         data = WorkerIdentity.DataPath(data);
         defaultData = WorkerIdentity.DataPath(defaultData);
         if (args.Contains("--ensure-media")) return MediaDependency.Install(data, !args.Contains("--no-download"));

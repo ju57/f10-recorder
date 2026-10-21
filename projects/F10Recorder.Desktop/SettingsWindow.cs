@@ -16,7 +16,7 @@ internal sealed class SettingsWindow : Window
     Window backdrop, overlay;
     bool wasVisible, exiting, dismissingOverlay;
     IntPtr previousWindow;
-    public SettingsWindow(WindowsRecorder recorder)
+    public SettingsWindow(IWindowsRecorder recorder)
     {
         Title = "F10 Recorder"; Width = 900; Height = 820; MinWidth = 780; MinHeight = 620;
         Background = Ui.Background; Icon = Ui.TrayIcon(true); WindowStartupLocation = WindowStartupLocation.CenterScreen;

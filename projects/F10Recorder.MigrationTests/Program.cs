@@ -35,7 +35,7 @@ internal static class MigrationChecks
             if (shortcutModifiers < 1 || shortcutModifiers > 7) throw new ArgumentOutOfRangeException(nameof(shortcutModifiers));
         }
         report["testShortcutModifiers"] = shortcutModifiers;
-        WindowsRecorder.Initialize(data);
+        RecorderHost.Initialize(data);
         int engineRootIndex = Array.IndexOf(args, "--engine-root");
         if (engineRootIndex >= 0) MediaDependency.RootDirectory = Path.GetFullPath(args[engineRootIndex + 1]);
         report["mediaEngine"] = MediaDependency.ResolveExecutable();
@@ -43,7 +43,7 @@ internal static class MigrationChecks
         if (args.Contains("--presentation-only")) config.CaptureMode = "window";
         config.Save(Path.Combine(data, "settings.json"));
         App.DataDirectory = data; App.Arguments = ["--paused", "--settings"]; App.ControlTitle = "F10Recorder.MigrationCheck." + Guid.NewGuid();
-        App.RecorderFactory = (root, post, paused, title) => new WindowsRecorder(root, post, paused, title, true, enabled => { if (failStartup) { failStartup = false; throw new IOException("Controlled startup-write failure."); } report["startupChoiceSubmitted"] = enabled; });
+        App.RecorderFactory = (root, post, paused, title) => new RecorderHost(root, post, paused, title, true, enabled => { if (failStartup) { failStartup = false; throw new IOException("Controlled startup-write failure."); } report["startupChoiceSubmitted"] = enabled; });
         App.Started = app => _ = args.Contains("--security-ui") ? CheckSecurityUiAsync(app) : args.Contains("--presentation-only") ? CheckPresentationAsync(app, args.Contains("--render-only")) : args.Contains("--focus-only") ? CheckFocusAsync(app) : CheckAsync(app);
         try { Program.BuildAvaloniaApp().StartWithClassicDesktopLifetime([]); }
         catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); File.WriteAllText(Path.Combine(data, "verification.json"), JsonSerializer.Serialize(report)); }

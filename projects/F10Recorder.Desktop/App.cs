@@ -21,9 +21,9 @@ public sealed class App : Application
 {
     internal static string DataDirectory, ControlTitle = HotkeyWindow.ControlTitle;
     internal static string[] Arguments = [];
-    internal static Func<string, Action<Action>, bool, string, WindowsRecorder> RecorderFactory;
+    internal static Func<string, Action<Action>, bool, string, IWindowsRecorder> RecorderFactory;
     internal static Action<App> Started;
-    internal WindowsRecorder Recorder;
+    internal IWindowsRecorder Recorder;
     internal SettingsWindow SettingsWindow;
     internal NoticeWindow Notice;
     TrayIcon tray;
@@ -45,7 +45,8 @@ public sealed class App : Application
         desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         DataDirectory ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "F10Recorder");
         Action<Action> dispatch = action => Dispatcher.UIThread.Post(() => { if (!exiting) action(); });
-        Recorder = RecorderFactory?.Invoke(DataDirectory, dispatch, Arguments.Contains("--paused"), ControlTitle) ?? new WindowsRecorder(DataDirectory, dispatch, Arguments.Contains("--paused"), ControlTitle);
+        // Production always uses the independent worker; verification supplies its direct host here.
+        Recorder = RecorderFactory?.Invoke(DataDirectory, dispatch, Arguments.Contains("--paused"), ControlTitle) ?? new WorkerRecorder(DataDirectory, dispatch, Arguments.Contains("--paused"), ControlTitle);
         CaptureVisibility.Configure(Recorder.Config, Recorder.CaptureModeKnown);
         SettingsWindow = new SettingsWindow(Recorder); Notice = new NoticeWindow();
         Recorder.Changed += Update; Recorder.OpenSettingsRequested += OpenSettings; Recorder.OverlayRequested += ToggleOverlay; Recorder.QuitRequested += Quit;
@@ -94,7 +95,7 @@ public sealed class App : Application
     {
         try { File.WriteAllText(Path.Combine(DataDirectory, "status.json"), new JavaScriptSerializer().Serialize(new { Ui = "Avalonia", UiProcessId = Environment.ProcessId, WorkerProcessId = Recorder.Metrics?.WorkerProcessId ?? 0, CaptureProcessId = Recorder.CaptureProcessId, CaptureMetrics = Recorder.Metrics, ControlTitle = ControlTitle, Paused = Recorder.Paused, CaptureState = Recorder.State, CaptureReady = Recorder.Ready, CapturePhase = Recorder.Phase.ToString(), RecordingEnabled = !Recorder.Paused, CanSaveReplay = Recorder.CanSave && !Recorder.Applying && !Recorder.Saving, SavingReplay = Recorder.Saving, SettingsVisible = SettingsWindow.IsVisible, SettingsWindow = SettingsWindow.TryGetPlatformHandle()?.Handle.ToInt64() ?? 0, OverlayVisible = SettingsWindow.OverlayVisible, OverlayWindow = SettingsWindow.OverlaySurface?.TryGetPlatformHandle()?.Handle.ToInt64() ?? 0, OverlayShortcutRegistered = Recorder.OverlayRegistered, OverlayShortcut = Recorder.Config.OverlayHotkeyText, NotificationVisible = Notice.IsVisible, NotificationTitle = Notice.Heading, ScreenshotShortcutRegistered = Recorder.ScreenshotRegistered, ScreenshotShortcut = Recorder.Config.ScreenshotHotkeyText, ScreenshotInProgress = Recorder.ScreenshotInProgress, LastScreenshot = Recorder.LastScreenshot, CurrentApplication = Recorder.ApplicationName, ApplicationFolder = ApplicationFolders.FolderName(Recorder.ApplicationName) })); } catch (IOException) { }
     }
-    void OpenFolder(string path) { try { WindowsRecorder.OpenFolder(path); } catch (Exception ex) { PresentNotice("Folder could not open", ex.Message, NotificationKind.Warning, 6000); } }
+    void OpenFolder(string path) { try { RecorderHost.OpenFolder(path); } catch (Exception ex) { PresentNotice("Folder could not open", ex.Message, NotificationKind.Warning, 6000); } }
     internal async void Quit()
     {
         if (exiting || quitting || Recorder.Applying) return;

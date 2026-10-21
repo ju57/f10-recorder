@@ -9,7 +9,7 @@ namespace F10Recorder;
 // Quick actions are separate from Settings so opening the overlay never commits edits.
 internal sealed class OverlayPanel : UserControl
 {
-    readonly WindowsRecorder recorder;
+    readonly IWindowsRecorder recorder;
     readonly TextBlock state = Ui.Label("", 19, null, FontWeight.SemiBold);
     readonly TextBlock detail = Ui.Label("", 13, Ui.Muted), saveHint = Ui.Label("", 12, Ui.Muted);
     readonly Button save, pause, screenshot;
@@ -17,7 +17,7 @@ internal sealed class OverlayPanel : UserControl
     internal Button ScreenshotAction => screenshot;
     internal void FocusInitial() => (save.IsEnabled ? save : screenshot).Focus();
 
-    internal OverlayPanel(WindowsRecorder session, Action dismiss, Action openSettings)
+    internal OverlayPanel(IWindowsRecorder session, Action dismiss, Action openSettings)
     {
         recorder = session; Background = Ui.Background;
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto"), Margin = new Thickness(28, 26) };

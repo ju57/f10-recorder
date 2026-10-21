@@ -9,7 +9,7 @@ internal static class FramePacingChecks
 {
     internal static int Run(string data, int seconds, int fps, string mode, bool audio, string variant, int ceiling, int sourceFps, string codec)
     {
-        data = Path.GetFullPath(data); Directory.CreateDirectory(data); WindowsRecorder.Initialize(data);
+        data = Path.GetFullPath(data); Directory.CreateDirectory(data); RecorderHost.Initialize(data);
         var report = new Dictionary<string, object> { ["sourceMode"] = mode, ["configuredFps"] = fps, ["configuredSourceFps"] = sourceFps, ["videoCodec"] = codec, ["systemAudio"] = audio, ["variant"] = variant };
         RecorderRuntime.CaptureArgumentProbe = args =>
         {
@@ -98,7 +98,7 @@ internal static class FramePacingChecks
             while (!File.Exists(Path.Combine(data, "pacing-ready.json")) && !fixture.HasExited && wait.Elapsed.TotalSeconds < 10) Thread.Sleep(100);
             Require(!fixture.HasExited && File.Exists(Path.Combine(data, "pacing-ready.json")), "Controlled frame source did not become ready.");
             var settings = new Settings { ReplayMinutes = 1, FramesPerSecond = fps, BitrateMbps = 20, VideoCodec = codec, SystemAudio = audio, OutputDirectory = Path.Combine(data, "clips") };
-            report["mediaEngine"] = settings.FfmpegPath; report["fixture"] = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(data, "pacing-ready.json")));
+            report["mediaEngine"] = MediaDependency.ResolveExecutable(); report["fixture"] = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(data, "pacing-ready.json")));
             capture = new CaptureSession(settings, Path.Combine(data, "buffer"), false);
             wait.Restart(); var samples = new List<RecorderMetrics>();
             while (wait.Elapsed.TotalSeconds < seconds)

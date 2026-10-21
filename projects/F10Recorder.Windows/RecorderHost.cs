@@ -51,7 +51,6 @@ internal sealed class RecorderHost : IWindowsRecorder
     internal static void Initialize(string data)
     {
         Directory.CreateDirectory(data); Log.DirectoryPath = data;
-        RecorderRuntime.MediaEngineResolver = MediaDependency.ResolveExecutable;
     }
 
     public RecorderHost(string data, Action<Action> dispatch, bool paused, string controlTitle, bool syntheticSource = false, Action<bool> setStartup = null, Func<int, string, string> screenshotSource = null)
@@ -112,6 +111,9 @@ internal sealed class RecorderHost : IWindowsRecorder
         if (Applying || disposed) throw new InvalidOperationException("Wait for the current settings change.");
         if (engine.IsSaving || ScreenshotInProgress) throw new InvalidOperationException("Wait for the current replay or screenshot to finish saving.");
         next.Validate();
+        // Reject an unavailable/untrusted engine before changing shortcuts or stopping capture.
+        // Every subsequent process launch still verifies and leases the executable again.
+        MediaDependency.ResolveExecutable();
         try { shortcuts.Register(next); }
         catch { Register(Config); throw; }
         Applying = true; Changed?.Invoke();
