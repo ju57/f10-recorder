@@ -48,6 +48,14 @@ A session-independent file lock in account-protected storage permits only one wo
 
 ## Public release milestones
 
+The near-term target is a **Windows + NVIDIA public beta**, with Linux following
+separately. The [release plan](docs/release-plan.md) defines priorities, delivery
+milestones and acceptance criteria for security, faster replay exports,
+user-selectable full-window or new-footage replay saves, manual recording, audio,
+the interface rebuild and an installer. It is a planning document; those features
+and release gates are not complete. Its milestone order governs beta preparation;
+the list below records the broader migration direction and existing work.
+
 1. **First migration step implemented:** SDK projects, Avalonia Settings/tray/overlay/passive notices, direct Win32 helpers and separate verification binaries. A Windows regression exercises edited settings and shortcuts, failed-apply rollback, overlay focus, click-through notices, native-resolution screenshots, application-named replay saves, encoder/display-change recovery and decoded MP4s for available NVENC codecs. Linux-runtime and broad game/driver acceptance are still pending.
 2. **Independent Windows worker implemented:** UI crash/reconnection, headless replay saving, explicit shutdown, pause persistence and bounded control messages have a separate local integration suite. Finish extracting the shared engine and validate the worker against the broader game/device matrix.
 3. Implement and validate NVIDIA capture on Linux against a declared distribution, driver and desktop matrix. Test X11 and Wayland separately, including denied permissions and restored sessions.

@@ -39,3 +39,17 @@
 - Distinguish static reverse-engineering evidence, diagnostic instrumentation and ordinary production behavior. Name unresolved internals and qualify observer overhead before attributing a performance cause.
 - Full decoding, timestamp ordering, source-picture cadence, A/V marker alignment/drift and gaming overhead establish different properties. Container boundary skew alone does not establish perceptual sync; synthetic checks and hosted CI do not establish live hardware or game acceptance.
 - Report what changed, which checks ran, their results and material limits. Keep recordings, machine-specific reports, credentials, vendor binaries and raw third-party extracts out of commits. Store local trial evidence under ignored `artifacts/`; consult `THIRD_PARTY_NOTICES` and the README before release work.
+
+## Agent skills
+
+### Issue tracker
+
+Track issues and specs in GitHub Issues. Before ticket operations, read `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five canonical triage labels. Before assigning triage states, read `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use a single-context glossary and ADR layout. Before exploring domain concepts or decisions, read `docs/agents/domain.md`.
