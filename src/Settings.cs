@@ -17,7 +17,6 @@ namespace F10Recorder
         public string CaptureMode = "monitor";
         public string WindowExecutable = "", WindowClass = "";
         public string OutputDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "F10 Recorder");
-        internal string FfmpegPath { get { return RecorderRuntime.ResolveExecutable(); } }
         public int SaveKey = 121; // VK_F10
         public int SaveModifiers = 6; // Ctrl + Shift
         public int OverlayKey = 120; // VK_F9
@@ -27,11 +26,6 @@ namespace F10Recorder
         public string ScreenshotDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "F10 Recorder");
 
         public void Validate()
-        {
-            ValidateValues();
-            if (!File.Exists(FfmpegPath)) throw new FileNotFoundException("Run the installer to repair F10 Recorder's media engine.");
-        }
-        void ValidateValues()
         {
             if (ReplayMinutes < 1 || ReplayMinutes > 30) throw new ArgumentException("Replay length must be 1–30 minutes.");
             if (!SupportedFrameRates.Contains(FramesPerSecond)) throw new ArgumentException("Choose 24, 30, 60, or 120 FPS.");
@@ -55,7 +49,7 @@ namespace F10Recorder
             if (!File.Exists(path)) return new Settings();
             Settings result = null;
             string contents = File.ReadAllText(path);
-            try { result = new JavaScriptSerializer().Deserialize<Settings>(contents); if (result == null) throw new FormatException("Empty settings."); result.ValidateValues(); return result; }
+            try { result = new JavaScriptSerializer().Deserialize<Settings>(contents); if (result == null) throw new FormatException("Empty settings."); result.Validate(); return result; }
             catch (Exception ex)
             {
                 File.Copy(path, path + ".invalid-" + DateTime.UtcNow.Ticks); Log.Write("Settings could not be loaded; original preserved. " + ex.Message);

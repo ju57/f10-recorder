@@ -166,7 +166,7 @@ internal sealed class SettingsPanel : UserControl
     {
         try
         {
-            var choices = await Task.Run(() => EncoderCapabilities.Probe(recorder.Config.FfmpegPath));
+            var choices = await Task.Run(() => EncoderCapabilities.Probe(MediaDependency.ResolveExecutable()));
             codec.ItemsSource = choices; codec.SelectedItem = choices.FirstOrDefault(c => c.Codec == recorder.Config.VideoCodec) ?? choices.FirstOrDefault();
             codecStatus.Text = choices.Count > 0 ? "Available: " + string.Join(" / ", choices.Select(c => c.Codec.Replace("_nvenc", "").ToUpperInvariant())) : "No GPU encoder initialized. Check the NVIDIA driver or repair the installation.";
         }

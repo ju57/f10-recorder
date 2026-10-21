@@ -4,6 +4,22 @@ using System.Text.Json;
 string data = args.Length > 0 ? Path.GetFullPath(args[0]) : Path.Combine(Path.GetTempPath(), "F10Recorder-CoreChecks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(data); Log.DirectoryPath = data;
 void Require(bool condition, string message) { if (!condition) throw new Exception(message); }
+var preferences = new Settings { OutputDirectory = Path.Combine(data, "clips", "..", "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots") };
+preferences.Validate();
+Require(preferences.OutputDirectory == Path.GetFullPath(Path.Combine(data, "clips")), "Preference validation must normalize paths without an engine or platform initialization.");
+foreach (var invalid in new[] {
+    new Settings { FramesPerSecond = 999 },
+    new Settings { SaveKey = 120, SaveModifiers = 6 },
+    new Settings { CaptureMode = "unsupported" },
+    new Settings { CaptureMode = "window", WindowExecutable = "relative.exe" },
+    new Settings { ScreenshotDirectory = "" }
+})
+{
+    bool rejected = false;
+    try { invalid.Validate(); } catch (ArgumentException) { rejected = true; }
+    Require(rejected, "Invalid recording preferences must be rejected through the ordinary validation interface without an engine.");
+}
+Console.WriteLine("Passed: direct portable preference validation and path normalization without a recording engine.");
 var segments = Enumerable.Range(0, 12).Select(i => new Segment { Path = i + ".ts", Start = i, End = i + 1 }).ToList();
 var selected = ReplaySelection.Select(segments, 9.4, 5);
 Require(selected.Select(s => s.Start).SequenceEqual(new double[] { 5, 6, 7, 8, 9 }), "Replay selection must start on a full keyframe interval and exclude future footage.");
