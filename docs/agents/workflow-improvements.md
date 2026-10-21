@@ -1,6 +1,6 @@
 # Workflow improvements for beta delivery
 
-Agreed direction from the retrospective discussion on 21 October 2026. Improve delivery of the Windows/NVIDIA beta by preventing observed workflow failures. Expand diagnostic infrastructure when a specific investigation needs it. Deliver the three changes below in order, with separate review boundaries. Final confirmation of shared understanding precedes implementation.
+Agreed direction from the retrospective discussion on 21 October 2026. Improve delivery of the Windows/NVIDIA beta by preventing observed workflow failures. Expand diagnostic infrastructure when a specific investigation needs it. Deliver the three changes below in order, with separate review boundaries. Shared understanding was confirmed before implementation.
 
 ## Agreed safeguards
 
@@ -45,6 +45,6 @@ Completion requires offline positive and negative fixtures, a plan validation mo
 
 ## Scope and status
 
-Legacy retirement and the test-launch contract are implemented and validated locally. Experiment safeguards are pending. See [test effects](../../tests/test-effects.md) for previews and executable route checks. Supporting deterministic checks belong in the existing modern verification/CI routes where their environment permits. Broader FFmpeg transport checks, further native observer contracts, performance/parity research and product feature work are follow-ups when specifically justified. None is an additional gate on ordinary unrelated source changes.
+All three changes are implemented locally. Legacy retirement passed modern builds/core/dependency checks; launch and experiment safeguards passed offline positive/negative checks. See [test effects](../../tests/test-effects.md) and [experiment admission](../../tests/experiment-contract.md) for usage and limits. Hosted CI and live gaming acceptance have not run for these changes. Supporting deterministic checks belong in the existing modern verification/CI routes where their environment permits. Broader FFmpeg transport checks, further native observer contracts, performance/parity research and product feature work are follow-ups when specifically justified. None is an additional gate on ordinary unrelated source changes.
 
 Per-experiment sampling values, storage limits and retained sets are resolved when planning that concrete experiment. This plan establishes the required inputs and behavior, and does not authorize a live batch, installation, publication, push, merge or evidence deletion.

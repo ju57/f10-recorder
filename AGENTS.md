@@ -28,8 +28,8 @@
 
 - [.github/workflows/ci.yml](.github/workflows/ci.yml) defines hosted checks. Choose checks appropriate to the changed paths; documentation-only edits need link/content review, not a capture run.
 - For clock changes, follow [tests/audio-clock.md](tests/audio-clock.md) and run `./tests/audio-clock.ps1`. For worker lifecycle changes, use `./tests/worker.ps1`; for UI/native integration, consult `./tests/migration.ps1` and the relevant focused scripts in `tests/`.
-- Read a test script's parameters and side effects before running it. Live desktop/system-audio capture needs authorization within the current task. Use isolated profiles and output directories; do not install or alter the user's active recorder as part of an ordinary build or test.
-- Gaming and pacing work must follow [tests/game-benchmark.md](tests/game-benchmark.md) and [tests/frame-lineage.md](tests/frame-lineage.md). Local ignored `docs/verification.md` and `docs/shadowplay-investigation.md`, when present, provide historical evidence rather than current acceptance guarantees.
+- Before worker/window checks, preview `-Plan` and read [test effects](tests/test-effects.md); read other scripts' parameters and side effects before running them. Live desktop/system-audio capture needs authorization within the current task. Use isolated profiles and output directories; do not install or alter the user's active recorder as part of an ordinary build or test.
+- Gaming and pacing work must follow [tests/game-benchmark.md](tests/game-benchmark.md) and [tests/frame-lineage.md](tests/frame-lineage.md). Before an expensive batch, read [experiment admission](tests/experiment-contract.md). Local ignored `docs/verification.md` and `docs/shadowplay-investigation.md`, when present, provide historical evidence rather than current acceptance guarantees.
 
 ## Live investigations and evidence
 

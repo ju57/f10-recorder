@@ -19,6 +19,18 @@ portable PresentMon 2.6.0 executable at
 and FFmpeg/ffprobe. All recordings and machine-specific evidence stay in ignored
 `artifacts/`; they must not be committed.
 
+## Experiment admission
+
+Collection now requires an explicit `-ExperimentPlan` and a fresh isolated
+`-DataDirectory`. Follow [the experiment contract](experiment-contract.md) for
+required timing/storage/retention inputs, one qualification run and the frozen
+batch. `-ValidatePlan` checks the schema without worker access or capture.
+The fixed plan's trace-relative window governs new planned trials; the older
+10..55 source-relative procedure below remains historical context. Requalify
+source-phase alignment before comparing modes. Invalid/incomplete trials block
+subsequent collection. The [effect map](test-effects.md) describes the separate
+worker/window verification routes.
+
 ## Procedure
 
 1. Start a fresh isolated worker with `-Action Start -DataDirectory <path>`.

@@ -130,6 +130,8 @@ Configuration and rotating diagnostic logs live in `%LOCALAPPDATA%\F10Recorder`.
 
 ## Verify
 
+Preview worker/window launches with `-Plan` as described in [test effects](tests/test-effects.md). Expensive game measurements use [experiment admission](tests/experiment-contract.md) to qualify the setup, freeze the batch and budget retained evidence.
+
 Run the migrated application regression with `.\tests\migration.ps1`. It uses controlled temporary windows, actual Windows keyboard input, native-resolution screenshots, GPU-generated media and a short display/system-audio capture. It validates all available NVENC codecs by saving and fully decoding MP4s. Reports and previews are kept under ignored `artifacts/`. This suite needs an interactive Windows desktop and NVIDIA GPU; it must not be run on a machine without permission to capture its display/audio.
 
 Use `.\tests\migration.ps1 -FocusOnly` for the paused focus regression. It opens only task-owned test windows and checks Settings restoration after switching away, explicit Settings activation, and return to previously focused Settings. It starts no recording, takes no screenshots, injects no input, and submits no settings or startup changes. Encoder availability is still probed, and the interactive desktop must be available for the test windows to activate.

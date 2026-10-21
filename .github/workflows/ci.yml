@@ -50,6 +50,12 @@ jobs:
       - name: Verify test launch effects without UI or capture
         shell: pwsh
         run: ./tests/verification-launch-checks.ps1
+      - name: Verify experiment admission without capture
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p test_experiment_contract.py -v
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./tests/experiment-runtime-checks.ps1
 
 # Hardware/UI acceptance is a separate local suite. Hosted runners do not
 # establish NVIDIA capture, fullscreen behavior, or driver performance.
