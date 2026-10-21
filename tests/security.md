@@ -9,8 +9,7 @@ in isolated ignored `artifacts/` directories.
 ./tests/security.ps1 -Package <pinned-archive.zip>
 ```
 
-The dependency suite uses the legacy build. The security suite builds the modern
-worker checks. Neither displays UI, records the desktop/system audio, injects
+Both suites build the modern worker checks. Neither displays UI, records the desktop/system audio, injects
 input, changes startup or installs a dependency into the user's active recorder.
 The package is verified and unpacked only inside the test directory. The pipe
 tests use marker bytes; screenshot checks generate a small synthetic image.
@@ -18,7 +17,7 @@ tests use marker bytes; screenshot checks generate a small synthetic image.
 | Boundary | Focused evidence |
 | --- | --- |
 | Engine trust | Reject PATH/profile/direct-launch candidates before execution; reject forged metadata and same-size/timestamp changes; verify offline reuse, explicit repair and a read-only launch lease |
-| Audio admission | Expected child accepted; wrong PID rejected before bytes; timeout/cancellation cleanup; legacy pipe construction |
+| Audio admission | Expected child accepted; wrong PID rejected before bytes; timeout/cancellation cleanup |
 | Profile ownership | Filesystem aliases share a lock; distinct profiles coexist; a blocked worker preserves cache; process termination releases ownership; retargeting an alias does not redirect an active worker's cache operations |
 | Storage | Other-account write grants and unrestricted null DACLs are rejected |
 | Settings state | Pending apply, lost reply, rejection, stale reply and worker replacement preserve authoritative capture-mode acknowledgement |

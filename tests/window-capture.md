@@ -81,7 +81,7 @@ are unchanged. Exact graph and experimental delivery-anchor diagnostics are logg
 Required independent gates:
 
 1. Portable configuration/status rules and rejection of ambiguous/missing source;
-   legacy/shared-source builds; protocol, restart and persisted pause checks.
+   modern application and verification builds; protocol, restart and persisted pause checks.
 2. Real worker source loss/minimize/restore/resize, retained saves, UI detachment,
    source recreation/handle reuse and save/apply/cancel transition races.
 3. Full decode; exact per-track missing/equal/decreasing DTS and decoded PTS;

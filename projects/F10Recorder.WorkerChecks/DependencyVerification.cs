@@ -18,7 +18,7 @@ namespace F10Recorder
         }
         internal static int Run(string data, bool download, string package = null)
         {
-            Directory.CreateDirectory(data);
+            TrustedStorage.CreatePrivateDirectory(data); RecorderHost.Initialize(data);
             var report = new Dictionary<string, object>();
             string originalRoot = MediaDependency.RootDirectory, originalPath = Environment.GetEnvironmentVariable("PATH");
             try
@@ -26,23 +26,22 @@ namespace F10Recorder
                 string rows = " ... ddagrab |->V Capture\n ... aresample A->A Audio\n ... hwdownload V->V Download\n ... setpts V->V Timestamp\n";
                 Require(!MediaDependency.SupportsCaptureFilters(rows + " ... vfrdet V->V Reports fps\n") && MediaDependency.SupportsCaptureFilters(rows + " ... fps V->V Pace\n"), "Filter inventory accepted a description instead of the FPS filter.");
                 report["filterInventory"] = true;
-                string pipeName = "F10Recorder-legacy-check-" + Guid.NewGuid().ToString("N"), pipeResult = Path.Combine(data, "pipe-result.txt");
-                using (var pipe = AudioPipe.Create(pipeName))
-                using (var child = Process.Start(new ProcessStartInfo(System.Reflection.Assembly.GetExecutingAssembly().Location,
-                    "--dependency-pipe " + CaptureSession.Quote(pipeName) + " " + CaptureSession.Quote(pipeResult)) { UseShellExecute = false, CreateNoWindow = true }))
-                {
-                    try
-                    {
-                        AudioPipe.Accept(pipe, child, null, 5000); pipe.WriteByte(83); pipe.Flush(); pipe.Dispose();
-                        Require(child.WaitForExit(5000) && child.ExitCode == 0 && File.ReadAllText(pipeResult) == "83", "Legacy expected-child admission failed.");
-                    }
-                    finally { if (!child.HasExited) { child.Kill(); child.WaitForExit(); } }
-                }
-                report["legacyExpectedChildAudioPipeAdmission"] = true;
                 MediaDependency.RootDirectory = Path.Combine(data, "managed");
                 string untrusted = Path.Combine(data, "profile", "runtime", "ffmpeg.exe"), marker = Path.Combine(data, "executed.txt");
                 Directory.CreateDirectory(Path.GetDirectoryName(untrusted));
-                File.Copy(System.Reflection.Assembly.GetExecutingAssembly().Location, untrusted);
+                // A runnable modern apphost fixture makes rejection-before-execution meaningful.
+                foreach (string file in Directory.GetFiles(AppContext.BaseDirectory))
+                    File.Copy(file, Path.Combine(Path.GetDirectoryName(untrusted), Path.GetFileName(file)));
+                File.Copy(Environment.ProcessPath, untrusted);
+                var fixtureInfo = new ProcessStartInfo(untrusted) { UseShellExecute = false, CreateNoWindow = true };
+                fixtureInfo.ArgumentList.Add("--dependency-marker"); fixtureInfo.ArgumentList.Add(marker);
+                using (var fixture = Process.Start(fixtureInfo))
+                {
+                    try { Require(fixture.WaitForExit(10000) && fixture.ExitCode == 0 && File.Exists(marker), "Untrusted marker fixture was not executable."); }
+                    finally { if (!fixture.HasExited) { fixture.Kill(); fixture.WaitForExit(); } }
+                }
+                File.Delete(marker);
+                report["untrustedMarkerFixtureExecutable"] = true;
                 string preferences = Path.Combine(data, "profile", "settings.json"); File.WriteAllText(preferences, "{\"ReplayMinutes\":5}");
                 string manifest = Path.Combine(data, "profile", "media-engine.json");
                 File.WriteAllText(manifest, new JavaScriptSerializer().Serialize(new MediaInstallation { Executable = untrusted, Sha256 = MediaDependency.Hash(untrusted) }));

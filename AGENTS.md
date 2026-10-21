@@ -10,7 +10,7 @@
 
 - F10 Recorder is a local rolling replay recorder. Preserve existing recording preferences and user media. Consult the README and settings code for current defaults rather than inferring them from the product name.
 - `projects/F10Recorder.Core` owns portable configuration, clocks, replay selection and notification rules; `projects/F10Recorder.Windows` owns Windows capture/audio and native integrations; `projects/F10Recorder.Desktop` owns the Avalonia UI and worker integration. Keep captured frames out of UI controls.
-- Several SDK projects link files from `src/`, which also supplies the legacy WinForms build. Inspect the relevant `.csproj` before editing shared code; retain legacy compiler compatibility where those files are shared.
+- Several SDK projects link active production files from `src/`. Inspect the relevant `.csproj` before editing those sources. The modern .NET/Avalonia application is the only maintained product; modern verification tools may use temporary WinForms test fixtures.
 - Keep buffering, saving and recovery independent of UI lifetime. Preserve per-profile worker ownership and the current-user restriction on the local control channel.
 - Preserve independently decodable replay segments, exclusion of incomplete segments, and pinning/copying before export so pruning cannot remove a save's inputs. Do not use `-segment_wrap` for the rolling cache.
 - Preserve the common A/V acquisition clock and timestamped audio through capture and export. Treat clock, pacing, retention and recovery changes as requiring focused regression checks.
@@ -18,7 +18,7 @@
 
 ## Build and verification
 
-- `./build-avalonia.ps1` builds the development app; `./build-avalonia.ps1 -Publish` creates the self-contained package. Publishing a local package does not install it. `./build.ps1` builds the legacy reference.
+- `./build-avalonia.ps1` builds the development app; `./build-avalonia.ps1 -Publish` creates the self-contained package. Publishing a local package does not install it.
 - Use the pinned SDK from `global.json` (`.tools/dotnet/dotnet.exe` when locally provisioned). The portable core check commands are:
 
   ```powershell
@@ -27,7 +27,7 @@
   ```
 
 - [.github/workflows/ci.yml](.github/workflows/ci.yml) defines hosted checks. Choose checks appropriate to the changed paths; documentation-only edits need link/content review, not a capture run.
-- For clock changes, follow [tests/audio-clock.md](tests/audio-clock.md) and run `./tests/audio-clock.ps1`. For worker lifecycle changes, use `./tests/worker.ps1`; for UI/native integration, consult `./tests/migration.ps1` and the relevant focused scripts in `tests/`. Build the legacy reference when changing shared sources.
+- For clock changes, follow [tests/audio-clock.md](tests/audio-clock.md) and run `./tests/audio-clock.ps1`. For worker lifecycle changes, use `./tests/worker.ps1`; for UI/native integration, consult `./tests/migration.ps1` and the relevant focused scripts in `tests/`.
 - Read a test script's parameters and side effects before running it. Live desktop/system-audio capture needs authorization within the current task. Use isolated profiles and output directories; do not install or alter the user's active recorder as part of an ordinary build or test.
 - Gaming and pacing work must follow [tests/game-benchmark.md](tests/game-benchmark.md) and [tests/frame-lineage.md](tests/frame-lineage.md). Local ignored `docs/verification.md` and `docs/shadowplay-investigation.md`, when present, provide historical evidence rather than current acceptance guarantees.
 
