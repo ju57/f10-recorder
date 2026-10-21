@@ -5,6 +5,8 @@ vendor/
 .tools/
 **/obj/
 **/bin/
+__pycache__/
+*.pyc
 
 # Local acceptance reports and reverse-engineering extracts are retained for
 # development, outside the public source tree. They can contain machine paths,

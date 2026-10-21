@@ -9,6 +9,8 @@ import subprocess
 
 import numpy as np
 
+from experiment_contract import digest, file_sha256, read_json, validate_samples
+
 
 def summarize(values):
     data = np.asarray(values, dtype=float)
@@ -63,12 +65,12 @@ def analyze_trace(path, start, end):
     return result
 
 
-def analyze_trial(path, start, end):
+def analyze_trial(path, start, end, trace_relative=False):
     label = path.name.removesuffix("-presentmon.csv")
     resume_path = path.with_name(label + "-resume.json")
     ready_path = path.with_name(label + "-ready.json")
     offset = 0
-    if resume_path.exists() and ready_path.exists():
+    if not trace_relative and resume_path.exists() and ready_path.exists():
         resume = json.loads(resume_path.read_text(encoding="utf-8-sig"))
         ready = json.loads(ready_path.read_text(encoding="utf-8-sig"))
         parse = lambda value: datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -109,6 +111,11 @@ def analyze_worker(path):
          all(state["Paused"] and state["Metrics"]["CaptureProcessId"] == 0 for state in states)) and
         (not active or len(result["capture_process_ids"]) == 1 and result["capture_process_ids"][0] != 0) and
         result["max_recoveries"] == 0 and result["max_cache_bytes"] <= result["cache_limit_bytes"])
+    if "ExperimentPlan" in trial:
+        plan = trial["ExperimentPlan"]
+        if digest(plan) != trial["ExperimentPlanSha256"]:
+            raise ValueError("Stored experiment plan identity changed")
+        result["sampled_health"] = validate_samples(plan, samples, trial["Mode"])
     return result
 
 
@@ -191,14 +198,40 @@ def analyze_clip(path, ffmpeg, output):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("directory", type=Path)
-    parser.add_argument("--start", type=float, default=10)
-    parser.add_argument("--end", type=float, default=55)
+    parser.add_argument("--start", type=float)
+    parser.add_argument("--end", type=float)
     parser.add_argument("--clips", action="store_true")
     parser.add_argument("--jobs", type=int, choices=(1, 2), default=1)
     parser.add_argument("--ffmpeg", default=r"C:\Program Files\ffmpeg\bin\ffmpeg.exe")
     args = parser.parse_args()
-    report = {"traces": [analyze_trial(path, args.start, args.end) for path in sorted(args.directory.glob("cap*-presentmon.csv"))]}
-    report["workers"] = [analyze_worker(path) for path in sorted(args.directory.glob("cap*-worker.json"))]
+    frozen = args.directory / "experiment-state/batch-plan.json"
+    if frozen.exists():
+        plan = read_json(frozen)
+        start, end = plan["window_seconds"]
+        if (args.start is not None and args.start != start) or (args.end is not None and args.end != end):
+            raise ValueError("Analysis window contradicts the frozen batch plan")
+        if (frozen.parent / "blocked.json").exists() or list(frozen.parent.glob("*.pending.json")):
+            raise ValueError("Batch is invalid or incomplete; preserve it as rejected evidence")
+        labels = [trial["label"] for trial in plan["trials"]]
+        for label in labels:
+            receipt = read_json(frozen.parent / (label + ".result.json"))
+            if receipt["result"] != "valid" or digest(receipt["plan"]) != digest(plan):
+                raise ValueError("Trial is not valid under the frozen plan: " + label)
+            trace = args.directory / receipt["trace"]
+            if file_sha256(trace) != receipt["trace_sha256"]:
+                raise ValueError("Trial evidence changed: " + label)
+            presentation = Path(read_json(trace)["PresentMonCSV"])
+            if file_sha256(presentation) != receipt["presentation_sha256"]:
+                raise ValueError("Presentation evidence changed: " + label)
+        traces = [args.directory / (label + "-presentmon.csv") for label in labels]
+        workers = [args.directory / (label + "-worker.json") for label in labels]
+    else:
+        start = 10 if args.start is None else args.start
+        end = 55 if args.end is None else args.end
+        traces = sorted(args.directory.glob("cap*-presentmon.csv"))
+        workers = sorted(args.directory.glob("cap*-worker.json"))
+    report = {"traces": [analyze_trial(path, start, end, trace_relative=frozen.exists()) for path in traces]}
+    report["workers"] = [analyze_worker(path) for path in workers]
     if any(not worker["health_passed"] for worker in report["workers"]):
         raise ValueError("Worker health verification failed; inspect individual reports.")
     if args.clips:

@@ -14,7 +14,7 @@ The implementation starts from main at e8713db24a7476b0e7db71548ae69b75c57886af.
 - Use [protected profile ownership](adr/0003-protected-profile-ownership.md) for worker, startup and interactive-instance coordination. Canonical profile paths and directory leases keep alias changes from redirecting an active worker.
 - Reject an affected operation when the intended audio recipient or capture target cannot be established. Audio-enabled recording must not silently become video-only, and window capture must not fall back to monitor capture.
 - Retain UI capture exclusion throughout uncertain settings transitions.
-- Close a finding only with focused regression evidence, applicable modern and legacy builds, and a final security review of the branch. Cross-account protection requires genuine cross-account testing before it is described as fully verified; otherwise retain verification as outstanding.
+- Close a finding only with focused regression evidence, applicable modern builds, and a final security review of the branch. Cross-account protection requires genuine cross-account testing before it is described as fully verified; otherwise retain verification as outstanding.
 
 ## Implementation agreement
 
@@ -23,7 +23,7 @@ The implementation starts from main at e8713db24a7476b0e7db71548ae69b75c57886af.
 3. Replace the vulnerable profile-ownership mechanism while preserving one worker per user/profile across Windows sessions. A different account must not be able to impersonate a legitimate profile owner through a predictable object name. Preserve rejection before replay-cache cleanup and release ownership after task termination.
 4. Make UI capture exclusion follow the acknowledged active capture state. Cover pending, rejected and successful transitions in both directions, preserving exclusion while the active mode is uncertain.
 5. Investigate screenshot window-identity changes between validation, capture binding and publication. Fix a validated issue and test stale-output rejection; retain any unresolved binding-identity proof gap explicitly.
-6. Update affected setup instructions and checks, run focused regressions and applicable modern/legacy builds, then review the complete branch diff for security. Prepare concrete capture and second-account test procedures after the patch and harness exist; obtain task-specific authorization before those steps. Report implemented fixes separately from outstanding verification.
+6. Update affected setup instructions and checks, run focused regressions and applicable modern builds, then review the complete branch diff for security. Prepare concrete capture and second-account test procedures after the patch and harness exist; obtain task-specific authorization before those steps. Report implemented fixes separately from outstanding verification.
 
 Use isolated profiles and evidence directories, preserving existing preferences, media, installed recorder state and unrelated checkout changes. Once confirmed, this agreement authorizes local implementation and verification within those boundaries; pushing, merging, installing and publishing remain separate actions.
 

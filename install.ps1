@@ -1,19 +1,14 @@
-param([switch]$NoLaunch, [switch]$Avalonia, [switch]$Legacy)
+param([switch]$NoLaunch)
 $ErrorActionPreference = 'Stop'
-if ($Avalonia -and $Legacy) { throw 'Choose either the Avalonia app or the legacy reference build.' }
-$useAvalonia = -not $Legacy
-$source = Join-Path $PSScriptRoot 'bin\F10Recorder.exe'
 $publish = Join-Path $PSScriptRoot 'bin\avalonia-publish'
-if ($useAvalonia) {
-    $source = Join-Path $publish 'F10Recorder.Desktop.exe'
-    if (-not (Test-Path -LiteralPath $source)) { & (Join-Path $PSScriptRoot 'build-avalonia.ps1') -Publish }
-} elseif (-not (Test-Path -LiteralPath $source)) { & (Join-Path $PSScriptRoot 'build.ps1') }
+$source = Join-Path $publish 'F10Recorder.Desktop.exe'
+if (-not (Test-Path -LiteralPath $source)) { & (Join-Path $PSScriptRoot 'build-avalonia.ps1') -Publish }
 $appRoot = Join-Path $env:LOCALAPPDATA 'F10Recorder'
 $destination = Join-Path $appRoot 'application'
 New-Item -ItemType Directory -Force -Path $destination | Out-Null
 $executable = Join-Path $destination 'F10Recorder.exe'
 if (Get-Process -Name F10Recorder,F10Recorder.Desktop -ErrorAction SilentlyContinue) { throw 'Quit F10 Recorder from its tray menu before reinstalling.' }
-if ($useAvalonia) { Get-ChildItem -LiteralPath $publish | Where-Object Name -ne 'F10Recorder.Desktop.exe' | Copy-Item -Destination $destination -Recurse -Force }
+Get-ChildItem -LiteralPath $publish | Where-Object Name -ne 'F10Recorder.Desktop.exe' | Copy-Item -Destination $destination -Recurse -Force
 Copy-Item -LiteralPath $source -Destination $executable -Force
 foreach ($noticeName in @('LICENSE', 'THIRD_PARTY_NOTICES')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $noticeName) -Destination (Join-Path $destination $noticeName) -Force

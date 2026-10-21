@@ -74,7 +74,10 @@ encrypted/transformed samples and fragmented containers need separate contracts.
 - Measure same-binary observer-off/on brackets before treating instrumented
   performance as ordinary performance. Proposed bounds are 2% FPS and 5% p99.
 - Preserve five counterbalanced paired blocks per claimed output mode, 40-second
-  traces with inner [10,35) seconds, plus recorder-off drift controls. Retain
+  traces with a prospectively frozen inner window, plus recorder-off drift
+  controls. The historical [10,35) window is usable only when qualification
+  establishes readiness and complete source/status coverage around it. Apply
+  [experiment admission](experiment-contract.md) before an expensive batch. Retain
   rejected attempts and replace whole pairs. Use paired run-level uncertainty,
   not frames as independent replicates. Proposed upper confidence bounds are
   2% FPS loss and 10% p99 increase.
