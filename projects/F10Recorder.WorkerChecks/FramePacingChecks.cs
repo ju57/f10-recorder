@@ -9,7 +9,7 @@ internal static class FramePacingChecks
 {
     internal static int Run(string data, int seconds, int fps, string mode, bool audio, string variant, int ceiling, int sourceFps, string codec)
     {
-        data = Path.GetFullPath(data); Directory.CreateDirectory(data); WindowsRecorder.Initialize(data);
+        data = Path.GetFullPath(data); Directory.CreateDirectory(data); RecorderHost.Initialize(data);
         var report = new Dictionary<string, object> { ["sourceMode"] = mode, ["configuredFps"] = fps, ["configuredSourceFps"] = sourceFps, ["videoCodec"] = codec, ["systemAudio"] = audio, ["variant"] = variant };
         RecorderRuntime.CaptureArgumentProbe = args =>
         {

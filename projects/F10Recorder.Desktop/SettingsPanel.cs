@@ -10,7 +10,7 @@ namespace F10Recorder;
 
 internal sealed class SettingsPanel : UserControl
 {
-    readonly WindowsRecorder recorder;
+    readonly IWindowsRecorder recorder;
     readonly NumericUpDown minutes = Number("ReplayMinutes", 1, 30), bitrate = Number("BitrateMbps", 5, 100), display = Number("DisplayIndex", -1, 31);
     readonly ComboBox fps = new() { Name = "FramesPerSecond", ItemsSource = Settings.SupportedFrameRates }, codec = new() { Name = "VideoCodec", MinWidth = 260 };
     readonly ComboBox captureMode = new() { Name = "CaptureMode", ItemsSource = new[] { "Monitor", "Application window · experimental" } }, window = new() { Name = "CaptureWindow", HorizontalAlignment = HorizontalAlignment.Stretch, MinHeight = 40, PlaceholderText = "Refresh windows to choose an application" };
@@ -35,7 +35,7 @@ internal sealed class SettingsPanel : UserControl
     internal bool CodecCheckFinished => !probing;
     internal int SelectedPage { get; private set; }
 
-    public SettingsPanel(WindowsRecorder session)
+    public SettingsPanel(IWindowsRecorder session)
     {
         Background = Ui.Background;
         recorder = session; var config = session.Config;
@@ -70,7 +70,7 @@ internal sealed class SettingsPanel : UserControl
         var footer = new StackPanel { Spacing = 10, Margin = new Thickness(0, 14, 0, 0) }; footer.Children.Add(error);
         var footerGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto"), ColumnSpacing = 8 };
         var info = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center }; info.Children.Add(estimate);
-        var logs = Ui.Button("Diagnostic logs", () => { try { WindowsRecorder.OpenFolder(recorder.DataDirectory); } catch (Exception ex) { error.Text = ex.Message; } }); logs.Padding = new Thickness(0); logs.Background = Brushes.Transparent; logs.Foreground = Ui.Muted; info.Children.Add(logs); footerGrid.Children.Add(info);
+        var logs = Ui.Button("Diagnostic logs", () => { try { RecorderHost.OpenFolder(recorder.DataDirectory); } catch (Exception ex) { error.Text = ex.Message; } }); logs.Padding = new Thickness(0); logs.Background = Brushes.Transparent; logs.Foreground = Ui.Muted; info.Children.Add(logs); footerGrid.Children.Add(info);
         var close = Ui.Button("Close", () => CloseRequested?.Invoke()); Grid.SetColumn(close, 1); footerGrid.Children.Add(close);
         apply = Ui.Button("Apply changes", primary: true); apply.Name = "ApplySettings"; apply.Click += async (_, _) => await ApplyAsync(); Grid.SetColumn(apply, 2); footerGrid.Children.Add(apply);
         footer.Children.Add(footerGrid); Grid.SetRow(footer, 3); root.Children.Add(footer); Content = root;
