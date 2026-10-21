@@ -45,6 +45,6 @@ Completion requires offline positive and negative fixtures, a plan validation mo
 
 ## Scope and status
 
-Implementation is pending. Supporting deterministic checks belong in the existing modern verification/CI routes where their environment permits. Broader FFmpeg transport checks, further native observer contracts, performance/parity research and product feature work are follow-ups when specifically justified. None is an additional gate on ordinary unrelated source changes.
+Legacy retirement and the test-launch contract are implemented and validated locally. Experiment safeguards are pending. See [test effects](../../tests/test-effects.md) for previews and executable route checks. Supporting deterministic checks belong in the existing modern verification/CI routes where their environment permits. Broader FFmpeg transport checks, further native observer contracts, performance/parity research and product feature work are follow-ups when specifically justified. None is an additional gate on ordinary unrelated source changes.
 
 Per-experiment sampling values, storage limits and retained sets are resolved when planning that concrete experiment. This plan establishes the required inputs and behavior, and does not authorize a live batch, installation, publication, push, merge or evidence deletion.

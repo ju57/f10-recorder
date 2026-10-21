@@ -1,6 +1,14 @@
-param([ValidateRange(10,86400)][int]$SoakSeconds = 120, [switch]$NoBuild, [switch]$LiveDesktop, [ValidateSet(24,30,60,120)][int]$FramesPerSecond = 60, [switch]$GpuFixture)
+param([ValidateRange(10,86400)][int]$SoakSeconds = 120, [switch]$NoBuild, [switch]$LiveDesktop, [ValidateSet(24,30,60,120)][int]$FramesPerSecond = 60, [switch]$GpuFixture, [switch]$Plan)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+$prefix = if ($LiveDesktop) { 'worker-live-' } else { 'worker-' }
+$data = Join-Path $root ('artifacts/' + $prefix + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$desktop = Join-Path $root 'bin/avalonia/F10Recorder.Desktop.exe'
+. (Join-Path $PSScriptRoot 'verification-launch.ps1')
+$mode = if ($LiveDesktop) { 'LiveDesktop' } else { 'Synthetic' }
+$launch = Get-VerificationLaunchPlan -Suite Worker -Mode $mode -Root $root -DataDirectory $data -Desktop $desktop -SoakSeconds $SoakSeconds -FramesPerSecond $FramesPerSecond -GpuFixture:$GpuFixture
+Assert-VerificationLaunchPlan $launch
+if ($Plan) { return $launch }
 $sdk = Join-Path $root '.tools\dotnet\dotnet.exe'
 if (-not (Test-Path -LiteralPath $sdk)) { $sdk = (Get-Command dotnet -ErrorAction Stop).Source }
 $env:DOTNET_CLI_HOME = Join-Path $root '.tools\home'
@@ -15,13 +23,7 @@ if (-not $NoBuild) {
     & $sdk build (Join-Path $root 'projects\F10Recorder.WorkerChecks\F10Recorder.WorkerChecks.csproj') -c Release -o $output -m:1 --disable-build-servers -p:UseSharedCompilation=false --ignore-failed-sources
     if ($LASTEXITCODE -ne 0) { throw 'Worker verification build failed.' }
 }
-$prefix = if ($LiveDesktop) { 'worker-live-' } else { 'worker-' }
-$data = Join-Path $root ('artifacts\' + $prefix + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-$desktop = Join-Path $root 'bin\avalonia\F10Recorder.Desktop.exe'
-$checkArgs = @(('"' + $data + '"'),('"' + $desktop + '"'),$SoakSeconds)
-if ($LiveDesktop) { $checkArgs += @('--live','--fps',$FramesPerSecond) }
-if ($GpuFixture) { if (-not $LiveDesktop) { throw 'GPU fixture requires -LiveDesktop' }; $checkArgs += '--gpu-fixture' }
-$process = Start-Process -FilePath (Join-Path $output 'F10Recorder.WorkerChecks.exe') -ArgumentList $checkArgs -WindowStyle Hidden -PassThru
+$process = Start-VerificationLaunchPlan $launch
 $gpuSamples = [System.Collections.Generic.List[object]]::new()
 $gpuTool = if ($LiveDesktop) { Get-Command nvidia-smi -ErrorAction SilentlyContinue } else { $null }
 $samplingClock = [System.Diagnostics.Stopwatch]::StartNew()
