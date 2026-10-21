@@ -43,9 +43,13 @@ internal static class CaptureExclusionChecks
         return await Task.Run(() =>
         {
             var config = new Settings { ReplayMinutes = 1, FramesPerSecond = 30, BitrateMbps = 5, SystemAudio = false };
-            using var session = new CaptureSession(config, Path.Combine(root, "cache"), false);
-            for (int i = 0; i < 12; i++) { System.Threading.Thread.Sleep(500); session.Maintain(); Require(!session.HasExited, session.ErrorTail); }
-            return session.Save(session.Position, Path.Combine(root, "clips"));
+            using var replays = new ReplayCache();
+            var session = new CaptureSession(config, Path.Combine(root, "cache"), false);
+            var sessionId = replays.RegisterSession(session);
+            for (int i = 0; i < 12; i++) { System.Threading.Thread.Sleep(500); replays.Maintain(sessionId); Require(!session.HasExited, session.ErrorTail); }
+            var save = replays.TrySave(sessionId, Stopwatch.GetTimestamp(), Path.Combine(root, "clips"));
+            Require(save.Accepted, save.Rejection); var result = save.Completion.GetAwaiter().GetResult();
+            Require(result.Succeeded, result.Error); return result.File;
         });
     }
     static async Task<string> Frame(string clip, string output)

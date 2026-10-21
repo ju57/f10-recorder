@@ -99,17 +99,23 @@ internal static class SecurityChecks
         {
             using var privateEvidence = TrustedStorage.Acquire(data);
             var settings = new Settings { ReplayMinutes = 1, FramesPerSecond = 30, BitrateMbps = 5, SystemAudio = true };
-            using var capture = new CaptureSession(settings, data, false);
+            using var replays = new ReplayCache();
+            var capture = new CaptureSession(settings, data, false);
+            var sessionId = replays.RegisterSession(capture);
             Require(replaced, "The video source was not replaced with generated imagery.");
             var clock = Stopwatch.StartNew();
-            while (clock.Elapsed < TimeSpan.FromSeconds(8)) { capture.Maintain(); Require(capture.Healthy, "Live audio pipeline stopped."); Thread.Sleep(100); }
-            Require(capture.Metrics.CaptureProgressSeconds > 3 && capture.BufferedSeconds > 2, "Live audio did not advance.");
-            string clip = capture.Save(capture.Position, Path.Combine(data, "clips"));
+            while (clock.Elapsed < TimeSpan.FromSeconds(8)) { replays.Maintain(sessionId); Require(capture.Healthy, "Live audio pipeline stopped."); Thread.Sleep(100); }
+            Require(capture.Metrics.CaptureProgressSeconds > 3 && replays.GetStatus(sessionId).BufferedSeconds > 2, "Live audio did not advance.");
+            var save = replays.TrySave(sessionId, Stopwatch.GetTimestamp(), Path.Combine(data, "clips"));
+            Require(save.Accepted, save.Rejection); var result = save.Completion.GetAwaiter().GetResult();
+            Require(result.Succeeded, result.Error); string clip = result.File;
             using var decode = CaptureSession.StartProcess(MediaDependency.ResolveExecutable(), new[] { "-hide_banner", "-v", "error", "-i", clip, "-map", "0:v:0", "-map", "0:a:0", "-f", "null", "-" }, data);
             var error = decode.StandardError.ReadToEndAsync(); var output = decode.StandardOutput.ReadToEndAsync();
             if (!decode.WaitForExit(15000)) { decode.Kill(); decode.WaitForExit(); throw new TimeoutException("Live audio fixture decode timed out."); }
             Require(decode.ExitCode == 0 && error.Result.Length == 0, "Live audio/video decode failed: " + error.Result); output.Wait();
-            report["result"] = "passed"; report["clip"] = clip; report["metrics"] = capture.Metrics;
+            var metrics = capture.Metrics; var buffer = replays.GetStatus(sessionId);
+            metrics.BufferedSeconds = buffer.BufferedSeconds; metrics.CacheBytes = buffer.CacheBytes;
+            report["result"] = "passed"; report["clip"] = clip; report["metrics"] = metrics;
             report["scope"] = "Eight seconds of real default-output system audio with generated video; both tracks decoded. No desktop capture or perceptual audio-quality/sync claim.";
             return 0;
         }

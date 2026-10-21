@@ -148,6 +148,15 @@ If another isolated recorder owns the regression shortcuts, use `-ShortcutModifi
 
 The platform-independent checks can run with `dotnet run --project projects/F10Recorder.CoreChecks -- artifacts/core-checks`. They cover replay boundaries, incomplete manifests, path containment, old-settings migration and invalid-file preservation; they need no GPU or capture permissions. The Core project targets `net10.0` and has no Windows references. GitHub CI runs these checks on Ubuntu; Linux desktop/capture acceptance remains pending.
 
+The [replay ownership checks](tests/replay-ownership.md) exercise save admission,
+retention, snapshot failures, publication and session retirement through the replay
+module used by capture supervision. Run `./tests/replay-ownership.ps1 -Plan` to
+preview, then omit `-Plan` to run local file fixtures with controlled export
+outcomes. These checks use no UI, recording engine, capture or GPU. Accepted
+saves keep their session resources until completion; orderly shutdown waits for
+that work before releasing profile ownership. Monitor capture remains continuous
+across game, browser and desktop use.
+
 Modern verification entry points are `tests/migration.ps1`, `tests/worker.ps1`,
 `tests/window-capture.ps1`, `tests/frame-pacing.ps1`, `tests/audio-clock.ps1`,
 `tests/dependencies.ps1` and `tests/security.ps1`. Select checks by their documented
