@@ -31,15 +31,14 @@ if (-not (Test-Path -LiteralPath $config)) {
     }
     $initialSettings | ConvertTo-Json | Set-Content -LiteralPath $config -Encoding UTF8
 }
-Write-Host 'Checking the recording engine. A compatible existing FFmpeg will be reused.'
+Write-Host 'Preparing the approved recording engine. Setup downloads a verified private copy when needed.'
 $engineSetup = Start-Process -FilePath $executable -ArgumentList @('--ensure-media','--data-dir',('"' + $appRoot + '"')) -WindowStyle Hidden -PassThru -Wait
 if ($engineSetup.ExitCode -ne 0) {
     $errorFile = Join-Path $appRoot 'media-install-error.txt'
     $detail = if (Test-Path -LiteralPath $errorFile) { Get-Content -LiteralPath $errorFile -Raw } else { 'Recording engine setup failed.' }
     throw $detail
 }
-$engine = Get-Content -LiteralPath (Join-Path $appRoot 'media-engine.json') -Raw | ConvertFrom-Json
-Write-Host "Recording engine ready ($($engine.Source)): $($engine.Version)"
+Write-Host 'Approved recording engine ready. Verified offline reuse is available.'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey | Out-Null }
 Set-ItemProperty -LiteralPath $runKey -Name F10Recorder -Value ('"' + $executable + '"')

@@ -15,4 +15,16 @@ if (-not $RemoveSettings) {
     $engineMetadata = Join-Path $appRoot 'media-engine.json'
     if (Test-Path -LiteralPath $engineMetadata) { Remove-Item -LiteralPath $engineMetadata -Force }
 }
+$privateRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'F10Recorder.Security'))
+if (-not $privateRoot.StartsWith($expected, [StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($privateRoot) -ne 'F10Recorder.Security') { throw 'Unexpected private storage directory.' }
+if (Test-Path -LiteralPath $privateRoot) {
+    $privateAncestor = Get-Item -LiteralPath $privateRoot
+    while ($null -ne $privateAncestor) {
+        if ($privateAncestor.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Private storage path contains a reparse point; automatic cleanup refused.' }
+        $privateAncestor = $privateAncestor.Parent
+    }
+    $privateDirectories = @(Get-Item -LiteralPath $privateRoot) + @(Get-ChildItem -LiteralPath $privateRoot -Directory -Recurse -Force)
+    if ($privateDirectories | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) { throw 'Private storage contains a reparse point; automatic cleanup refused.' }
+    Remove-Item -LiteralPath $privateRoot -Recurse -Force
+}
 Write-Host 'F10 Recorder uninstalled. Saved clips were preserved.'

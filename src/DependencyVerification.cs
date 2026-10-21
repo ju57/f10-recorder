@@ -2,69 +2,107 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
-using System.Linq;
+using System.Diagnostics;
 using System.Web.Script.Serialization;
 
 namespace F10Recorder
 {
     internal static class DependencyVerification
     {
-        internal static int Run(string data, bool download)
+        static void Require(bool value, string message) { if (!value) throw new Exception(message); }
+        static void Rejected(Action action)
         {
+            bool rejected = false;
+            try { action(); } catch (IOException) { rejected = true; } catch (System.ComponentModel.Win32Exception) { rejected = true; }
+            Require(rejected, "An unapproved executable was accepted.");
+        }
+        internal static int Run(string data, bool download, string package = null)
+        {
+            Directory.CreateDirectory(data);
             var report = new Dictionary<string, object>();
+            string originalRoot = MediaDependency.RootDirectory, originalPath = Environment.GetEnvironmentVariable("PATH");
             try
             {
-                string filterRows = " ... ddagrab |->V Desktop capture\n ... aresample A->A Resample audio\n ... hwdownload V->V Download frames\n ... setpts V->V Timestamp frames\n";
-                if (MediaDependency.SupportsCaptureFilters(filterRows) || MediaDependency.SupportsCaptureFilters(filterRows + " ... vfrdet V->V Reports fps\n") || !MediaDependency.SupportsCaptureFilters(filterRows + " ... fps V->V Pace frames\n")) throw new Exception("Required FPS filter inventory was not enforced.");
-                string currentRows = filterRows.Replace(" ... ", " .. ");
-                if (MediaDependency.SupportsCaptureFilters(currentRows) || MediaDependency.SupportsCaptureFilters(currentRows + " .. vfrdet V->V Reports fps\n") || !MediaDependency.SupportsCaptureFilters(currentRows + " .. fps V->V Pace frames\n")) throw new Exception("Current FFmpeg filter inventory format was rejected.");
-                report["requiredFpsFilterAndDescriptionFalsePositive"] = true;
-                report["currentAndLegacyFilterInventoryFormats"] = true;
-                if (MediaDependency.SupportsCaptureFilters((filterRows + " ... fps V->V Pace frames\n").Replace(" ... setpts V->V Timestamp frames\n", ""))) throw new Exception("Timestamp alignment filter is required.");
-                report["requiredTimestampFilter"] = true;
-                string existing = MediaDependency.ResolveExecutable();
-                string originalHash = MediaDependency.Hash(existing);
-                bool acquired = false;
-                var reused = MediaDependency.Ensure(Path.Combine(data, "reuse"), new[] { existing }, true, new Uri(MediaDependency.PackageUrl), MediaDependency.PackageSha256, delegate { acquired = true; throw new Exception("Existing FFmpeg should prevent downloading."); });
-                if (acquired || reused.Source != "existing" || reused.Executable != existing) throw new Exception("Compatible existing engine was not reused.");
-                report["existingReuseWithoutDownload"] = true;
-                string invalid = Path.Combine(data, "invalid", "ffmpeg.exe"); Directory.CreateDirectory(Path.GetDirectoryName(invalid)); File.WriteAllText(invalid, "not an executable");
-                string version;
-                if (MediaDependency.TryValidate(invalid, out version)) throw new Exception("An invalid executable was accepted.");
-                report["invalidCandidateRejected"] = true;
-                var fallback = MediaDependency.Ensure(Path.Combine(data, "skip-invalid"), new[] { invalid, existing }, false, new Uri(MediaDependency.PackageUrl), MediaDependency.PackageSha256, delegate { throw new Exception("Unexpected download."); });
-                if (fallback.Executable != existing) throw new Exception("Invalid candidate blocked reuse of a valid installation.");
-                report["invalidCandidateSkipped"] = true;
-                bool failed = false;
-                try { MediaDependency.Ensure(Path.Combine(data, "bad-checksum"), new string[0], true, new Uri(MediaDependency.PackageUrl), MediaDependency.PackageSha256, delegate(Uri uri, string path) { File.WriteAllText(path, "incomplete package"); }); }
-                catch (IOException) { failed = true; }
-                if (!failed || File.Exists(Path.Combine(data, "bad-checksum", "media-engine.json"))) throw new Exception("Checksum failure published an installation.");
-                report["checksumFailureRejected"] = true;
-                string traversal = Path.Combine(data, "traversal.zip");
-                using (var archive = ZipFile.Open(traversal, ZipArchiveMode.Create)) { using (var writer = new StreamWriter(archive.CreateEntry("../escaped.txt").Open())) writer.Write("must not escape"); }
-                failed = false;
-                try { MediaDependency.ExtractArchive(traversal, Path.Combine(data, "extracted")); } catch (IOException) { failed = true; }
-                if (!failed || File.Exists(Path.Combine(data, "escaped.txt"))) throw new Exception("Archive traversal was not rejected.");
-                report["archiveBoundaryEnforced"] = true;
-                var settings = new Settings(); string preferenceFile = Path.Combine(data, "preference-test.json"); settings.Save(preferenceFile);
-                if (File.ReadAllText(preferenceFile).Contains("FfmpegPath")) throw new Exception("The recording preferences still expose an editable FFmpeg path.");
-                report["pathRemovedFromPreferences"] = true;
-                if (download)
+                string rows = " ... ddagrab |->V Capture\n ... aresample A->A Audio\n ... hwdownload V->V Download\n ... setpts V->V Timestamp\n";
+                Require(!MediaDependency.SupportsCaptureFilters(rows + " ... vfrdet V->V Reports fps\n") && MediaDependency.SupportsCaptureFilters(rows + " ... fps V->V Pace\n"), "Filter inventory accepted a description instead of the FPS filter.");
+                report["filterInventory"] = true;
+                string pipeName = "F10Recorder-legacy-check-" + Guid.NewGuid().ToString("N"), pipeResult = Path.Combine(data, "pipe-result.txt");
+                using (var pipe = AudioPipe.Create(pipeName))
+                using (var child = Process.Start(new ProcessStartInfo(System.Reflection.Assembly.GetExecutingAssembly().Location,
+                    "--dependency-pipe " + CaptureSession.Quote(pipeName) + " " + CaptureSession.Quote(pipeResult)) { UseShellExecute = false, CreateNoWindow = true }))
                 {
-                    var installed = MediaDependency.DownloadForVerification(Path.Combine(data, "clean-install"));
-                    if (installed.Source != "private") throw new Exception("Missing-engine installation did not produce a private runtime.");
-                    var codecs = EncoderCapabilities.Probe(installed.Executable);
-                    if (!codecs.Any(codec => codec.Codec == "h264_nvenc")) throw new Exception("Downloaded engine could not initialize H.264 on this GPU.");
-                    bool redownloaded = false;
-                    var again = MediaDependency.Ensure(Path.Combine(data, "clean-install"), new string[0], true, new Uri(MediaDependency.PackageUrl), MediaDependency.PackageSha256, delegate { redownloaded = true; throw new Exception("Already installed runtime was downloaded again."); });
-                    if (redownloaded || again.Executable != installed.Executable) throw new Exception("Private engine was not reused on repair.");
-                    report["cleanInstallDownloadAndValidation"] = true; report["privateRuntimeReused"] = true; report["downloadedEngine"] = installed; report["downloadedCodecs"] = codecs.Select(codec => codec.Codec).ToArray();
+                    try
+                    {
+                        AudioPipe.Accept(pipe, child, null, 5000); pipe.WriteByte(83); pipe.Flush(); pipe.Dispose();
+                        Require(child.WaitForExit(5000) && child.ExitCode == 0 && File.ReadAllText(pipeResult) == "83", "Legacy expected-child admission failed.");
+                    }
+                    finally { if (!child.HasExited) { child.Kill(); child.WaitForExit(); } }
                 }
-                if (MediaDependency.Hash(existing) != originalHash) throw new Exception("Existing FFmpeg was modified.");
-                report["existingBinaryPreserved"] = true;
-                report["result"] = "passed"; File.WriteAllText(Path.Combine(data, "verification.json"), new JavaScriptSerializer().Serialize(report)); return 0;
+                report["legacyExpectedChildAudioPipeAdmission"] = true;
+                MediaDependency.RootDirectory = Path.Combine(data, "managed");
+                string untrusted = Path.Combine(data, "profile", "runtime", "ffmpeg.exe"), marker = Path.Combine(data, "executed.txt");
+                Directory.CreateDirectory(Path.GetDirectoryName(untrusted));
+                File.Copy(System.Reflection.Assembly.GetExecutingAssembly().Location, untrusted);
+                string preferences = Path.Combine(data, "profile", "settings.json"); File.WriteAllText(preferences, "{\"ReplayMinutes\":5}");
+                string manifest = Path.Combine(data, "profile", "media-engine.json");
+                File.WriteAllText(manifest, new JavaScriptSerializer().Serialize(new MediaInstallation { Executable = untrusted, Sha256 = MediaDependency.Hash(untrusted) }));
+                Environment.SetEnvironmentVariable("PATH", Path.GetDirectoryName(untrusted) + Path.PathSeparator + ".");
+                Rejected(delegate { MediaDependency.ResolveExecutable(); });
+                Rejected(delegate { using (var process = CaptureSession.StartProcess(untrusted, new[] { "--dependency-marker", marker }, data)) process.WaitForExit(); });
+                Require(!File.Exists(marker), "An untrusted engine executed before verification.");
+                report["pathProfileManifestAndDirectLaunchRejectedBeforeExecution"] = true;
+                string version;
+                Require(!MediaDependency.TryValidate(untrusted, out version), "An external compatibility probe ran.");
+                TrustedStorage.CreatePrivateDirectory(MediaDependency.RootDirectory);
+                Rejected(delegate { MediaDependency.Ensure(false, delegate { throw new Exception("Offline lookup downloaded."); }); });
+                Rejected(delegate { MediaDependency.Ensure(true, delegate(Uri uri, string file) { File.WriteAllText(file, "bad package"); }); });
+                Require(!File.Exists(MediaDependency.ExecutablePath), "Bad checksum published an engine.");
+                report["offlineMissingAndPackageChecksumFailure"] = true;
+                string traversal = Path.Combine(data, "traversal.zip");
+                using (var zip = ZipFile.Open(traversal, ZipArchiveMode.Create)) using (var writer = new StreamWriter(zip.CreateEntry("../escaped.txt").Open())) writer.Write("escape");
+                Rejected(delegate { MediaDependency.ExtractArchive(traversal, Path.Combine(data, "extract")); });
+                Require(!File.Exists(Path.Combine(data, "escaped.txt")), "Archive traversal escaped staging.");
+                report["archiveContainment"] = true;
+                if (package == null && !download) throw new IOException("Approved-package success checks need --package with the pinned archive, or --download.");
+                var installed = package == null ? MediaDependency.DownloadForVerification(data)
+                    : MediaDependency.Ensure(true, delegate(Uri uri, string file) { File.Copy(package, file); });
+                Require(installed.Sha256 == MediaDependency.ExecutableSha256, "Installed engine was not approved.");
+                string packageRoot = Path.GetDirectoryName(Path.GetDirectoryName(installed.Executable));
+                Require(Directory.GetFiles(packageRoot, "LICENSE*").Length > 0, "The package license was not retained.");
+                using (var probe = CaptureSession.StartProcess(Path.Combine(Path.GetDirectoryName(installed.Executable), "ffprobe.exe"), new[] { "-version" }, data))
+                { var output = probe.StandardOutput.ReadToEndAsync(); var error = probe.StandardError.ReadToEndAsync(); Require(probe.WaitForExit(5000) && probe.ExitCode == 0, "The approved inspection tool did not run."); output.Wait(); error.Wait(); }
+                report["approvedInspectionToolAndPackageNotices"] = true;
+                var reused = MediaDependency.Ensure(false, delegate { throw new Exception("Verified engine downloaded again."); });
+                Require(reused.Executable == installed.Executable, "Verified offline engine was not reused.");
+                report["approvedInstallAndOfflineReuse"] = true;
+                using (var lease = MediaDependency.OpenVerifiedExecutable(installed.Executable))
+                {
+                    Rejected(delegate { using (File.Open(installed.Executable, FileMode.Open, FileAccess.Write, FileShare.ReadWrite)) { } });
+                    Rejected(delegate { Directory.Move(Path.GetDirectoryName(installed.Executable), Path.GetDirectoryName(installed.Executable) + "-moved"); });
+                }
+                report["verificationLeasePreventsWriteAndRename"] = true;
+                DateTime written = File.GetLastWriteTimeUtc(installed.Executable);
+                using (var file = new FileStream(installed.Executable, FileMode.Open, FileAccess.ReadWrite)) { int first = file.ReadByte(); file.Position = 0; file.WriteByte((byte)(first ^ 1)); }
+                File.SetLastWriteTimeUtc(installed.Executable, written);
+                Rejected(delegate { MediaDependency.ResolveExecutable(); });
+                Rejected(delegate { using (var process = CaptureSession.StartProcess(installed.Executable, new[] { "-version" }, data)) process.WaitForExit(); });
+                Require(!MediaDependency.TryValidate(installed.Executable, out version), "Modified engine passed a probe.");
+                report["sameLengthSameTimestampTamperingRejected"] = true;
+                if (package == null) MediaDependency.DownloadForVerification(data);
+                else MediaDependency.Ensure(true, delegate(Uri uri, string file) { File.Copy(package, file); });
+                Require(MediaDependency.ResolveExecutable() == installed.Executable, "Explicit repair did not restore the approved engine.");
+                Require(File.ReadAllText(preferences) == "{\"ReplayMinutes\":5}" && File.Exists(untrusted) && File.Exists(manifest), "Setup changed the old profile.");
+                report["explicitRepairAndOldProfilePreservation"] = true;
+                report["mediaEngine"] = installed.Executable;
+                report["result"] = "passed";
+                return 0;
             }
-            catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); File.WriteAllText(Path.Combine(data, "verification.json"), new JavaScriptSerializer().Serialize(report)); return 1; }
+            catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); return 1; }
+            finally
+            {
+                MediaDependency.RootDirectory = originalRoot; Environment.SetEnvironmentVariable("PATH", originalPath);
+                File.WriteAllText(Path.Combine(data, "verification.json"), new JavaScriptSerializer().Serialize(report));
+            }
         }
     }
 }

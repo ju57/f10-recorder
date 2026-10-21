@@ -46,7 +46,7 @@ public sealed class App : Application
         DataDirectory ??= Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "F10Recorder");
         Action<Action> dispatch = action => Dispatcher.UIThread.Post(() => { if (!exiting) action(); });
         Recorder = RecorderFactory?.Invoke(DataDirectory, dispatch, Arguments.Contains("--paused"), ControlTitle) ?? new WindowsRecorder(DataDirectory, dispatch, Arguments.Contains("--paused"), ControlTitle);
-        CaptureVisibility.Configure(Recorder.Config);
+        CaptureVisibility.Configure(Recorder.Config, Recorder.CaptureModeKnown);
         SettingsWindow = new SettingsWindow(Recorder); Notice = new NoticeWindow();
         Recorder.Changed += Update; Recorder.OpenSettingsRequested += OpenSettings; Recorder.OverlayRequested += ToggleOverlay; Recorder.QuitRequested += Quit;
         Recorder.Notification += PresentNotice;
@@ -58,7 +58,13 @@ public sealed class App : Application
         Item("Open screenshots", () => OpenFolder(Recorder.Config.ScreenshotDirectory)); Item("Open clips", () => OpenFolder(Recorder.Config.OutputDirectory));
         Item("Settings…", OpenSettings); Item("Open overlay", ToggleOverlay);
         pauseItem = new NativeMenuItem("Pause recording"); pauseItem.Click += (_, _) => Recorder.Pause(!Recorder.Paused); menu.Items.Add(pauseItem);
-        Item("Restart buffer", Recorder.Restart); menu.Items.Add(new NativeMenuItemSeparator()); Item("Quit", Quit);
+        Item("Restart buffer", Recorder.Restart);
+        Item("Repair recording engine", async () =>
+        {
+            try { await Recorder.RepairMediaAsync(); PresentNotice("Recording engine ready", "The approved recording engine is available.", NotificationKind.Success, 4000); }
+            catch (Exception ex) { PresentNotice("Recording engine repair failed", ex.Message, NotificationKind.Warning, 6000); }
+        });
+        menu.Items.Add(new NativeMenuItemSeparator()); Item("Quit", Quit);
         tray = new TrayIcon { Icon = Ui.TrayIcon(false), Menu = menu, ToolTipText = "F10 Recorder", IsVisible = true, Command = new ActionCommand(OpenSettings) };
         TrayIcon.SetIcons(this, new TrayIcons { tray });
         timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
@@ -77,7 +83,7 @@ public sealed class App : Application
     }
     internal void Update()
     {
-        if (!Recorder.Applying) CaptureVisibility.Configure(Recorder.Config);
+        CaptureVisibility.Configure(Recorder.Config, Recorder.CaptureModeKnown);
         var status = ReplayPresentation.Describe(Recorder.Phase, Recorder.State, Recorder.Paused, Recorder.Ready, Recorder.CanSave, Recorder.Applying, Recorder.Saving, Recorder.SaveRegistered, Recorder.Metrics?.BufferedSeconds ?? 0);
         SettingsWindow.UpdateState(); statusItem.Header = status.Heading;
         pauseItem.Header = Recorder.Paused ? "Resume recording" : "Pause recording";

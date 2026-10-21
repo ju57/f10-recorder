@@ -11,14 +11,14 @@ internal static class RecorderWorker
     {
         data = WorkerIdentity.DataPath(data); RecorderHost.Initialize(data);
         Log.FileName = "worker.log";
-        using var ownership = new Mutex(true, @"Local\F10Recorder-Worker-" + WorkerIdentity.Scope(data), out bool first);
-        if (!first) return 0;
-        using var profileOwnership = new Mutex(true, WorkerIdentity.ProfileMutexName(data), out bool firstProfile);
-        if (!firstProfile)
+        IDisposable profileOwnership;
+        try { profileOwnership = ProfileOwnership.Acquire(data, out string bound); data = bound; Log.DirectoryPath = data; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Log.Write("This recording profile is already active in another Windows session. Quit that recorder or use a separate data directory.");
+            Log.Write("Recording profile ownership could not be established. Another session may own it, or private ownership storage needs repair. " + ex.Message);
             return 1;
         }
+        using var profileLifetime = profileOwnership;
         var loop = new WorkerLoop();
         string pauseFile = Path.Combine(data, "worker-state.json");
         if (File.Exists(pauseFile))
@@ -32,6 +32,7 @@ internal static class RecorderWorker
         long sequence = 0;
         long revision = 0;
         string instance = Guid.NewGuid().ToString("N");
+        string completedApply = null;
         Process attachedUi = null;
         bool stopping = false;
         TaskCompletionSource screenshotPrepared = null;
@@ -100,7 +101,7 @@ internal static class RecorderWorker
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             }
-            return new WorkerStatus { Instance = instance, Revision = ++revision, Config = host.Config, Paused = host.Paused, Ready = host.Ready && metrics.CaptureProcessId != 0, Phase = host.Phase, CanSave = host.CanSave, Applying = host.Applying, Saving = host.Saving, ScreenshotInProgress = host.ScreenshotInProgress,
+            return new WorkerStatus { Instance = instance, CompletedApply = completedApply, Revision = ++revision, Config = host.Config, Paused = host.Paused, Ready = host.Ready && metrics.CaptureProcessId != 0, Phase = host.Phase, CanSave = host.CanSave, Applying = host.Applying, Saving = host.Saving, ScreenshotInProgress = host.ScreenshotInProgress,
                 SaveRegistered = host.SaveRegistered, OverlayRegistered = host.OverlayRegistered, ScreenshotRegistered = host.ScreenshotRegistered,
                 State = host.State, LastScreenshot = host.LastScreenshot, ApplicationName = host.ApplicationName, WorkerProcessId = Environment.ProcessId,
                 Sequence = sequence, Metrics = metrics, Stopping = stopping, Events = after < 0 ? [] : events.Where(e => e.Sequence > after).Take(16).ToArray() };
@@ -129,7 +130,7 @@ internal static class RecorderWorker
             string error = null;
             try
             {
-                if (request.Version != 2) throw new InvalidDataException("Unsupported recorder protocol version.");
+                if (request.Version != WorkerProtocol.Version) throw new InvalidDataException("Unsupported recorder protocol version.");
                 if (request.AttachUi)
                 {
                     if (attachedUi == null || attachedUi.Id != clientPid || !UiAlive())
@@ -140,7 +141,7 @@ internal static class RecorderWorker
                     }
                 }
                 if (stopping && request.Command != "status") throw new InvalidOperationException("Recorder is stopping.");
-                if (host.Applying && request.Command is "save" or "pause" or "restart" or "apply" or "screenshot" or "quit") throw new InvalidOperationException("Wait for the current settings change.");
+                if (host.Applying && request.Command is "save" or "pause" or "restart" or "apply" or "repairMedia" or "screenshot" or "quit") throw new InvalidOperationException("Wait for the current settings change.");
                 switch (request.Command)
                 {
                     case "status": break;
@@ -148,6 +149,7 @@ internal static class RecorderWorker
                     case "pause": host.Pause(request.Value); PersistPause(); break;
                     case "restart": host.Restart(); break;
                     case "apply": await host.ApplyAsync(request.Settings ?? throw new ArgumentException("Capture settings are required."), request.Value); break;
+                    case "repairMedia": await host.RepairMediaAsync(); break;
                     case "screenshot": host.TakeScreenshot(); break;
                     case "screenshotPrepared": screenshotPrepared?.TrySetResult(); break;
                     case "quit": await host.StopAsync(); stopping = true; PersistPause(true); break;
@@ -155,6 +157,7 @@ internal static class RecorderWorker
                 }
             }
             catch (Exception ex) { error = ex.Message; Log.Write(ex.ToString()); }
+            if (request.Command is "apply" or "repairMedia") completedApply = request.OperationId;
             return new WorkerReply { Error = error, Status = Snapshot(request.AfterEvent) };
         }
         loop.Tick = () =>
@@ -180,6 +183,7 @@ internal static class RecorderWorker
                 {
                     var request = await WorkerProtocol.ReadAsync<WorkerRequest>(pipe, deadline.Token).ConfigureAwait(false);
                     if (request.Command is "apply" or "quit") deadline.CancelAfter(TimeSpan.FromSeconds(40));
+                    if (request.Command == "repairMedia") deadline.CancelAfter(TimeSpan.FromSeconds(180));
                     if (!GetNamedPipeClientProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out uint pid)) throw new IOException("Recorder client identity unavailable.");
                     var reply = await loop.InvokeAsync(() => Handle(request, checked((int)pid))).WaitAsync(deadline.Token).ConfigureAwait(false);
                     stopAfterReply = request.Command == "quit" && reply.Error == null;

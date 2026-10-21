@@ -1,0 +1,3 @@
+# Coordinate ownership through protected file leases
+
+Store profile, startup and interactive-instance locks in account-protected local storage rather than predictable Windows mutex objects. Resolve a profile to its canonical directory before retaining its path, bind ownership to filesystem identity, exclude the Windows session from worker ownership, and retain handles protecting that resolved directory for the lease's lifetime. This preserves exclusivity across aliases and sessions while avoiding trust in an object another Windows account can precreate; retargeting a junction cannot redirect an already active recorder into a different cache.

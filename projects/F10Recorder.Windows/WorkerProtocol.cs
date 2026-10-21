@@ -10,7 +10,11 @@ namespace F10Recorder;
 
 internal static class WorkerIdentity
 {
-    internal static string DataPath(string data) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(data));
+    internal static string DataPath(string data)
+    {
+        string full = Path.GetFullPath(data);
+        return Path.TrimEndingDirectorySeparator(Directory.Exists(full) ? Native.FinalDirectoryPath(full) : full);
+    }
     internal static string Scope(string data)
     {
         using var identity = WindowsIdentity.GetCurrent();
@@ -20,14 +24,6 @@ internal static class WorkerIdentity
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..24];
     }
     internal static string PipeName(string data) => "F10Recorder.v1." + Scope(data);
-    internal static string ProfileMutexName(string data)
-    {
-        using var identity = WindowsIdentity.GetCurrent();
-        string key = (identity.User?.Value ?? throw new InvalidOperationException("Current Windows user unavailable.")) + ":" + DataPath(data).ToUpperInvariant();
-        // Profiles contain shared settings and disposable cache files. Pipe/session
-        // isolation must not permit two sessions to mutate those same files.
-        return @"Global\F10Recorder-Profile-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..24];
-    }
     internal static string ControlTitle(string data)
     {
         string standard = DataPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "F10Recorder"));
@@ -38,8 +34,9 @@ internal static class WorkerIdentity
 
 internal sealed class WorkerRequest
 {
-    public int Version = 2;
+    public int Version = WorkerProtocol.Version;
     public string Command = "status";
+    public string OperationId;
     public Settings Settings;
     public bool Value;
     public bool AttachUi;
@@ -55,6 +52,7 @@ internal sealed class WorkerEvent
 internal sealed class WorkerStatus
 {
     public string Instance;
+    public string CompletedApply;
     public long Revision;
     public Settings Config;
     public bool Paused, Ready, Applying, Saving, ScreenshotInProgress, SaveRegistered, OverlayRegistered, ScreenshotRegistered, Stopping;
@@ -69,7 +67,7 @@ internal sealed class WorkerStatus
 internal sealed class WorkerPersistentState { public bool Paused, UserStopped; }
 internal sealed class WorkerReply
 {
-    public int Version = 2;
+    public int Version = WorkerProtocol.Version;
     public string Error;
     public WorkerStatus Status;
 }
@@ -77,6 +75,7 @@ internal sealed class WorkerProtocolMismatchException(string message) : IOExcept
 
 internal static class WorkerProtocol
 {
+    internal const int Version = 3;
     internal static bool WasStopped(string data)
     {
         try { return JsonSerializer.Deserialize<WorkerPersistentState>(File.ReadAllText(Path.Combine(data, "worker-state.json")), Json)?.UserStopped == true; }
@@ -104,35 +103,29 @@ internal static class WorkerProtocol
     internal static async Task<WorkerReply> CallAsync(string data, WorkerRequest request, CancellationToken cancellation = default)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-        deadline.CancelAfter(request.Command is "apply" or "quit" ? TimeSpan.FromSeconds(40) : TimeSpan.FromSeconds(5));
+        deadline.CancelAfter(request.Command == "repairMedia" ? TimeSpan.FromSeconds(180) : request.Command is "apply" or "quit" ? TimeSpan.FromSeconds(40) : TimeSpan.FromSeconds(5));
         using var pipe = new NamedPipeClientStream(".", WorkerIdentity.PipeName(data), PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
         await pipe.ConnectAsync(deadline.Token).ConfigureAwait(false);
         await WriteAsync(pipe, request, deadline.Token).ConfigureAwait(false);
         var reply = await ReadAsync<WorkerReply>(pipe, deadline.Token).ConfigureAwait(false);
-        if (reply.Version != 2) throw new WorkerProtocolMismatchException("Recorder protocol version mismatch. Quit the older recorder before opening this build.");
+        if (reply.Version != Version) throw new WorkerProtocolMismatchException("Recorder protocol version mismatch. Quit the older recorder before opening this build.");
         return reply;
     }
     internal static WorkerReply EnsureWorker(string data, bool paused, string executable = null, bool attachUi = true)
     {
-        using var launch = new Mutex(false, @"Local\F10Recorder-Launch-" + WorkerIdentity.Scope(data));
-        bool owns = false;
+        Directory.CreateDirectory(data); data = WorkerIdentity.DataPath(data);
+        using var launch = ProfileOwnership.AcquireLaunch(data, out data);
         try
         {
-            try { owns = launch.WaitOne(TimeSpan.FromSeconds(10)); } catch (AbandonedMutexException) { owns = true; }
-            if (!owns) throw new TimeoutException("Recorder startup is already in progress.");
-            try
-            {
-                using var check = new CancellationTokenSource(500);
-                return CallAsync(data, new WorkerRequest { AttachUi = attachUi }, check.Token).GetAwaiter().GetResult();
-            }
-            catch (Exception ex) when (ex is not WorkerProtocolMismatchException && (ex is IOException or OperationCanceledException or TimeoutException)) { }
-            var info = new ProcessStartInfo(executable ?? Environment.ProcessPath) { UseShellExecute = false, CreateNoWindow = true };
-            info.ArgumentList.Add("--recorder-worker"); info.ArgumentList.Add("--data-dir"); info.ArgumentList.Add(data);
-            if (paused) info.ArgumentList.Add("--paused");
-            using var child = Process.Start(info) ?? throw new IOException("Recorder worker did not start.");
-            using var startup = new CancellationTokenSource(10000);
-            return CallAsync(data, new WorkerRequest { AttachUi = attachUi }, startup.Token).GetAwaiter().GetResult();
+            using var check = new CancellationTokenSource(500);
+            return CallAsync(data, new WorkerRequest { AttachUi = attachUi }, check.Token).GetAwaiter().GetResult();
         }
-        finally { if (owns) launch.ReleaseMutex(); }
+        catch (Exception ex) when (ex is not WorkerProtocolMismatchException && (ex is IOException or OperationCanceledException or TimeoutException)) { }
+        var info = new ProcessStartInfo(executable ?? Environment.ProcessPath) { UseShellExecute = false, CreateNoWindow = true };
+        info.ArgumentList.Add("--recorder-worker"); info.ArgumentList.Add("--data-dir"); info.ArgumentList.Add(data);
+        if (paused) info.ArgumentList.Add("--paused");
+        using var child = Process.Start(info) ?? throw new IOException("Recorder worker did not start.");
+        using var startup = new CancellationTokenSource(10000);
+        return CallAsync(data, new WorkerRequest { AttachUi = attachUi }, startup.Token).GetAwaiter().GetResult();
     }
 }

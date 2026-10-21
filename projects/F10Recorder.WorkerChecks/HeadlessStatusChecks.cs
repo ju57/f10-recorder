@@ -17,7 +17,7 @@ internal static class HeadlessStatusChecks
         Process Launch()
         {
             var info = new ProcessStartInfo(Environment.ProcessPath) { UseShellExecute = false, CreateNoWindow = true };
-            foreach (var arg in new[] { "--worker", data, desktop }) info.ArgumentList.Add(arg);
+            foreach (var arg in new[] { "--worker", data, desktop, "--engine-root", MediaDependency.RootDirectory, "--ownership-root", ProfileOwnership.RootDirectory }) info.ArgumentList.Add(arg);
             return Process.Start(info);
         }
         async Task<WorkerStatus> Until(Func<WorkerStatus, bool> condition, string reason)

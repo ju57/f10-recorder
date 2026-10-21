@@ -12,6 +12,8 @@ internal static class Program
         string defaultData = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "F10Recorder")));
         string data = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Argument(args, "--data-dir") ?? defaultData));
         WindowsRecorder.Initialize(data);
+        data = WorkerIdentity.DataPath(data);
+        defaultData = WorkerIdentity.DataPath(defaultData);
         if (args.Contains("--ensure-media")) return MediaDependency.Install(data, !args.Contains("--no-download"));
         if (args.Contains("--recorder-worker"))
         {
@@ -38,8 +40,12 @@ internal static class Program
             catch (OperationCanceledException) { return args.Contains("--quit") ? 0 : 1; }
             catch (IOException ex) { Log.Write(ex.ToString()); return 1; }
         }
-        using var mutex = new Mutex(true, @"Local\F10Recorder-Interactive-" + Environment.UserName + suffix, out bool first);
-        if (!first)
+        using var ownership = ProfileOwnership.TryAcquireUi(data, out string boundData);
+        if (boundData != null) data = boundData;
+        Log.DirectoryPath = data;
+        suffix = !string.Equals(data, defaultData, StringComparison.OrdinalIgnoreCase) ? "-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(data.ToUpperInvariant())))[..16] : "";
+        controlTitle = HotkeyWindow.ControlTitle + suffix;
+        if (ownership == null)
         {
             int command = args.Contains("--quit") ? 4 : args.Contains("--pause") ? 2 : args.Contains("--resume") ? 3 : args.Contains("--overlay") ? 5 : args.Contains("--screenshot") ? 6 : 1;
             var window = Native.FindWindow(null, controlTitle + ".UI");
