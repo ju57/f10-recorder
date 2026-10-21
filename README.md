@@ -157,6 +157,11 @@ saves keep their session resources until completion; orderly shutdown waits for
 that work before releasing profile ownership. Monitor capture remains continuous
 across game, browser and desktop use.
 
+The [capture status checks](tests/capture-status.md) verify delayed owner-queue
+delivery, capture-attempt freshness and supervisor-only readiness without UI,
+capture or GPU work. Preview with `./tests/capture-status.ps1 -Plan`. Status reads
+may reject readiness; only fresh supervisor evidence can establish it.
+
 Modern verification entry points are `tests/migration.ps1`, `tests/worker.ps1`,
 `tests/window-capture.ps1`, `tests/frame-pacing.ps1`, `tests/audio-clock.ps1`,
 `tests/dependencies.ps1` and `tests/security.ps1`. Select checks by their documented

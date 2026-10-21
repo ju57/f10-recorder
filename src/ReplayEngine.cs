@@ -282,13 +282,13 @@ namespace F10Recorder
         readonly Thread worker;
         readonly bool synthetic;
         readonly Func<WindowTargetSnapshot> windowTarget;
-        volatile bool closing, paused, restart;
+        readonly CaptureLifecycle capture;
         CaptureSession session;
         readonly ReplayCache replays = new ReplayCache();
         readonly ReplaySaveNotifications saveNotifications = new ReplaySaveNotifications();
         ReplaySessionId? sessionId;
         int recoveries;
-        internal bool CanSave { get { lock (gate) return !paused && !closing && sessionId.HasValue && replays.GetStatus(sessionId.Value).BufferedSeconds > 0; } }
+        internal bool CanSave { get { lock (gate) return !capture.Paused && !capture.Closing && sessionId.HasValue && replays.GetStatus(sessionId.Value).BufferedSeconds > 0; } }
         internal RecorderMetrics Metrics
         {
             get
@@ -310,8 +310,12 @@ namespace F10Recorder
             }
         }
         internal bool IsSaving { get { return replays.Status.Saving; } }
-        public event Action<string, bool> StateChanged;
-        internal event Action<CapturePhase, string, bool> CaptureStateChanged;
+        internal event Action CaptureStatusChanged
+        {
+            add { capture.CaptureStatusChanged += value; }
+            remove { capture.CaptureStatusChanged -= value; }
+        }
+        internal CaptureStatus ReadCaptureStatus() => capture.ReadCaptureStatus();
         public event Action<string, bool> SaveFinished;
         public event Action SaveStarted;
         public ReplayEngine(Settings config, string dataDirectory, bool startPaused = false) : this(config, dataDirectory, startPaused, false) { }
@@ -319,51 +323,53 @@ namespace F10Recorder
         internal ReplayEngine(Settings config, string dataDirectory, bool startPaused, bool syntheticSource, Func<WindowTargetSnapshot> targetProvider)
         {
             windowTarget = targetProvider;
-            settings = config; paused = startPaused; synthetic = syntheticSource; cache = Path.Combine(dataDirectory, "buffer");
+            settings = config; capture = new CaptureLifecycle(startPaused); synthetic = syntheticSource; cache = Path.Combine(dataDirectory, "buffer");
             Directory.CreateDirectory(cache);
             // Only this application's disposable cache. Saved clips live elsewhere.
             foreach (string old in Directory.GetDirectories(cache, "session-*")) CaptureSession.TryDeleteDirectory(old);
             worker = new Thread(Run) { IsBackground = true, Name = "Capture supervisor" }; worker.Start();
         }
-        void State(string message, bool ready) { State(ready ? CapturePhase.Buffering : paused ? CapturePhase.Paused : message.StartsWith("Recovering:") ? CapturePhase.Recovering : CapturePhase.Starting, message, ready); }
-        void State(CapturePhase next, string message, bool ready) { var typed = CaptureStateChanged; if (typed != null) typed(next, message, ready); var callback = StateChanged; if (callback != null) callback(message, ready); }
-        public void Restart() { restart = true; }
-        internal bool RestartPending { get { return restart; } }
-        public void Pause(bool value) { paused = value; restart = true; }
+        public void Restart() => capture.Restart();
+        public void Pause(bool value) => capture.Pause(value);
         internal int CaptureProcessId { get { lock (gate) return session == null ? 0 : session.ProcessId; } }
         void Run()
         {
             if (!synthetic && settings.CaptureMode == "window") { RunWindow(); return; }
             int failures = 0;
-            while (!closing)
+            while (!capture.Closing)
             {
+                if (!capture.TryBeginAttempt("Starting replay buffer…", out var attempt)) { Thread.Sleep(250); continue; }
                 CaptureSession current = null; ReplaySessionId? currentReplay = null;
                 try
                 {
-                    if (paused) { State("Paused", false); Thread.Sleep(250); continue; }
-                    restart = false;
                     settings.Validate();
-                    State("Starting replay buffer…", false);
-                    current = new CaptureSession(settings, cache, synthetic, delegate { return closing || paused || restart; });
+                    current = new CaptureSession(settings, cache, synthetic, () => !capture.IsCurrent(attempt));
                     currentReplay = replays.RegisterSession(current);
+                    var observed = current;
+                    if (!capture.AttachProcess(attempt, () => observed.ProcessId != 0)) continue;
                     lock (gate) { session = current; sessionId = currentReplay; }
-                    while (!closing && !restart && !paused)
+                    while (capture.IsCurrent(attempt))
                     {
                         replays.Maintain(currentReplay.Value);
                         if (!current.Healthy) throw new IOException("Capture stopped advancing. " + current.ErrorTail);
                         double buffered = replays.GetStatus(currentReplay.Value).BufferedSeconds;
-                        if (buffered > 0) { failures = 0; State("Buffering · " + Math.Min(settings.ReplayMinutes * 60, (int)buffered) + "s · " + settings.HotkeyText + " to save", true); }
+                        if (buffered > 0) { failures = 0; capture.Publish(attempt, CapturePhase.Buffering, "Buffering · " + Math.Min(settings.ReplayMinutes * 60, (int)buffered) + "s · " + settings.HotkeyText + " to save", true); }
                         Thread.Sleep(500);
                     }
                 }
-                catch (Exception ex) { failures++; lock (gate) recoveries++; Log.Write(ex.ToString()); State("Recovering: " + ex.Message.Split('\n')[0], false); }
+                catch (Exception ex)
+                {
+                    failures++; lock (gate) recoveries++; Log.Write(ex.ToString());
+                    capture.Publish(attempt, CapturePhase.Recovering, ex.Message.Split('\n')[0], false);
+                }
                 finally
                 {
+                    capture.EndAttempt(attempt);
                     lock (gate) { session = null; sessionId = null; }
                     if (currentReplay.HasValue) replays.RetireSessionAsync(currentReplay.Value).GetAwaiter().GetResult();
                 }
                 int delay = failures == 0 ? 0 : Math.Min(30, 1 << Math.Min(5, failures));
-                for (int i = 0; i < delay * 10 && !closing && !restart; i++) Thread.Sleep(100);
+                for (int i = 0; i < delay * 10 && !capture.Closing && !capture.RestartPending; i++) Thread.Sleep(100);
             }
         }
         // Source loss retains only this session's completed footage. A new source
@@ -371,62 +377,75 @@ namespace F10Recorder
         void RunWindow()
         {
             CaptureSession current = null; ReplaySessionId? currentReplay = null;
+            CaptureAttempt attempt = default;
             long generation = -1;
             bool capturing = false;
             int failures = 0;
             try
             {
-                while (!closing)
+                while (!capture.Closing)
                 {
                     try
                     {
+                        long reset = capture.ResetRequest;
                         var target = windowTarget == null ? new WindowTargetSnapshot { Phase = CapturePhase.WaitingForTarget, Reason = "Window capture is available only through the independent Windows worker." } : windowTarget();
-                        if (paused || restart || !target.Available || (capturing && target.Generation != generation))
+                        if (capture.Paused || capture.RestartPending || !target.Available || (capturing && target.Generation != generation))
                         {
-                            State(paused ? CapturePhase.Paused : target.Available ? CapturePhase.Starting : target.Phase, paused ? "Paused" : target.Reason, false);
+                            capture.SourceUnavailable(target.Available ? CapturePhase.Starting : target.Phase, target.Reason);
                             if (capturing) { replays.StopAcquisitionAsync(currentReplay.Value).GetAwaiter().GetResult(); capturing = false; }
-                            if (paused || restart)
+                            if (capture.Paused || capture.RestartPending)
                             {
                                 lock (gate) { session = null; sessionId = null; }
                                 if (currentReplay.HasValue) { replays.RetireSessionAsync(currentReplay.Value).GetAwaiter().GetResult(); current = null; currentReplay = null; }
-                                restart = false;
+                                capture.CompleteReset(reset);
+                                if (!target.Available) capture.SourceUnavailable(target.Phase, target.Reason);
                             }
-                            if (paused || !target.Available) { Thread.Sleep(250); continue; }
+                            if (capture.Paused || !target.Available) { Thread.Sleep(250); continue; }
                         }
                         if (!capturing)
                         {
                             lock (gate) { session = null; sessionId = null; }
-                            if (closing) break;
+                            if (capture.Closing) break;
                             if (currentReplay.HasValue) { replays.RetireSessionAsync(currentReplay.Value).GetAwaiter().GetResult(); current = null; currentReplay = null; }
-                            settings.Validate(); State(CapturePhase.Starting, target.Reason, false);
+                            if (!capture.TryBeginAttempt(target.Reason, out attempt)) continue;
+                            settings.Validate();
                             var expected = target;
-                            current = new CaptureSession(settings, cache, false, delegate { return closing || paused || restart; }, target,
+                            var starting = attempt;
+                            current = new CaptureSession(settings, cache, false, () => !capture.IsCurrent(starting), target,
                                 delegate { var latest = windowTarget(); return latest.Available && latest.Generation == expected.Generation; });
                             currentReplay = replays.RegisterSession(current);
                             var verified = windowTarget();
-                            if (!verified.Available || verified.Generation != expected.Generation) { replays.StopAcquisitionAsync(currentReplay.Value).GetAwaiter().GetResult(); continue; }
+                            if (!verified.Available || verified.Generation != expected.Generation)
+                            {
+                                capture.SourceUnavailable(verified.Available ? CapturePhase.Starting : verified.Phase, verified.Reason);
+                                replays.StopAcquisitionAsync(currentReplay.Value).GetAwaiter().GetResult(); continue;
+                            }
+                            var observed = current;
+                            if (!capture.AttachProcess(attempt, () => observed.ProcessId != 0)) continue;
                             generation = target.Generation; capturing = true;
                             lock (gate) { session = current; sessionId = currentReplay; }
                         }
                         replays.Maintain(currentReplay.Value);
                         if (!current.Healthy) throw new IOException("Window capture stopped advancing. " + current.ErrorTail);
                         double buffered = replays.GetStatus(currentReplay.Value).BufferedSeconds;
-                        if (buffered > 0) { failures = 0; State(CapturePhase.Buffering, "Buffering · " + (int)buffered + "s · " + target.ApplicationName, true); }
+                        if (buffered > 0) { failures = 0; capture.Publish(attempt, CapturePhase.Buffering, "Buffering · " + (int)buffered + "s · " + target.ApplicationName, true); }
                         Thread.Sleep(250);
                     }
                     catch (Exception ex)
                     {
-                        State(CapturePhase.Recovering, ex.Message.Split('\n')[0], false);
+                        capture.Publish(attempt, CapturePhase.Recovering, ex.Message.Split('\n')[0], false);
+                        capture.EndAttempt(attempt);
                         if (current != null) replays.StopAcquisitionAsync(currentReplay.Value).GetAwaiter().GetResult(); capturing = false;
                         lock (gate) recoveries++;
                         Log.Write(ex.ToString()); failures++;
                         int delay = Math.Min(30, 1 << Math.Min(5, failures));
-                        for (int i = 0; i < delay * 10 && !closing && !paused && !restart; i++) Thread.Sleep(100);
+                        for (int i = 0; i < delay * 10 && !capture.Closing && !capture.Paused && !capture.RestartPending; i++) Thread.Sleep(100);
                     }
                 }
             }
             finally
             {
+                capture.EndAttempt(attempt);
                 lock (gate) { session = null; sessionId = null; }
                 if (currentReplay.HasValue) replays.RetireSessionAsync(currentReplay.Value).GetAwaiter().GetResult();
             }
@@ -439,8 +458,8 @@ namespace F10Recorder
             {
                 lock (gate)
                 {
-                    if (closing) submission = new SaveSubmission("Recorder is stopping.", null);
-                    else if (paused) submission = new SaveSubmission("Replay recording is paused. Resume recording before saving.", null);
+                    if (capture.Closing) submission = new SaveSubmission("Recorder is stopping.", null);
+                    else if (capture.Paused) submission = new SaveSubmission("Replay recording is paused. Resume recording before saving.", null);
                     else if (!sessionId.HasValue) submission = new SaveSubmission("The replay buffer is warming up or recovering.", null);
                     else submission = replays.TrySave(sessionId.Value, triggerQpc, ApplicationFolders.Destination(settings.OutputDirectory, applicationName));
                     // Preserve admission order even when consecutive Save calls
@@ -454,7 +473,7 @@ namespace F10Recorder
         void NotifySave(string message, bool success) { ReplaySaveNotifications.Finish(SaveFinished, message, success); }
         public void Dispose()
         {
-            lock (gate) closing = true;
+            capture.Close();
             // Keep the worker's protected profile lease until retirement actually
             // completes. Export has its own timeout; elapsed join time is not cleanup.
             worker.Join();
