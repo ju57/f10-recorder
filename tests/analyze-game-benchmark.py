@@ -1,7 +1,6 @@
 """Summarize game presentation traces and saved media; image repeats are candidates, not proven loss."""
 import argparse
 import csv
-import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
@@ -10,7 +9,7 @@ import subprocess
 
 import numpy as np
 
-from experiment_contract import digest, read_json, validate_samples
+from experiment_contract import digest, file_sha256, read_json, validate_samples
 
 
 def summarize(values):
@@ -219,10 +218,10 @@ if __name__ == "__main__":
             if receipt["result"] != "valid" or digest(receipt["plan"]) != digest(plan):
                 raise ValueError("Trial is not valid under the frozen plan: " + label)
             trace = args.directory / receipt["trace"]
-            if hashlib.sha256(trace.read_bytes()).hexdigest() != receipt["trace_sha256"]:
+            if file_sha256(trace) != receipt["trace_sha256"]:
                 raise ValueError("Trial evidence changed: " + label)
             presentation = Path(read_json(trace)["PresentMonCSV"])
-            if hashlib.sha256(presentation.read_bytes()).hexdigest() != receipt["presentation_sha256"]:
+            if file_sha256(presentation) != receipt["presentation_sha256"]:
                 raise ValueError("Presentation evidence changed: " + label)
         traces = [args.directory / (label + "-presentmon.csv") for label in labels]
         workers = [args.directory / (label + "-worker.json") for label in labels]

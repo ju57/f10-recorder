@@ -7,6 +7,17 @@ import math
 from pathlib import Path
 import shutil
 
+COLLECTION_ROLES = {"desktop_apphost", "desktop_assembly", "windows_assembly", "core_assembly",
+                    "capture_engine", "presentmon", "profile"}
+
+
+def file_sha256(path):
+    checksum = hashlib.sha256()
+    with Path(path).open("rb") as file:
+        for block in iter(lambda: file.read(1024 * 1024), b""):
+            checksum.update(block)
+    return checksum.hexdigest()
+
 
 def read_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8-sig"))
@@ -58,6 +69,10 @@ def load_plan(path):
     require(isinstance(plan["identity_files"], dict) and plan["identity_files"], "Build/configuration identity files required")
     for name, sha in plan["identity_files"].items():
         require(name and len(sha) == 64 and all(c in "0123456789abcdef" for c in sha), "Invalid identity hash")
+    inputs = plan["collection_inputs"]
+    require(isinstance(inputs, dict) and set(inputs) == COLLECTION_ROLES, "Required collection input roles are missing")
+    require(len(set(inputs.values())) == len(COLLECTION_ROLES), "Collection input roles require distinct files")
+    require(all(name in plan["identity_files"] for name in inputs.values()), "Collection input is missing its identity hash")
     trials = plan["trials"]
     require(isinstance(trials, list) and trials, "Frozen trial sequence required")
     labels = []
@@ -80,8 +95,9 @@ def load_plan(path):
 def verify_identity(plan, repository):
     for name, expected in plan["identity_files"].items():
         path = (repository / name).resolve()
-        require(path.is_relative_to(repository), "Identity file is outside repository")
-        require(path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == expected,
+        require(path.is_relative_to(repository) or name == plan["collection_inputs"]["capture_engine"],
+                "Only the managed capture engine may be outside the repository")
+        require(path.is_file() and file_sha256(path) == expected,
                 f"Build/configuration identity changed: {name}")
 
 
@@ -188,14 +204,14 @@ def admit(plan_path, root, label, mode, seconds, qualification=False):
         qualified = read_json(state / (plan["qualification"]["label"] + ".result.json"))
         require(qualified["result"] == "valid", "Successful qualification required")
         prior = qualified["plan"]
-        for field in ("identity_files", "environment", "source_qualification", "sampling_interval_seconds"):
+        for field in ("identity_files", "collection_inputs", "environment", "source_qualification", "sampling_interval_seconds"):
             require(plan[field] == prior[field], f"Qualification does not match current {field}")
         trace_path = root / qualified["trace"]
-        require(hashlib.sha256(trace_path.read_bytes()).hexdigest() == qualified["trace_sha256"], "Qualification trace changed")
+        require(file_sha256(trace_path) == qualified["trace_sha256"], "Qualification trace changed")
         trace = read_json(trace_path)
         presentation = Path(trace["PresentMonCSV"]).resolve()
         require(presentation.is_relative_to(root), "Qualification presentation trace outside experiment")
-        require(hashlib.sha256(presentation.read_bytes()).hexdigest() == qualified["presentation_sha256"], "Qualification presentation trace changed")
+        require(file_sha256(presentation) == qualified["presentation_sha256"], "Qualification presentation trace changed")
         validate_samples(plan, trace["Samples"], "On")
         validate_presentation_window(plan, presentation)
         frozen = state / "batch-plan.json"
@@ -232,10 +248,10 @@ def finish(plan_path, root, label, trace=None, error=None):
         require(presentation.is_relative_to(root), "Presentation trace outside experiment root")
         validate_presentation_window(plan, presentation)
         check_storage(plan, root)
-        result.update(health)
         result["trace"] = path.relative_to(root).as_posix()
-        result["trace_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
-        result["presentation_sha256"] = hashlib.sha256(presentation.read_bytes()).hexdigest()
+        result["trace_sha256"] = file_sha256(path)
+        result["presentation_sha256"] = file_sha256(presentation)
+        result.update(health)
     except (ValueError, KeyError, TypeError, OSError) as failure:
         result["error"] = str(failure)
     write_new(state / (label + ".result.json"), result)
@@ -260,7 +276,7 @@ def close(plan_path, root):
     for path in root.rglob("*"):
         if path.is_file():
             files.append({"path": path.relative_to(root).as_posix(), "bytes": path.stat().st_size,
-                          "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+                          "sha256": file_sha256(path)})
     result = {"plan": plan, "retention": records, "files": files, "used_bytes": used,
               "pending_trials": [p.name for p in state.glob("*.pending.json")],
               "scope": "Inventory only. No automatic deletion; retirement changes availability and must retain a receipt."}

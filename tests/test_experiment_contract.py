@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import importlib.util
 import sys
+from unittest.mock import patch
 
 import experiment_contract as contract
 
@@ -33,6 +34,14 @@ class ExperimentChecks(unittest.TestCase):
             "storage": {"expected_bytes": 100000, "budget_bytes": 1000000, "trial_reserve_bytes": 10000,
                         "finalization_reserve_bytes": 10000, "poll_growth_reserve_bytes": 10000, "minimum_free_bytes": 0},
             "retention": [{"path": "qualification.json", "class": "report", "needed_for": "setup proof"}]}
+        self.plan["collection_inputs"] = {}
+        for role in sorted(contract.COLLECTION_ROLES):
+            path = self.identity if role == "desktop_assembly" else self.root / (role + ".fixture")
+            if path != self.identity:
+                path.write_text("known-" + role)
+            name = path.relative_to(self.repository).as_posix()
+            self.plan["collection_inputs"][role] = name
+            self.plan["identity_files"][name] = contract.file_sha256(path)
         self.path = self.root / "plan.json"
         self.save_plan()
 
@@ -65,7 +74,7 @@ class ExperimentChecks(unittest.TestCase):
 
     def test_plan_requires_explicit_limits_and_retention(self):
         contract.load_plan(self.path)
-        for field in ["window_seconds", "sampling_interval_seconds", "maximum_sample_gap_seconds", "storage", "retention", "identity_files", "acceptance_criteria"]:
+        for field in ["window_seconds", "sampling_interval_seconds", "maximum_sample_gap_seconds", "storage", "retention", "identity_files", "collection_inputs", "acceptance_criteria"]:
             with self.subTest(field=field):
                 value = copy.deepcopy(self.plan)
                 del value[field]
@@ -169,6 +178,27 @@ class ExperimentChecks(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "identity changed"):
             contract.admit(self.path, self.root, "qualification", "On", 8, True)
 
+    def test_required_collection_identities_cannot_be_omitted(self):
+        original = copy.deepcopy(self.plan)
+        for role in contract.COLLECTION_ROLES:
+            with self.subTest(role=role):
+                self.plan = copy.deepcopy(original)
+                del self.plan["identity_files"][self.plan["collection_inputs"][role]]
+                self.save_plan()
+                with self.assertRaisesRegex(ValueError, "identity hash"):
+                    contract.load_plan(self.path)
+
+    def test_each_measured_input_is_rechecked_after_qualification(self):
+        self.qualify()
+        for role, name in self.plan["collection_inputs"].items():
+            with self.subTest(role=role):
+                path = self.repository / name
+                original = path.read_bytes()
+                path.write_text("changed input")
+                with self.assertRaisesRegex(ValueError, "identity changed"):
+                    contract.admit(self.path, self.root, "off-1", "Off", 8)
+                path.write_bytes(original)
+
     def test_incomplete_presentation_trace_rejected(self):
         contract.admit(self.path, self.root, "qualification", "On", 8, True)
         trace = self.trace("qualification")
@@ -232,6 +262,17 @@ class ExperimentChecks(unittest.TestCase):
         result = contract.close(self.path, self.root)
         self.assertEqual(result["plan"]["identity_files"], original)
         self.assertTrue(self.identity.exists())
+
+    def test_closure_streams_file_hashes(self):
+        media = self.root / "recording.mp4"
+        with media.open("wb") as file:
+            for _ in range(4):
+                file.write(b"x" * 1024 * 1024)
+        with patch.object(Path, "read_bytes", side_effect=AssertionError("Whole-file reads forbidden")):
+            result = contract.close(self.path, self.root)
+        record = next(item for item in result["files"] if item["path"] == "recording.mp4")
+        self.assertEqual(record["bytes"], 4 * 1024 * 1024)
+        self.assertEqual(record["sha256"], contract.file_sha256(media))
 
 
 if __name__ == "__main__":

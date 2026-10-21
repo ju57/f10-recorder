@@ -15,7 +15,8 @@ NVIDIA settings.
 | `environment` | Commit, machine, driver, display, game and measurement-tool identities |
 | `source_qualification` | Evidence and method qualifying the workload/source phase; status alone is insufficient |
 | `acceptance_criteria` | Nonempty object recording the intended claim, thresholds and decision method; admission freezes it but does not replace the statistical/media reviewer |
-| `identity_files` | Repository-relative file paths mapped to SHA-256 hashes; include actual product assemblies/apphost, the approved test FFmpeg and the isolated profile settings |
+| `identity_files` | File paths mapped to SHA-256 hashes; repository-relative except that the managed capture engine may use its absolute per-account path |
+| `collection_inputs` | Required roles `desktop_apphost`, `desktop_assembly`, `windows_assembly`, `core_assembly`, `capture_engine`, `presentmon`, `profile`; each maps to a distinct hashed file in `identity_files` |
 | `window_seconds` | `[start,end]` relative to the collector trace, fixed across the batch; source-phase equivalence needs separate qualification |
 | `sampling_interval_seconds` | Nominal status polling interval, retained from qualification |
 | `maximum_sample_gap_seconds` | Largest admissible actual gap, including call and save waits |
@@ -44,7 +45,13 @@ capturing anything or creating evidence:
 ./tests/game-benchmark.ps1 -ExperimentPlan <plan.json> -ValidatePlan
 ```
 
-Admission also verifies the declared file hashes. Build and prepare the isolated
+Admission requires all seven collection roles and verifies their file hashes.
+The game runner binds the apphost/assemblies to `bin/avalonia`, PresentMon to its
+pinned tool location, and the profile to the supplied settings file. Before
+timing, it also compares the running worker/capture executable paths with those
+roles. The managed production capture engine can live outside the repository;
+this exception permits hashing it, without installing or altering it.
+Build and prepare the isolated
 profile first; use its explicit directory with the existing `-Action Start`.
 For an authorized qualification, use:
 
@@ -68,6 +75,13 @@ setup in a new experiment directory; do not clear its state to retry secretly.
 The controller can explicitly resume a partially completed valid batch by
 invoking the next declared trial through `game-benchmark.ps1`. The batch wrapper
 always starts from the declared first trial and never skips existing receipts.
+
+After the final save, every successful recording-on trial pauses the task-owned
+worker and confirms that its capture process has stopped. Qualification review,
+inter-trial setup and post-batch analysis therefore leave no unmonitored capture
+producer running. Failure/finalization paths also attempt this confirmed pause.
+After abrupt controller termination, explicitly pause the isolated worker before
+analysis or closure; its incomplete receipt blocks further collection.
 
 During collection, existing worker polls check readiness/control state, process
 identity, recovery and gaps. Storage accounting runs in that same polling loop;
@@ -97,7 +111,8 @@ After the controller stops task-owned producers, inventory the experiment:
 python tests/experiment_contract.py close <plan.json> --root <experiment>
 ```
 
-Closure records the plan, file hashes/sizes, retention purposes and present/missing
+Closure streams file hashing with bounded buffers and records the plan, file
+hashes/sizes, retention purposes and present/missing
 availability. It deletes nothing and prevents further collection in that
 experiment. Future authorized retirement must retain a dated receipt and explicit
 availability update alongside the immutable inventory. Recordings, builds and

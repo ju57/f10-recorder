@@ -110,8 +110,7 @@ if (-not $ExperimentPlan) { throw 'Measurement collection requires -ExperimentPl
 $plan = Invoke-ExperimentContract @('validate-plan',$ExperimentPlan)
 $settingsPath = Join-Path $data 'settings.json'
 $profile = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
-$profileIdentity = [IO.Path]::GetRelativePath($root,[IO.Path]::GetFullPath($settingsPath)).Replace('\','/')
-if ($profileIdentity -notin $plan.identity_files.PSObject.Properties.Name) { throw 'Include the isolated settings file in plan identity_files.' }
+Assert-ExperimentInputs -Plan $plan -Root $root -DataDirectory $data
 foreach ($outputPath in @($profile.OutputDirectory,$profile.ScreenshotDirectory)) {
     if (-not $outputPath -or -not [IO.Path]::IsPathRooted($outputPath)) { throw 'Use absolute task-isolated output paths.' }
     $relativeOutput = [IO.Path]::GetRelativePath([IO.Path]::GetFullPath($evidence),[IO.Path]::GetFullPath($outputPath))
@@ -123,6 +122,7 @@ $admission = @('admit',$ExperimentPlan,'--root',$evidence,'--label',$Label,'--mo
 if ($Qualification) { $admission += '--qualification' }
 $admitted = Invoke-ExperimentContract $admission
 $trace = $null
+$captureStopped = $false
 $samples = [Collections.Generic.List[object]]::new()
 try {
     $capture = $Action -eq 'On'
@@ -137,6 +137,9 @@ try {
         if ($readyClock.Elapsed.TotalSeconds -gt 30) { throw ('Worker did not reach requested mode: '+$state.State) }
         Start-Sleep -Milliseconds 250
     } while ($true)
+    $workerExecutable = (Get-Process -Id $state.WorkerProcessId -ErrorAction Stop).MainModule.FileName
+    $captureExecutable = if ($capture) { (Get-Process -Id $state.Metrics.CaptureProcessId -ErrorAction Stop).MainModule.FileName } else { $null }
+    Assert-ExperimentInputs -Plan $plan -Root $root -DataDirectory $data -ActualWorkerExecutable $workerExecutable -ActualCaptureExecutable $captureExecutable
     if ($WaitForResume) {
         $resumeFile = Join-Path $evidence ($Label+'-resume.json')
         if (Test-Path -LiteralPath $resumeFile) { throw 'A resume marker already exists for this label.' }
@@ -192,6 +195,7 @@ try {
     if ($trace.ExitCode -ne 0) { throw ('PresentMon failed: '+$trace.ExitCode+' '+$stderrTask.Result) }
     if (-not (Test-Path -LiteralPath $csv) -or (Get-Item -LiteralPath $csv).Length -lt 1000) { throw 'PresentMon produced no useful frame trace.' }
     if ($capture) { $null = Save-Replay -Observe $observe }
+    if ($capture) { Stop-ExperimentCapture -Pause { Call-Worker 'pause' $true } -ReadStatus { Call-Worker }; $captureStopped = $true }
     [pscustomobject]@{Mode=$Action;Label=$Label;Seconds=$Seconds;GamePid=$games[0].Id;TraceStartUtc=$traceStartUtc;PresentMonCSV=$csv;TraceExitCode=$trace.ExitCode;Stdout=$stdoutTask.Result;Stderr=$stderrTask.Result;Samples=$samples;ExperimentPlan=$plan;ExperimentPlanSha256=$admitted.plan_sha256} | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $evidence ($Label+'-worker.json')) -Encoding UTF8
     $null = Invoke-ExperimentContract @('finish',$ExperimentPlan,'--root',$evidence,'--label',$Label,'--trace',(Join-Path $evidence ($Label+'-worker.json')))
     Write-Output ('Completed '+$Label+'; sampled health valid, source/performance acceptance separate.')
@@ -201,6 +205,11 @@ try {
     if (Test-Path -LiteralPath (Join-Path $evidence ('experiment-state/'+$Label+'.pending.json'))) {
         try { $null = Invoke-ExperimentContract @('finish',$ExperimentPlan,'--root',$evidence,'--label',$Label,'--error',$trialError) } catch { Write-Warning $_ }
     }
-    if ($capture) { try { $null = Call-Worker 'pause' $true } catch { Write-Warning ('Could not pause test worker after failure: '+$_.Exception.Message) } }
+    if ($capture) { try { Stop-ExperimentCapture -Pause { Call-Worker 'pause' $true } -ReadStatus { Call-Worker }; $captureStopped = $true } catch { Write-Warning ('Could not pause test worker after failure: '+$_.Exception.Message) } }
     throw
-} finally { if ($null -ne $trace) { if (-not $trace.HasExited) { $trace.Kill(); $trace.WaitForExit() }; $trace.Dispose() } }
+} finally {
+    if ($null -ne $trace) { if (-not $trace.HasExited) { $trace.Kill(); $trace.WaitForExit() }; $trace.Dispose() }
+    if ($capture -and -not $captureStopped) {
+        try { Stop-ExperimentCapture -Pause { Call-Worker 'pause' $true } -ReadStatus { Call-Worker } } catch { Write-Warning ('Could not pause task-owned capture during finalization: '+$_.Exception.Message) }
+    }
+}
