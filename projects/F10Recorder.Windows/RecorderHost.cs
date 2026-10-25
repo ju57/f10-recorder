@@ -18,16 +18,19 @@ internal sealed class RecorderHost : IWindowsRecorder
     readonly ForegroundApplicationTracker foreground;
     readonly RecorderNotifications notices;
     ReplayEngine engine;
+    RecordingProfile profile;
     WindowCaptureTarget windowTarget;
     bool disposed;
+    bool savedPauseIntent;
     public Settings Config { get; private set; }
+    public ProfileStatus ProfileStatus => profile.Status;
     public string DataDirectory { get; }
     public bool Paused { get; private set; }
     public bool Ready { get; private set; }
     public CapturePhase Phase { get; private set; } = CapturePhase.Starting;
-    public bool CanSave => !Applying && !Paused && engine.CanSave;
+    public bool CanSave => !Applying && !Paused && engine?.CanSave == true;
     public bool Applying { get; private set; }
-    public bool CaptureModeKnown => !Applying;
+    public bool CaptureModeKnown => !Applying && ProfileStatus.CanWrite && !ProfileStatus.RequiresCorrection;
     public bool ScreenshotInProgress { get; private set; }
     public string LastScreenshot { get; private set; }
     public string State { get; private set; } = "Starting replay buffer…";
@@ -35,10 +38,10 @@ internal sealed class RecorderHost : IWindowsRecorder
     public bool OverlayRegistered => shortcuts.OverlayRegistered;
     public bool ScreenshotRegistered => shortcuts.ScreenshotRegistered;
     public string ApplicationName => Config.CaptureMode == "window" ? Path.GetFileNameWithoutExtension(Config.WindowExecutable) : foreground.ApplicationName;
-    public int CaptureProcessId => engine.CaptureProcessId;
-    public RecorderMetrics Metrics => engine.Metrics;
+    public int CaptureProcessId => engine?.CaptureProcessId ?? 0;
+    public RecorderMetrics Metrics => engine?.Metrics ?? new RecorderMetrics();
     public string EngineCapabilityContext { get; private set; }
-    public bool Saving => engine.IsSaving;
+    public bool Saving => engine?.IsSaving == true;
     internal Func<Task> PrepareRemoteScreenshot;
     internal void ExcludeUiProcess(int id) => foreground.ExcludeProcess(id);
     public event Action Changed;
@@ -58,15 +61,22 @@ internal sealed class RecorderHost : IWindowsRecorder
     {
         data = WorkerIdentity.DataPath(data);
         Initialize(data); owner = new RecorderDispatch(dispatch); synthetic = syntheticSource; customStartupWriter = setStartup != null; startupWriter = setStartup ?? WindowsStartup.SetEnabled; captureScreenshot = screenshotSource ?? ScreenshotCapture.Capture;
-        DataDirectory = data; settingsPath = Path.Combine(data, "settings.json"); Config = Settings.Load(settingsPath); Paused = paused;
+        DataDirectory = data; settingsPath = Path.Combine(data, "settings.json"); profile = RecordingProfile.Load(data); Config = profile.Settings;
+        Paused = paused || profile.State.Paused || profile.State.UserStopped || ProfileStatus.ActivationRequired;
+        savedPauseIntent = paused || profile.State.Paused;
         repairMedia = repairEngine ?? (() => MediaDependency.Install(DataDirectory, true));
         shortcuts = new HotkeyWindow(controlTitle); foreground = new ForegroundApplicationTracker();
         notices = new RecorderNotifications((title, message, kind, duration) => Notification?.Invoke(title, message, kind, duration));
-        shortcuts.Pressed += SaveReplay; shortcuts.OverlayPressed += () => OverlayRequested?.Invoke(); shortcuts.ScreenshotPressed += TakeScreenshot;
+        shortcuts.Pressed += () => ShortcutAction(SaveReplay); shortcuts.OverlayPressed += () => OverlayRequested?.Invoke(); shortcuts.ScreenshotPressed += TakeScreenshot;
         shortcuts.EnvironmentChanged += Restart;
-        shortcuts.CommandRequested += command => { switch (command) { case 1: OpenSettingsRequested?.Invoke(); break; case 2: Pause(true); break; case 3: Pause(false); break; case 4: QuitRequested?.Invoke(); break; case 5: OverlayRequested?.Invoke(); break; case 6: TakeScreenshot(); break; } };
-        Register(Config); StartEngine();
-        if (!File.Exists(settingsPath)) Config.Save(settingsPath);
+        shortcuts.CommandRequested += command => ShortcutAction(() => { switch (command) { case 1: OpenSettingsRequested?.Invoke(); break; case 2: Pause(true); break; case 3: Pause(false); break; case 4: QuitRequested?.Invoke(); break; case 5: OverlayRequested?.Invoke(); break; case 6: TakeScreenshot(); break; } });
+        if (ProfileStatus.CanWrite && !ProfileStatus.RequiresCorrection) Register(Config);
+        StartEngine();
+    }
+    void ShortcutAction(Action action)
+    {
+        try { action(); }
+        catch (Exception ex) { Notification?.Invoke("Recording profile needs attention", ex.Message, NotificationKind.Warning, 6000); Log.Write(ex.Message); }
     }
     void Register(Settings settings)
     {
@@ -78,6 +88,11 @@ internal sealed class RecorderHost : IWindowsRecorder
         var Dispatch = owner.NextGeneration();
         EngineCapabilityContext = Guid.NewGuid().ToString("N");
         windowTarget?.Dispose(); windowTarget = null;
+        if (ProfileStatus.ActivationRequired || Paused)
+        {
+            engine = null; Paused = true; Ready = false; Phase = CapturePhase.Paused; State = ProfileStatus.ActivationRequired ? ProfileStatus.Message : "Paused";
+            Changed?.Invoke(); return;
+        }
         if (Config.CaptureMode == "window" && !synthetic) windowTarget = new WindowCaptureTarget(Config);
         engine = new ReplayEngine(Config, DataDirectory, Paused, synthetic, windowTarget == null ? null : windowTarget.Read);
         var current = engine;
@@ -94,22 +109,35 @@ internal sealed class RecorderHost : IWindowsRecorder
         Changed?.Invoke();
     }
     public void SampleForeground() => foreground.Sample();
-    public void SaveReplay() { if (!Applying && !disposed) engine.Save(Config.CaptureMode == "window" ? ApplicationName : foreground.Sample()); }
+    public void SaveReplay() { if (!Applying && !disposed) { if (engine == null) throw new InvalidOperationException(ProfileStatus.Message); engine.Save(Config.CaptureMode == "window" ? ApplicationName : foreground.Sample()); } }
     public void Pause(bool value)
     {
-        if (Applying || disposed || Paused == value) return;
-        Paused = value; engine.Pause(value);
+        if (Applying || disposed) return;
+        if (value) savedPauseIntent = true;
+        if (Paused == value) return;
+        if (!value && ProfileStatus.ActivationRequired)
+        {
+            if (!ProfileStatus.CanWrite || ProfileStatus.RequiresCorrection) throw new InvalidOperationException(ProfileStatus.Message);
+            try { profile.Commit(Config, paused: false, userStopped: false, activationRequired: false); }
+            catch { profile = RecordingProfile.Load(DataDirectory); State = ProfileStatus.Message; Changed?.Invoke(); throw; }
+            Config = profile.Settings; Paused = false; StartEngine();
+        }
+        else { Paused = value; if (engine == null && !value) StartEngine(); else engine?.Pause(value); }
+        savedPauseIntent = value;
         PresentCaptureStatus(engine.ReadCaptureStatus()); notices.PauseChanged(value);
     }
     public void Restart()
     {
         if (Applying || disposed) return;
+        if (engine == null) return;
         engine.Restart(); PresentCaptureStatus(engine.ReadCaptureStatus());
     }
+    internal void PersistState(bool userStopped) { if (!ProfileStatus.ActivationRequired) profile.PersistState(savedPauseIntent, userStopped || Paused && profile.State.UserStopped); }
     public async Task ApplyAsync(Settings next, bool startup)
     {
         if (Applying || disposed) throw new InvalidOperationException("Wait for the current settings change.");
-        if (engine.IsSaving || ScreenshotInProgress) throw new InvalidOperationException("Wait for the current replay or screenshot to finish saving.");
+        if (Saving || ScreenshotInProgress) throw new InvalidOperationException("Wait for the current replay or screenshot to finish saving.");
+        if (!ProfileStatus.CanWrite) throw new InvalidOperationException(ProfileStatus.Message);
         next.Validate();
         // Reject an unavailable/untrusted engine before changing shortcuts or stopping capture.
         // Every subsequent process launch still verifies and leases the executable again.
@@ -121,12 +149,22 @@ internal sealed class RecorderHost : IWindowsRecorder
         {
             bool previousStartup = WindowsStartup.Enabled;
             // Stop the old capture before replacing it, preserving the pause state.
-            await Task.Run(engine.Dispose);
-            try { next.Save(settingsPath); if (customStartupWriter || startup != previousStartup) startupWriter(startup); Config = next; }
+            if (engine != null) await Task.Run(engine.Dispose);
+            try
+            {
+                // Current UI editors know represented fields only. Preserve opaque future
+                // preferences/device identities rather than dropping them on correction.
+                next.AdditionalPreferences = new(profile.Settings.AdditionalPreferences);
+                if (ProfileStatus.ActivationRequired) profile.Commit(next, paused: profile.State.Paused, userStopped: profile.State.UserStopped, activationRequired: true);
+                else next.Save(settingsPath);
+                if (customStartupWriter || startup != previousStartup) startupWriter(startup);
+                Config = next; profile = RecordingProfile.Load(DataDirectory);
+            }
             catch
             {
                 // A startup-write failure must not leave disk and live configuration different.
-                Config.Save(settingsPath);
+                profile = RecordingProfile.Load(DataDirectory);
+                if (ProfileStatus.CanWrite) Config.Save(settingsPath);
                 if (WindowsStartup.Enabled != previousStartup) startupWriter(previousStartup);
                 throw;
             }
@@ -136,11 +174,11 @@ internal sealed class RecorderHost : IWindowsRecorder
     }
     public async Task RepairMediaAsync()
     {
-        if (Applying || disposed || engine.IsSaving || ScreenshotInProgress) throw new InvalidOperationException("Wait for settings or saving to finish before repairing the recording engine.");
+        if (Applying || disposed || Saving || ScreenshotInProgress) throw new InvalidOperationException("Wait for settings or saving to finish before repairing the recording engine.");
         Applying = true; Ready = false; Phase = CapturePhase.Recovering; State = "Repairing recording engine…"; Changed?.Invoke();
         try
         {
-            await Task.Run(engine.Dispose);
+            if (engine != null) await Task.Run(engine.Dispose);
             try
             {
                 if (await Task.Run(repairMedia) != 0)
@@ -165,11 +203,15 @@ internal sealed class RecorderHost : IWindowsRecorder
     public async void TakeScreenshot()
     {
         if (disposed || ScreenshotInProgress || Applying) return;
+        if (ProfileStatus.ActivationRequired) { Notification?.Invoke("Recording profile needs attention", ProfileStatus.Message, NotificationKind.Warning, 6000); return; }
         ScreenshotInProgress = true; PreparingScreenshot?.Invoke(); Changed?.Invoke();
         int display = Config.DisplayIndex; string folder = Config.ScreenshotDirectory;
-        var selected = Config.CaptureMode == "window" ? windowTarget?.ReadForScreenshot() : null;
         try
         {
+            // A paused compatible profile still supports screenshots without
+            // constructing a replay engine or clearing its retained inputs.
+            if (Config.CaptureMode == "window" && !synthetic) windowTarget ??= new WindowCaptureTarget(Config);
+            var selected = Config.CaptureMode == "window" ? windowTarget?.ReadForScreenshot() : null;
             if (PrepareRemoteScreenshot != null) await PrepareRemoteScreenshot();
             await Task.Delay(150);
             string file = await Task.Run(() =>
@@ -189,11 +231,11 @@ internal sealed class RecorderHost : IWindowsRecorder
     public void Dispose()
     {
         if (disposed) return; disposed = true; owner.Dispose();
-        shortcuts.Dispose(); foreground.Dispose(); engine.Dispose(); windowTarget?.Dispose();
+        shortcuts.Dispose(); foreground.Dispose(); engine?.Dispose(); windowTarget?.Dispose();
     }
     public Task StopAsync()
     {
-        if (!disposed && (Applying || engine.IsSaving || ScreenshotInProgress)) throw new InvalidOperationException("Wait for settings, replay or screenshot saving to finish before quitting.");
+        if (!disposed && (Applying || Saving || ScreenshotInProgress)) throw new InvalidOperationException("Wait for settings, replay or screenshot saving to finish before quitting.");
         Dispose(); return Task.CompletedTask;
     }
 }

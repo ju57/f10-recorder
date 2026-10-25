@@ -27,6 +27,7 @@ internal static class MigrationChecks
     static int Main(string[] args)
     {
         data = args[0]; Directory.CreateDirectory(data);
+        if (args.Contains("--profile-migration-ui")) return ProfileDesktopChecks.Run(Path.GetFullPath(data), Path.GetFullPath(args[2]));
         if (args.Contains("--engine-trust-ui")) return EngineTrustChecks.Run(Path.GetFullPath(data), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]));
         if (args.Contains("--fixture")) { Fixture(); return 0; }
         int modifiersIndex = Array.IndexOf(args, "--shortcut-modifiers");

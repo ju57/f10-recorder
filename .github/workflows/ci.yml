@@ -51,6 +51,8 @@ jobs:
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-ownership artifacts/replay-ownership-ci
       - name: Verify capture status without capture or GPU
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --capture-status artifacts/capture-status-ci
+      - name: Verify bounded profile status without native recorder or GPU
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --profile-status-transport artifacts/profile-status-transport-ci
       - name: Verify engine capability responses without capture or GPU
         shell: pwsh
         run: |

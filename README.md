@@ -8,7 +8,7 @@ clock uncertainty, NVIDIA coexistence and remaining acceptance gates.
 See [prototype scope and limitations](docs/prototype-status.md) for the bounded
 gameplay evidence and remaining release work.
 
-A local replay recorder that starts buffering at sign-in and saves recent footage with a global hotkey. Defaults: **five minutes, primary monitor, system audio, Ctrl+Shift+F10, native display resolution at 60 FPS, H.264 at 20 Mbps**.
+A local replay recorder that saves recent footage with a global hotkey. New represented defaults: **five minutes, primary monitor, system audio, F10, native display resolution at 60 FPS, H.264 at 20 Mbps**. Existing valid preferences and shortcuts survive migration. Unversioned profiles wait for explicit Resume; migration itself never starts capture. The approved new-user setup and Overview shell remain separate implementation work.
 
 **Status: Windows/NVIDIA prototype running C# on .NET 10 with Avalonia 12.1.4. Linux capture is not implemented. Public binary release preparation is incomplete.** The modern .NET/Avalonia application is the only maintained product. F10 Recorder's own code is [MIT licensed](LICENSE); dependency licenses are separate, as described in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
 
@@ -34,7 +34,7 @@ The local control channel is a versioned named pipe restricted to the current Wi
 
 Application-window screenshots verify window lifetime before capture and saving, including when Windows reuses a handle. If Windows denies the required lifetime marker, the screenshot fails with a reason; this can affect elevated applications. Ordinary recording keeps its existing policy, and a rejected window screenshot does not fall back to the desktop.
 
-The recorder uses protocol version 4, including authenticated engine capability responses. Quit older recorder processes before opening this build; mixed versions are rejected so a new UI cannot silently delegate to a worker without the security fixes, settings acknowledgement and capability contracts.
+The recorder uses protocol version 5, including authenticated engine capability responses and profile compatibility/activation results. Quit older recorder processes before opening this build; mixed versions are rejected so a new UI cannot silently delegate to a worker without the security, settings acknowledgement, capability and migration contracts.
 
 A session-independent file lock in account-protected storage permits only one worker to open a given user's recording profile, so a second Windows session cannot clear an active replay cache. Profile identity includes its filesystem identity, so path aliases share ownership. Concurrent sessions must use separate `--data-dir` profiles. Focused checks exercise rejection before cache cleanup and reuse after ownership is released; genuine cross-account execution remains a separate acceptance check.
 
@@ -149,7 +149,7 @@ Use `.\tests\migration.ps1 -FocusOnly` for the paused focus regression. It opens
 
 If another isolated recorder owns the regression shortcuts, use `-ShortcutModifiers 3` for Ctrl+Alt instead of the default Ctrl+Alt+Shift (`7`). This changes only the test profile; an occupied shortcut still fails rather than modifying or stopping another recorder. Modifier bits are Alt=`1`, Ctrl=`2`, Shift=`4`.
 
-The platform-independent checks can run with `dotnet run --project projects/F10Recorder.CoreChecks -- artifacts/core-checks`. They cover replay boundaries, incomplete manifests, path containment, old-settings migration and invalid-file preservation; they need no GPU or capture permissions. The Core project targets `net10.0` and has no Windows references. GitHub CI runs these checks on Ubuntu; Linux desktop/capture acceptance remains pending.
+The platform-independent checks can run with `dotnet run --project projects/F10Recorder.CoreChecks -- artifacts/core-checks`. They cover replay boundaries, incomplete manifests, path containment, old-settings migration and invalid-file preservation; they need no GPU or capture permissions. The [profile migration checks](tests/profile-migration.md) add version/partial-correction/byte-preservation/failure cases, paused worker ownership/reconnect and offscreen Desktop feedback. The Core project targets `net10.0` and has no Windows references. GitHub CI runs these checks on Ubuntu; Linux desktop/capture acceptance remains pending.
 
 The [replay ownership checks](tests/replay-ownership.md) exercise save admission,
 retention, snapshot failures, publication and session retirement through the replay

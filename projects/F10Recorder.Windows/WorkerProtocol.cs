@@ -56,6 +56,8 @@ internal sealed class WorkerStatus
     public string EngineCapabilityContext;
     public long Revision;
     public Settings Config;
+    public int RetainedPreferenceCount;
+    public ProfileStatus ProfileStatus = new();
     public bool Paused, Ready, Applying, Saving, ScreenshotInProgress, SaveRegistered, OverlayRegistered, ScreenshotRegistered, Stopping;
     public CapturePhase Phase;
     public bool CanSave;
@@ -64,8 +66,21 @@ internal sealed class WorkerStatus
     public long Sequence;
     public RecorderMetrics Metrics;
     public WorkerEvent[] Events = [];
+
+    // The desktop edits represented settings. Opaque future preferences remain
+    // worker-owned: their JSON escaping and size must not consume reply space.
+    internal WorkerStatus ForClient()
+    {
+        var result = (WorkerStatus)MemberwiseClone();
+        if (Config != null)
+        {
+            result.Config = new Settings();
+            foreach (var field in Settings.StoredFields) field.SetValue(result.Config, field.GetValue(Config));
+            result.RetainedPreferenceCount = Math.Max(RetainedPreferenceCount, Config.AdditionalPreferences?.Count ?? 0);
+        }
+        return result;
+    }
 }
-internal sealed class WorkerPersistentState { public bool Paused, UserStopped; }
 internal sealed class WorkerReply
 {
     public int Version = WorkerProtocol.Version;
@@ -77,10 +92,10 @@ internal sealed class WorkerProtocolMismatchException(string message) : IOExcept
 
 internal static class WorkerProtocol
 {
-    internal const int Version = 4;
+    internal const int Version = 5;
     internal static bool WasStopped(string data)
     {
-        try { return JsonSerializer.Deserialize<WorkerPersistentState>(File.ReadAllText(Path.Combine(data, "worker-state.json")), Json)?.UserStopped == true; }
+        try { var profile = RecordingProfile.Load(data); return profile.State.UserStopped || !profile.Status.CanWrite; }
         catch (Exception ex) when (ex is IOException or JsonException) { return false; }
     }
     internal const int MaxBytes = 1024 * 1024;
