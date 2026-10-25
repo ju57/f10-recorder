@@ -35,3 +35,27 @@ It does not qualify arbitrary resolutions/rates, live capture, fullscreen,
 NVIDIA coexistence, perceptual A/V sync, performance, native window accessibility
 or a shipping offline installer. Offscreen rendering does not establish focus,
 DPI or screen-reader acceptance. All beta release gates remain separate.
+
+## No-GPU worker capability response checks
+
+After the usual Release build of WorkerChecks, run:
+
+```powershell
+dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --engine-capabilities artifacts/engine-capabilities-local
+```
+
+This early route uses the production worker-client transport seam with controlled
+responses. It verifies an empty codec result, rejected missing capabilities,
+rejected delayed capabilities during Apply without a context change, and a
+rejected error-bearing reply. It writes `verification.json` and exits before
+recorder initialization: no Window, RecorderHost, named pipe, engine, GPU,
+capture, startup write or installation is involved. It does not establish byte
+authentication, actual hardware initialization or native pipe/UI integration;
+those remain covered by the separate trust/dependency suites and release gates.
+
+Windows CI also repeats this route with a separate output directory and
+`--sensitivity-control`. That intentionally supplies a complete receipt in the
+missing-capabilities fixture; exactly that rejection assertion must fail with
+exit code 1. This proves the assertion can go red when the fixture changes, not
+that production code was mutated. CI checks the failure identity and keeps the
+normal and control results in separate output directories.

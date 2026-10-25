@@ -5,7 +5,7 @@ description: Design, implement or review F10 interfaces and visual assets using 
 
 # F10 design
 
-Use the F10 checkout attached to the task. On this machine it is `D:/repository/f10-recorder`. Read `docs/brand-guidelines.md` before designing or changing the interface. It is the canonical visual specification; this skill routes to it rather than duplicating its tokens.
+Use the F10 checkout attached to the task. Read `docs/brand-guidelines.md` before designing or changing the interface. It is the canonical visual specification; this skill routes to it rather than duplicating its tokens.
 
 ## Resolve the relevant source
 

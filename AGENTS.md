@@ -46,6 +46,10 @@
 
 Before implementing a feature, fixing a bug or executing an implementation ticket, read and use Matt Pocock's `implement` skill (`mattpocock-skills:implement`, `engineering/implement/SKILL.md`). If it is omitted from the session's skill list, locate it in the installed Matt Pocock plugin before editing; report a missing installation instead of silently skipping it. Task-specific authorization, verification effects and commit restrictions take precedence over the skill's defaults.
 
+### Parallel delivery
+
+Before delegating implementation tickets or running parallel delivery work, read [the parallel delivery protocol](docs/agents/parallel-delivery.md). It defines independent validation, candidate evidence, shared-resource ownership and integration checks.
+
 ### Issue tracker
 
 Track issues and specs in GitHub Issues. Before ticket operations, read `docs/agents/issue-tracker.md`.
