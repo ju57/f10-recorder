@@ -1,4 +1,4 @@
-# F10 Recorder
+# F10
 
 This early prototype includes experimental selected-window video capture
 and separate live-readiness/save-availability states. Existing profiles retain
@@ -24,7 +24,7 @@ The adopted migration target is **C# on .NET 10 LTS with Avalonia UI**, retainin
 | Electron + native recorder | Strong HTML/CSS ecosystem and flexible visual design | Bundles Chromium and Node, adds a JavaScript/native control boundary, and needs ongoing browser-runtime maintenance |
 | Tauri + native recorder | HTML/CSS UI using the operating system's webview | Introduces Rust plus a web UI alongside the existing C# recorder; webview behavior varies by platform |
 
-See the official [Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model) and [Tauri architecture](https://v2.tauri.app/concept/architecture/). Resource use must be measured on the finished app; this comparison is about architecture, not benchmark results. The charcoal/emerald visual direction remains suitable for the new UI, with keyboard access, readable status, and settings available while recording.
+See the official [Electron process model](https://www.electronjs.org/docs/latest/tutorial/process-model) and [Tauri architecture](https://v2.tauri.app/concept/architecture/). Resource use must be measured on the finished app; this comparison is about architecture, not benchmark results. The [approved F10 visual guide](docs/brand-guidelines.md) uses NVIDIA App-inspired neutral dark surfaces and green emphasis with Discord-inspired rounded controls and solid icons. It is a review-board direction; production UI migration, keyboard access and readable recording state remain separate work.
 
 The first migration step separates three SDK projects: `F10Recorder.Core` contains configuration, replay selection and notification rules; `F10Recorder.Windows` contains native capture/audio, encoder probing, screenshots, application identity, global shortcuts and Windows session/display/power handling; `F10Recorder.Desktop` contains the Avalonia interface. The migrated app has no WinForms or System.Drawing dependency. Native Win32 message dispatch replaces the old helper window, and icons are embedded assets. Frames stay in the capture/encoder pipeline rather than passing through UI controls.
 
@@ -49,7 +49,10 @@ A session-independent file lock in account-protected storage permits only one wo
 ## Public release milestones
 
 The near-term target is a **Windows + NVIDIA public beta**, with Linux following
-separately. The [release plan](docs/release-plan.md) defines priorities, delivery
+separately. The [consolidated beta specification](docs/beta-spec.md) records the
+accepted M0 product/ADR baseline and owned mandatory release gates under Q158.
+Planning closeout does not establish fullscreen, performance, package or release
+acceptance. The [release plan](docs/release-plan.md) defines priorities, delivery
 milestones and acceptance criteria for security, faster replay exports,
 user-selectable full-window or new-footage replay saves, manual recording, audio,
 the interface rebuild and an installer. It is a planning document; those features
@@ -175,3 +178,5 @@ Exclusive-fullscreen games, HDR fidelity, protected content, monitor hotplug, re
 ## Uninstall
 
 Quit from the tray menu, then run `./uninstall.ps1`. This removes the app, its managed FFmpeg package and private ownership state; external FFmpeg installations are preserved. Add `-RemoveSettings` to remove configuration, logs, and temporary cache as well. Saved MP4 clips are preserved.
+
+For F10 interface or identity work, use [the F10 design skill](skills/f10-design/SKILL.md) and its canonical brand/asset references. The realistic keycap logo is selected; native implementation and release acceptance remain separate.

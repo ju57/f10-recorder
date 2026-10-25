@@ -7,3 +7,8 @@
 *.ps1 text eol=crlf
 *.yml text eol=lf
 *.png binary
+
+# Preserve the exact downloaded preview bytes recorded in the asset manifest.
+docs/m0-review/assets/*.txt -text
+docs/m0-review/assets/*.svg -text
+docs/m0-review/assets/*.ttf binary

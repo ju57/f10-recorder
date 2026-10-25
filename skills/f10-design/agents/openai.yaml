@@ -1,0 +1,4 @@
+interface:
+  display_name: "F10 Design"
+  short_description: "Apply F10's approved brand and interface decisions"
+  default_prompt: "Use $f10-design to design or review this F10 interface using its approved logo, brand guide and screen decisions."
