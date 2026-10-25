@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <title>Illustrative game recording frame, courtyard</title>
+  <path fill="#9caeb6" d="M0 0h320v180H0z"/>
+  <path fill="#b5a18a" d="M0 105 160 78l160 27v75H0z"/>
+  <path fill="#c5b494" d="M0 24h89v104H0zM224 17h96v116h-96z"/>
+  <path fill="#897b66" d="m89 24 34 24v64l-34 16zm135-7-30 31v69l30 16z"/>
+  <path fill="#cdbd9e" d="M123 53h71v62h-71z"/>
+  <path fill="#635e52" d="M145 78h27v37h-27zM17 48h21v27H17zm35 0h21v27H52zM246 41h25v30h-25zm36 0h23v30h-23z"/>
+  <path fill="#8b7455" d="M54 114h44v37H54zM206 118h51v35h-51z"/>
+  <path stroke="#bca17a" stroke-width="3" d="m54 114 44 37m0-37-44 37m152-33 51 35m0-35-51 35"/>
+  <path fill="#272e30" d="m207 180 12-39 33-12 17 14 30 8 21 29z"/>
+  <path stroke="#ebefda" stroke-width="2" d="M153 90h5m4 0h5m-7-7v5m0 4v5"/>
+  <path fill="#20262b" opacity=".7" d="M8 8h43v34H8zM116 6h88v12h-88zM8 162h68v10H8z"/>
+  <path fill="#b4c884" d="M13 166h43v3H13z"/>
+</svg>

@@ -13,6 +13,7 @@ internal sealed class RecorderHost : IWindowsRecorder
     readonly Func<int, string, string> captureScreenshot;
     readonly Action<bool> startupWriter;
     readonly bool customStartupWriter;
+    readonly Func<int> repairMedia;
     readonly HotkeyWindow shortcuts;
     readonly ForegroundApplicationTracker foreground;
     readonly RecorderNotifications notices;
@@ -36,6 +37,7 @@ internal sealed class RecorderHost : IWindowsRecorder
     public string ApplicationName => Config.CaptureMode == "window" ? Path.GetFileNameWithoutExtension(Config.WindowExecutable) : foreground.ApplicationName;
     public int CaptureProcessId => engine.CaptureProcessId;
     public RecorderMetrics Metrics => engine.Metrics;
+    public string EngineCapabilityContext { get; private set; }
     public bool Saving => engine.IsSaving;
     internal Func<Task> PrepareRemoteScreenshot;
     internal void ExcludeUiProcess(int id) => foreground.ExcludeProcess(id);
@@ -52,11 +54,12 @@ internal sealed class RecorderHost : IWindowsRecorder
         Directory.CreateDirectory(data); Log.DirectoryPath = data;
     }
 
-    public RecorderHost(string data, Action<Action> dispatch, bool paused, string controlTitle, bool syntheticSource = false, Action<bool> setStartup = null, Func<int, string, string> screenshotSource = null)
+    public RecorderHost(string data, Action<Action> dispatch, bool paused, string controlTitle, bool syntheticSource = false, Action<bool> setStartup = null, Func<int, string, string> screenshotSource = null, Func<int> repairEngine = null)
     {
         data = WorkerIdentity.DataPath(data);
         Initialize(data); owner = new RecorderDispatch(dispatch); synthetic = syntheticSource; customStartupWriter = setStartup != null; startupWriter = setStartup ?? WindowsStartup.SetEnabled; captureScreenshot = screenshotSource ?? ScreenshotCapture.Capture;
         DataDirectory = data; settingsPath = Path.Combine(data, "settings.json"); Config = Settings.Load(settingsPath); Paused = paused;
+        repairMedia = repairEngine ?? (() => MediaDependency.Install(DataDirectory, true));
         shortcuts = new HotkeyWindow(controlTitle); foreground = new ForegroundApplicationTracker();
         notices = new RecorderNotifications((title, message, kind, duration) => Notification?.Invoke(title, message, kind, duration));
         shortcuts.Pressed += SaveReplay; shortcuts.OverlayPressed += () => OverlayRequested?.Invoke(); shortcuts.ScreenshotPressed += TakeScreenshot;
@@ -73,6 +76,7 @@ internal sealed class RecorderHost : IWindowsRecorder
     void StartEngine()
     {
         var Dispatch = owner.NextGeneration();
+        EngineCapabilityContext = Guid.NewGuid().ToString("N");
         windowTarget?.Dispose(); windowTarget = null;
         if (Config.CaptureMode == "window" && !synthetic) windowTarget = new WindowCaptureTarget(Config);
         engine = new ReplayEngine(Config, DataDirectory, Paused, synthetic, windowTarget == null ? null : windowTarget.Read);
@@ -133,18 +137,30 @@ internal sealed class RecorderHost : IWindowsRecorder
     public async Task RepairMediaAsync()
     {
         if (Applying || disposed || engine.IsSaving || ScreenshotInProgress) throw new InvalidOperationException("Wait for settings or saving to finish before repairing the recording engine.");
-        Applying = true; Ready = false; Changed?.Invoke();
+        Applying = true; Ready = false; Phase = CapturePhase.Recovering; State = "Repairing recording engine…"; Changed?.Invoke();
         try
         {
             await Task.Run(engine.Dispose);
             try
             {
-                if (await Task.Run(() => MediaDependency.Install(DataDirectory, true)) != 0)
+                if (await Task.Run(repairMedia) != 0)
                     throw new IOException("Recording engine repair failed. Check the connection and retry. Details are in media-install-error.txt.");
+                MediaDependency.ResolveExecutable();
+                Phase = Paused ? CapturePhase.Paused : CapturePhase.Starting;
+                State = Paused ? "Paused" : "Starting replay buffer…";
             }
+            catch (Exception ex) { Phase = CapturePhase.Recovering; State = ex.Message; throw; }
             finally { StartEngine(); }
         }
         finally { Applying = false; Changed?.Invoke(); }
+    }
+    public async Task<RecordingEngineCapabilities> ProbeMediaAsync()
+    {
+        if (Applying || disposed) throw new InvalidOperationException("Wait for the current recording engine operation.");
+        string current = EngineCapabilityContext;
+        var receipt = await Task.Run(EncoderCapabilities.ProbeManaged);
+        if (disposed || Applying || current != EngineCapabilityContext) throw new IOException("Recording engine changed during the check. Check again.");
+        return receipt;
     }
     public async void TakeScreenshot()
     {

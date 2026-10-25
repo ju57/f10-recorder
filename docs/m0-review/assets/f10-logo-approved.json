@@ -1,0 +1,28 @@
+{
+  "product_name": "F10",
+  "decision_date": "2026-10-24",
+  "status": "Approved visual logo selection; production integration and small-size validation separate",
+  "selected": "User-attached realistic option B keycap",
+  "canonical_file": "f10-logo.png",
+  "sha256": "576d2f1d12c11f0ee24d185fc1815d3adbbcd3dcac385d9149e471edb899e163",
+  "dimensions": [
+    1254,
+    1254
+  ],
+  "mode": "RGBA",
+  "source": "User attachment codex-clipboard-32e96acd-0ff3-44f4-b497-9a57c4157f86.png",
+  "lineage": "User selected realistic keycap originally generated via built-in ImageGen. Attachment is authoritative; it is not byte-identical to the earlier local B candidate.",
+  "preservation": "Copied unchanged; no recolouring, font replacement, crop, resizing, softening or redesign.",
+  "supersedes": [
+    "Mint 10 placeholder",
+    "Abstract monogram explorations",
+    "A illustrated keycap",
+    "C compact hybrid proposal",
+    "B illustrated and softened-edge revisions"
+  ],
+  "limits": [
+    "Exact glyph-font and #76B900 pixel matching not established by image generation",
+    "Native app/tray export, contrast and DPI checks remain",
+    "Master selection is not binary release approval"
+  ]
+}

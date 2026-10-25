@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>F10 · M0 wireframe review</title>
+<style>
+:root{color-scheme:dark;--bg:#171b19;--surface:#202622;--input:#29312c;--line:#405047;--text:#edf4ef;--muted:#b2bfb6;--accent:#77d7a0;--warn:#e6bb75;--danger:#f2aaa5}
+*{box-sizing:border-box}body{margin:0;background:#101310;color:var(--text);font:14px/1.5 "Segoe UI",Arial,sans-serif}button,input,select{font:inherit}button,a,input,select{outline-offset:4px}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent)}a{color:var(--accent)}button,.button{display:inline-flex;align-items:center;justify-content:center;gap:12px;padding:9px 14px;background:var(--input);border:1px solid var(--line);border-radius:4px;color:var(--text);text-decoration:none;cursor:pointer;min-height:40px}button:hover,.button:hover{border-color:var(--muted)}button:disabled{opacity:.55;cursor:not-allowed}.primary{background:var(--accent);border-color:var(--accent);color:#142019;font-weight:650}.danger{color:var(--danger);border-color:#9d625e}.quiet{background:transparent}.small{padding:5px 10px;min-height:32px;font-size:13px}h1,h2,h3,p{margin:0}h1{font-size:28px;line-height:1.2;font-weight:600}h2{font-size:20px;font-weight:600}h3{font-size:15px;font-weight:600}.muted,.hint{color:var(--muted)}.hint{font-size:13px}.kicker{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}kbd{font:12px "Segoe UI",sans-serif;border:1px solid #65716a;border-radius:3px;padding:2px 5px;white-space:nowrap}.review{max-width:1280px;margin:0 auto;padding:20px 28px 14px}.review h1{font-size:20px;margin:4px 0 7px}.review-controls{display:flex;flex-wrap:wrap;gap:12px;margin-top:14px;align-items:center}.review-controls label{font-size:12px;color:var(--muted)}.review-controls select{margin-left:6px;min-width:165px}.review-controls a{margin-left:auto;font-size:13px}.review-note{font-size:12px;color:var(--muted);max-width:1000px}.stage{max-width:1280px;margin:0 auto;padding:0 28px 30px}.window{background:var(--bg);border:1px solid #627268;min-height:650px}.titlebar{height:43px;padding:0 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;font-size:13px}.titlebar span{color:var(--muted)}.shell{display:grid;grid-template-columns:185px minmax(0,1fr);min-height:605px}.app-nav{border-right:1px solid var(--line);padding:22px 12px;display:flex;flex-direction:column;gap:4px}.app-nav a{padding:10px 13px;color:var(--muted);text-decoration:none;border-left:2px solid transparent}.app-nav a[aria-current=page]{background:var(--surface);color:var(--text);border-left-color:var(--accent)}.app-nav .brand{padding:0 13px 20px;font-weight:600;color:var(--text)}.app-nav .bottom{margin-top:auto;padding-top:25px}.content{padding:28px 32px;min-width:0}.pagehead{display:flex;justify-content:space-between;align-items:start;gap:20px;margin-bottom:24px}.pagehead p{margin-top:7px}.status{font-size:13px;color:var(--accent)}.status.warning{color:var(--warn)}.status.problem{color:var(--danger)}.badge{border:1px solid var(--line);padding:3px 8px;font-size:12px;border-radius:3px;white-space:nowrap}.banner{border-left:3px solid var(--warn);padding:12px 16px;background:#2b2b21;color:#f0dcb2;margin-bottom:20px}.banner.problem{border-color:var(--danger);background:#302422;color:#f3c9c5}.banner p{font-size:13px;margin-top:3px}.split{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:28px}.panel{padding:20px 0;border-top:1px solid var(--line)}.big{font-size:36px;font-weight:550;letter-spacing:-.02em;margin:10px 0 0}.big small{font-size:15px;font-weight:400;color:var(--muted);letter-spacing:0}.bar{height:5px;background:var(--input);margin:14px 0}.bar span{display:block;height:100%;background:var(--accent)}.actions{display:flex;gap:9px;flex-wrap:wrap;margin:18px 0 10px}.inline{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.section{margin-top:26px}.section-title{display:flex;justify-content:space-between;gap:15px;align-items:center;margin-bottom:10px}.list{border-top:1px solid var(--line)}.listrow{display:flex;gap:16px;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--line)}.listrow .grow{flex:1;min-width:0}.listrow p{font-size:12px;color:var(--muted)}.listrow strong{font-size:13px;font-weight:600}.empty{padding:18px 0;color:var(--muted);font-size:13px}.row{display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,.9fr);gap:24px;align-items:center;padding:15px 0;border-bottom:1px solid var(--line)}.row p{margin-top:4px;font-size:12px;color:var(--muted)}input:not([type=checkbox]):not([type=range]),select{width:100%;max-width:100%;background:var(--input);border:1px solid var(--line);border-radius:3px;color:var(--text);padding:9px 10px;min-height:39px}input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;vertical-align:middle;margin-right:8px}input[type=range]{accent-color:var(--accent);width:100%}.checkbox{display:block;padding:9px 0}.field-label{display:block;font-size:13px;margin-bottom:5px}.field{margin-top:15px}.footer{border-top:1px solid var(--line);margin-top:26px;padding-top:16px;display:flex;align-items:center;justify-content:space-between;gap:18px}.table{width:100%;border-collapse:collapse;font-size:13px}.table th,.table td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:12px 8px}.table th{font-size:12px;font-weight:400;color:var(--muted)}.standalone{max-width:770px;margin:0 auto;background:var(--bg);border:1px solid #627268;padding:28px 34px}.standalone h1{margin:5px 0 10px}.setup-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 24px}.setup-grid .full{grid-column:1/-1}.setup-grid .row{grid-template-columns:1fr}.spec{border-left:2px solid var(--line);padding-left:16px;margin:16px 0;color:var(--muted);font-size:13px}.game-surface{position:relative;min-height:650px;background:#181b1a;border:1px solid #627268;display:flex;justify-content:center;align-items:center;padding:45px}.surface-note{position:absolute;bottom:18px;left:22px;right:22px;font-size:12px;color:var(--muted)}.overlay{width:min(600px,100%);padding:26px;background:var(--bg);border:1px solid #66786b}.overlay .split{gap:18px}.hud{position:absolute;right:22px;top:22px;padding:10px 16px;border:1px solid #7b8f80;background:var(--bg);font-size:13px;min-width:300px}.hud .inline{justify-content:space-between}.tray{width:345px;border:1px solid #687b6c;padding:16px;background:var(--bg)}.tray a{display:flex;justify-content:space-between;color:var(--text);padding:8px 5px;text-decoration:none}.tray a:hover{background:var(--input)}.tray hr{border:0;border-top:1px solid var(--line)}.metadata{font-size:12px;white-space:pre-wrap;background:var(--surface);padding:16px;border:1px solid var(--line);overflow-wrap:anywhere}.diagram{display:flex;flex-direction:column;gap:10px}.step{border:1px solid var(--line);padding:13px 16px;font-size:13px}.step strong{display:block;margin-bottom:2px}.connector{font-size:12px;color:var(--muted);padding-left:18px}.review-footer{max-width:1280px;margin:auto;padding:0 28px 30px;font-size:12px;color:var(--muted)}
+@media(max-width:900px){.review,.stage{padding-left:12px;padding-right:12px}.shell{grid-template-columns:150px minmax(0,1fr)}.content{padding:22px}.split{grid-template-columns:1fr}.row{grid-template-columns:1fr;gap:10px}.review-controls a{margin-left:0}.hud{position:static;min-width:0;width:100%}.game-surface{align-items:flex-start;padding:20px}.big{font-size:30px}.pagehead{flex-wrap:wrap}}
+@media print{body{background:white;color:#111}.review,.review-footer,.notice-stack{display:none}.stage{padding:0;max-width:none}.window,.standalone,.game-surface{border:1px solid #555;min-height:0;break-inside:avoid}*{print-color-adjust:exact;-webkit-print-color-adjust:exact}.stage{padding:10px}.app-nav{width:160px}.shell{grid-template-columns:160px minmax(0,1fr)}}
+.duration-inputs{display:flex;align-items:center;gap:10px}.duration-inputs input[type=range]{flex:1;min-width:0}.duration-inputs input[type=number]{width:76px;flex:none}.duration-limits{display:flex;justify-content:space-between;padding-right:116px;font-size:11px;color:var(--muted)}.mic-under-device{margin-top:9px}.mic-button{width:40px;padding:6px}.mic-button svg{flex:none}.mic-button.mic-on{color:var(--accent);border-color:var(--accent)}.storage-estimate{margin-top:20px}
+.setup-heading{display:flex;align-items:center;gap:14px;margin-bottom:18px}.setup-heading img{flex:none}.setup-heading h1{margin:0;font-size:25px}.folder-control{position:relative}.folder-control #setup-folder{padding-right:48px;min-width:0}.folder-control .folder-button{position:absolute;right:3px;top:50%;transform:translateY(-50%);width:34px;height:32px;min-height:32px;padding:5px;background:transparent;border:0}.folder-button:hover{color:var(--accent)}.folder-button svg{flex:none}.setup-footer{justify-content:flex-end}dialog{width:min(440px,90vw);padding:24px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:5px}dialog::backdrop{background:#0009}dialog .field-label{margin-top:18px}dialog .actions{justify-content:flex-end;margin-bottom:0}
+.system-level{display:flex;align-items:center;min-height:32px;margin-top:9px}.mic-under-device{flex-wrap:nowrap}.audio-level{display:flex;align-items:center;gap:3px;flex:1;min-width:0;height:20px}.audio-level span{display:block;flex:1;min-width:1px;height:18px;border-radius:1px;background:#414b45}.audio-level span.lit{background:var(--warn)}
+</style>
+<link rel="stylesheet" href="f10-theme.css?v=43">
+</head>
+<body>
+<header class="review">
+  <div class="kicker">M0 review draft v4 · 22 October 2026</div>
+  <h1>F10 · screens and states</h1>
+  <p class="review-note">Sample UI only. Nothing here records, changes F10 settings, registers shortcuts, opens media or uploads data. Review navigation and scenarios work locally; devices, folders, files and measurements are examples.</p>
+  <div class="review-controls">
+    <label>Screen <select id="screen" aria-label="Review screen"></select></label>
+    <label>Scenario <select id="scenario" aria-label="Review scenario"></select></label>
+    <button id="complete" class="small quiet" type="button">Review saved export outcome</button>
+    <button id="manual-complete" class="small quiet" type="button" hidden>Review manual finalization outcome</button>
+    <label id="report-export-review" hidden>Sample report export <select id="report-export-outcome" aria-label="Review report export outcome"><option value="success">Download sample</option><option value="failure">Export failure</option></select></label>
+    <label id="indicator-context-review" hidden>Sample foreground <select id="indicator-context" aria-label="Sample foreground"><option value="game">Game</option><option value="fullscreen">Full-screen application</option><option value="desktop">Desktop</option><option value="browser">Browser</option><option value="explorer">Explorer</option></select></label>
+    <label id="indicator-fps-review" hidden>Sample FPS data <select id="indicator-fps-data" aria-label="Sample FPS data"><option value="available">Available (144 FPS)</option><option value="unavailable">Unavailable</option></select></label>
+    <span id="recovery-outcome-review" hidden><label>Sample recovery outcome <select id="recovery-outcome" aria-label="Sample recovery outcome"><option value="success">Saved recording</option><option value="failure">Save folder unavailable</option></select></label> <button id="complete-recovery" class="small quiet" type="button" disabled>Review recovery outcome</button></span>
+    <label id="exit-example-review" hidden>Exit example <select id="exit-example" aria-label="Exit example"><option value="current">Current pending work</option><option value="idle">No pending work</option><option value="busy">Saving recordings</option><option value="stalled">Stalled saves</option><option value="failure">Save failed</option></select></label>
+    <a href="README.md">State flows and review notes</a>
+  </div>
+</header>
+<main id="stage" class="stage"></main>
+<footer class="review-footer"><strong>Review focus:</strong> actual versus pending settings; replay versus manual recording; accepted versus saved. Source/encoder/driver support and exclusion of F10 UI from footage still require separate qualification. Low-fidelity layout and copy are proposed.</footer>
+<dialog id="restart-replay-dialog" aria-labelledby="restart-replay-title" aria-describedby="restart-replay-description"><h2 id="restart-replay-title">Restart replay buffer?</h2><p id="restart-replay-description">Unsaved replay history will be cleared. Saved clips stay in place. Replay will refill unless you paused it.</p><div class="actions"><button type="button" data-action="cancel-replay-restart" autofocus>Cancel</button><button type="button" class="danger" data-action="confirm-replay-restart">Restart replay buffer</button></div></dialog>
+<dialog id="folder-picker" aria-labelledby="folder-picker-title"><h2 id="folder-picker-title">Select save folder</h2><p class="hint">Example folders</p><label class="field-label" for="folder-choice">Folder</label><select id="folder-choice"><option>Videos / F10</option><option>D:/Clips</option><option>Videos / Gameplay</option></select><div class="actions"><button type="button" data-action="cancel-folder">Cancel</button><button type="button" class="primary" data-action="choose-folder">Select folder</button></div></dialog>
+<dialog id="capture-remove-dialog" aria-labelledby="capture-remove-title" aria-describedby="capture-remove-summary"><h2 id="capture-remove-title">Remove selected files?</h2><p id="capture-remove-summary"></p><ul id="capture-remove-files"></ul><p class="hint">You can restore these files from Windows Recycle Bin.</p><div class="actions"><button type="button" data-action="cancel-capture-removal" autofocus>Cancel</button><button type="button" class="danger" data-action="confirm-capture-removal">Move to Recycle Bin</button></div></dialog>
+<dialog id="recovery-discard-dialog" aria-labelledby="recovery-discard-title" aria-describedby="recovery-discard-item recovery-discard-warning"><h2 id="recovery-discard-title">Discard unfinished recording?</h2><p id="recovery-discard-item"></p><p id="recovery-discard-warning">This recording’s recovery data will be permanently deleted.</p><div class="actions"><button type="button" data-action="cancel-recovery-discard" autofocus>Cancel</button><button type="button" class="danger" data-action="confirm-recovery-discard">Discard permanently</button></div></dialog>
+<dialog id="force-exit-dialog" aria-labelledby="force-exit-title" aria-describedby="force-exit-summary force-exit-warning"><div class="exit-confirm-heading"><img class="approved-logo" src="assets/f10-logo.png" width="22" height="22" alt=""><h2 id="force-exit-title">Force F10 to exit?</h2></div><p id="force-exit-summary"></p><p id="force-exit-warning">Unfinished recordings may remain incomplete or need recovery.</p><div class="actions"><button type="button" data-action="exit-keep-waiting" autofocus>Keep waiting</button><button type="button" class="danger" data-action="exit-force-confirm">Force exit</button></div></dialog>
+<script>
+'use strict';
+const screens = [['setup','First run'],['overview','Overview'],['captures','Captures'],['video','Capture & Video'],['audio','Audio'],['controls','Controls'],['storage','Storage'],['diagnostics','Diagnostics'],['overlay','Overlay'],['indicator','Recording indicator'],['tray','Tray menu'],['recovery','Recovery'],['discard','Discard confirmation'],['apply','Restart-required Apply'],['quit','Exit'],['flows','State-flow summary']];
+const scenarios = [['ready','Ready'],['filling','Filling · 42 seconds'],['recording','Manual + replay recording'],['paused-manual','Replay paused + manual recording'],['queue-full','One export + two waiting'],['window-missing','Selected window unavailable'],['display-missing','Selected display unavailable'],['mic-missing','Microphone unavailable'],['system-missing','System audio unavailable'],['mic-permission','Microphone access denied'],['multiple-problems','Source and microphone unavailable'],['file-unavailable','Saved file unavailable'],['media-library','10 recordings + 30 screenshots'],['worker-disconnected','Worker disconnected'],['low-storage','Low unreserved storage'],['output-unavailable','Output folder unavailable'],['new-footage','Only new footage']];
+const desktop = ['overview','captures','video','audio','controls','storage','diagnostics'];
+const labels = Object.fromEntries(screens);
+const q = id => document.getElementById(id);
+const esc = value => String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const btn = (text,action,cls='',disabled=false) => `<button type="button" class="${cls}" data-action="${action}" ${disabled?'disabled':''}>${text}</button>`;
+const go = (text,to,cls='button') => `<a class="${cls}" href="#${to}${to.includes('?')?'':'?scenario='+route().scenario}">${text}</a>`;
+const select = (values,selected=values[0]) => `<select>${values.map(v=>`<option ${v===selected?'selected':''}>${esc(v)}</option>`).join('')}</select>`;
+const field = (name,control,note='') => `<div class="field"><label class="field-label">${name}</label>${control}${note?`<p class="hint">${note}</p>`:''}</div>`;
+const row = (name,note,control) => `<div class="row"><div><h3>${name}</h3><p>${note}</p></div><div>${control}</div></div>`;
+const check = (text,checked=false) => `<label class="checkbox"><input type="checkbox" ${checked?'checked':''}>${text}</label>`;
+const input = value => `<input aria-label="Example value" value="${esc(value)}">`;
+const head = (title,description,extra='') => `<div class="pagehead"><div><h1>${title}</h1><p class="muted">${description}</p></div>${extra}</div>`;
+const route = () => {const [screen,query='']=location.hash.slice(1).split('?');return {screen:labels[screen]?screen:'overview',scenario:new URLSearchParams(query).get('scenario')||'ready',focus:new URLSearchParams(query).get('focus')||''};};
+let activeScenario = '', model, nextJob = 1, nextSession = 1, replayMinutes = 5, lastRenderedScreen = '';
+const setupErrors = {folder:'',duration:''};
+let setupDurationInput = '5';
+let captureTab='recordings';
+const captureScroll={recordings:0,screenshots:0};
+let removalSelection=[],removalContext='captures';
+const setupDraft = {source:'display',display:'Main display (primary)',window:'Game window (example)',folder:'Videos / F10',system:'Headphones (example)',microphone:'Microphone (example)',micState:'on',tracks:'One mixed track',startup:true};
+function durationControl(scope){return `<div class="duration-control" data-duration-group><div class="duration-inputs"><input id="${scope}-duration-slider" type="range" min="1" max="30" step="1" value="${replayMinutes}" data-duration="slider" aria-label="Replay duration slider"><input id="${scope}-duration-number" type="number" min="1" max="30" step="1" required value="${scope==='setup'?esc(setupDurationInput):replayMinutes}" data-duration="number" aria-label="Replay duration in minutes" ${scope==='setup'?`aria-describedby="setup-duration-error" aria-invalid="${Boolean(setupErrors.duration)}"`:''}><span>min</span></div><div class="duration-limits" aria-hidden="true"><span>1 min</span><span>30 min</span></div></div>`;}
+function audioLevel(label,level,state='Sample level'){const filled=Math.round(level*.4);return `<div class="audio-level" role="meter" aria-label="${label} (sample)" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${level}" aria-valuetext="${state==='Sample level'?'Sample level '+level+' percent':state}" title="${state==='Sample level'?'Sample '+label.toLowerCase():state}">${Array.from({length:40},(_,index)=>`<span class="${index<filled?'lit':''}" aria-hidden="true"></span>`).join('')}</div>`;}
+const solidIcons = {"microphone-fill": "<svg width=\"20\" height=\"20\" aria-hidden=\"true\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M80,128V64a48,48,0,0,1,96,0v64a48,48,0,0,1-96,0Zm128,0a8,8,0,0,0-16,0,64,64,0,0,1-128,0,8,8,0,0,0-16,0,80.11,80.11,0,0,0,72,79.6V240a8,8,0,0,0,16,0V207.6A80.11,80.11,0,0,0,208,128Z\"/></svg>", "microphone-slash-fill": "<svg width=\"20\" height=\"20\" aria-hidden=\"true\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M213.38,229.92a8,8,0,0,1-11.3-.54l-30.92-34A78.83,78.83,0,0,1,136,207.59V240a8,8,0,0,1-16,0V207.6A80.11,80.11,0,0,1,48,128a8,8,0,0,1,16,0,64.07,64.07,0,0,0,64,64,63.41,63.41,0,0,0,32.21-8.68l-11.1-12.2A48,48,0,0,1,80,128V95.09L42.08,53.38A8,8,0,0,1,53.92,42.62l160,176A8,8,0,0,1,213.38,229.92Zm-24.19-63.13a7.88,7.88,0,0,0,3.51.82,8,8,0,0,0,7.19-4.49A79.16,79.16,0,0,0,208,128a8,8,0,0,0-16,0,63.32,63.32,0,0,1-6.48,28.09A8,8,0,0,0,189.19,166.79Zm-27.33-29.22A8,8,0,0,0,175.74,133a49.49,49.49,0,0,0,.26-5V64A48,48,0,0,0,84,44.87a8,8,0,0,0,1.41,8.57Z\"/></svg>", "folder-open-fill": "<svg width=\"20\" height=\"20\" aria-hidden=\"true\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M245,110.64A16,16,0,0,0,232,104H216V88a16,16,0,0,0-16-16H130.67L102.94,51.2a16.14,16.14,0,0,0-9.6-3.2H40A16,16,0,0,0,24,64V208h0a8,8,0,0,0,8,8H211.1a8,8,0,0,0,7.59-5.47l28.49-85.47A16.05,16.05,0,0,0,245,110.64ZM93.34,64,123.2,86.4A8,8,0,0,0,128,88h72v16H69.77a16,16,0,0,0-15.18,10.94L40,158.7V64Z\"/></svg>"};
+function microphoneButton(state,action='mic',blocked=false,shortcut=''){
+ const label=state==='on'?'Mute microphone':state==='muted'?'Unmute microphone':state==='off'?'Enable microphone':'Microphone unavailable';
+ return `<button type="button" class="mic-button small ${state==='on'?'mic-on':''}${shortcut?' action-button overlay-mic-control':''}" data-action="${action}" aria-label="${label}" title="${label}${state==='on'||state==='muted'?' ('+(action==='setup-mic'?'Alt+F2':model?.controlsApplied?.shortcuts.mic||'Alt+F2')+')':''}" aria-pressed="${state==='on'}" ${blocked?'disabled':''}>${solidIcons[state==='on'?'microphone-fill':'microphone-slash-fill']}${shortcut?'<kbd class="shortcut" aria-hidden="true">'+esc(shortcut)+'</kbd>':''}</button>`;
+}
+function setupErrorMarkup(field){return `<p id="setup-${field}-error" class="field-error" role="alert" ${setupErrors[field]?'':'hidden'}>${esc(setupErrors[field])}</p>`;}
+function setSetupError(field,message){setupErrors[field]=message;const line=q('setup-'+field+'-error');if(line){line.hidden=!message;line.textContent=message;}const input=q(field==='duration'?'setup-duration-number':'setup-folder');if(input)input.setAttribute('aria-invalid',String(Boolean(message)));}
+
+function resetModel(scenario){
+  activeScenario=scenario;captureScroll.recordings=0;captureScroll.screenshots=0;
+  model={available:300,newFootage:20,target:300,session:'R'+nextSession++,replay:'ready',manual:'stopped',elapsed:'12:34',mic:'on',tracks:1,system:'Headphones (example)',source:'Main display · 1920 × 1080',mode:'Full replay each time',jobs:[],results:[],banner:'',problem:false,disconnected:false,low:false};
+  if(scenario==='filling'){model.available=42;model.replay='filling';}
+  if(scenario==='recording')model.manual='recording';
+  if(scenario==='paused-manual'){model.replay='paused';model.manual='recording';model.mic='on';model.banner='Replay is paused. Manual recording and its enabled audio continue.';}
+  if(scenario==='queue-full')model.jobs=['12:10:00','12:10:20','12:10:40'].map(time=>({id:nextJob++,time,duration:'5:00',mode:model.mode,source:model.source,destination:'Videos / F10',session:model.session}));
+  if(scenario==='window-missing'){model.replay='unavailable';model.source='Selected application window · example';model.banner='Application unavailable. Retained replay footage can still be saved. Restore the original window or select a replacement.';model.problem=true;}
+  if(scenario==='display-missing'){model.replay='unavailable';model.banner='Display unavailable. Recording has not switched to another display. Retained replay footage can still be saved.';model.problem=true;}
+  if(scenario==='output-unavailable')model.outputUnavailable=true;
+  if(scenario==='system-missing')model.systemMissing=true;
+  if(scenario==='mic-permission'){model.mic='missing';model.micPermissionDenied=true;}
+  if(scenario==='mic-missing'){model.mic='missing';model.tracks=2;model.banner='Selected microphone unavailable. Video and system audio continue; the microphone track is silent.';}
+  if(scenario==='multiple-problems'){model.replay='unavailable';model.mic='missing';model.tracks=2;}
+  model.recoveryItems=[{id:1,label:'Manual recording',date:'22 Oct 2026 · 11:35',duration:'18:12',state:'pending',error:''}];model.recoveredCaptures=[];model.savedCaptures=[];model.recoveryDiscardId=null;model.captureSelection=[];model.removedCaptures=[];model.largeLibrary=scenario==='media-library';
+  if(scenario==='file-unavailable')model.fileUnavailable=true;
+  if(scenario==='worker-disconnected'){model.disconnected=true;model.replay='unknown';model.manual='unknown';model.mic='unknown';model.banner='Worker disconnected. Recording state is unknown; reconnect before sending commands. Last-known settings are shown below.';model.problem=true;}
+  if(scenario==='low-storage'){model.low=true;model.replay='stopped';model.banner='Capture stopped for low unreserved space. Accepted work retains its reservations. Free space or change storage before resuming.';model.problem=true;}
+  if(scenario==='new-footage')model.mode='Only new footage';
+  model.videoApplied=initialVideoProfile();model.videoApplied.mode=model.mode;model.videoDraft={...model.videoApplied};model.videoPending=null;model.videoError='';
+  model.audioApplied=initialAudioProfile();model.audioDraft={...model.audioApplied};model.audioPending=null;model.audioLevels={system:100,microphone:100};model.audioError='';model.audioTesting=false;
+  model.controlsApplied=initialControlsProfile();model.controlsDraft=copyControls(model.controlsApplied);model.editingShortcut=null;model.indicatorPreview=false;model.overlayScroll={home:0,settings:0,recordings:0,screenshots:0};model.overlayView='home';model.overlayGalleryTab='recordings';model.overlaySelected=null;model.overlayPlaying=false;model.overlayPreviewVolume=100;model.overlayPreviewLastVolume=100;model.overlayOpen=true;
+  model.exitState=null;model.exitExample='current';model.storageApplied=initialStorageProfile();model.storageDraft={...model.storageApplied};model.storagePending=null;model.storageErrors={};model.storageCacheUsed=.82;model.diagnosticReport=null;model.diagnosticHistory=[];model.diagnosticSeen=[];model.manualDestination=model.manual==='recording'?model.storageApplied.recordings:null;
+}
+function duration(s){return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}
+function savable(){return model.mode==='Only new footage'?Math.min(model.available,model.newFootage):model.available;}
+function status(){if(model.disconnected)return 'Status unavailable';if(model.replay==='paused')return 'Replay paused';if(model.replay==='unavailable')return 'Source unavailable';if(model.low)return 'Stopped · low storage';if(model.replay==='filling')return 'Filling replay buffer';if(model.mode==='Only new footage'&&savable()<1)return 'Waiting for new footage';return 'Replay ready to save';}
+function banner(){return model.banner?`<div class="banner ${model.problem?'problem':''}"><strong>${esc(model.banner)}</strong></div>`:'';}
+function queue(){return `<section class="section export-section" aria-label="Replay exports"><div class="section-title"><h3>Replay exports</h3><span class="hint">${model.jobs.length?'1 exporting · '+(model.jobs.length-1)+' waiting':'No saves in progress'}</span></div>${model.jobs.length?`<div class="list">${model.jobs.map((job,i)=>`<div class="listrow"><div class="grow"><strong>${i===0?'Exporting':'Waiting'} · requested ${job.time}</strong><p>${job.duration} · ${esc(job.mode)} · ${esc(job.source)} → ${esc(job.destination)}${i===0?' · elapsed 0:02':''}</p></div>${btn('Cancel','cancel-'+job.id,'small')}</div>`).join('')}</div>`:''}</section>`;}
+
+const shellIcons = {"house": "<svg width=\"20\" height=\"20\" aria-hidden=\"true\" fill=\"currentColor\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M224,120v96a8,8,0,0,1-8,8H160a8,8,0,0,1-8-8V164a4,4,0,0,0-4-4H108a4,4,0,0,0-4,4v52a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V120a16,16,0,0,1,4.69-11.31l80-80a16,16,0,0,1,22.62,0l80,80A16,16,0,0,1,224,120Z\"/></svg>", "images": "<svg width=\"20\" height=\"20\" aria-hidden=\"true\" fill=\"currentColor\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M216,40H72A16,16,0,0,0,56,56V72H40A16,16,0,0,0,24,88V200a16,16,0,0,0,16,16H184a16,16,0,0,0,16-16V184h16a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40ZM172,72a12,12,0,1,1-12,12A12,12,0,0,1,172,72Zm12,128H40V88H56v80a16,16,0,0,0,16,16H184Zm32-32H72V120.69l30.34-30.35a8,8,0,0,1,11.32,0L163.31,140,189,114.34a8,8,0,0,1,11.31,0L216,130.07V168Z\"/></svg>", "video-camera": "<svg width=\"20\" height=\"20\" aria-hidden=\"true\" fill=\"currentColor\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M192,72V184a16,16,0,0,1-16,16H32a16,16,0,0,1-16-16V72A16,16,0,0,1,32,56H176A16,16,0,0,1,192,72Zm58,.25a8.23,8.23,0,0,0-6.63,1.22L209.78,95.86A4,4,0,0,0,208,99.19v57.62a4,4,0,0,0,1.78,3.33l33.78,22.52a8,8,0,0,0,8.58.19,8.33,8.33,0,0,0,3.86-7.17V80A8,8,0,0,0,250,72.25Z\"/></svg>", "speaker-high": "<svg width=\"20\" height=\"20\" aria-hidden=\"true\" fill=\"currentColor\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M160,32.25V223.69a8.29,8.29,0,0,1-3.91,7.18,8,8,0,0,1-9-.56l-65.57-51A4,4,0,0,1,80,176.16V79.84a4,4,0,0,1,1.55-3.15l65.57-51a8,8,0,0,1,10,.16A8.27,8.27,0,0,1,160,32.25ZM60,80H32A16,16,0,0,0,16,96v64a16,16,0,0,0,16,16H60a4,4,0,0,0,4-4V84A4,4,0,0,0,60,80Zm126.77,20.84a8,8,0,0,0-.72,11.3,24,24,0,0,1,0,31.72,8,8,0,1,0,12,10.58,40,40,0,0,0,0-52.88A8,8,0,0,0,186.74,100.84Zm40.89-26.17a8,8,0,1,0-11.92,10.66,64,64,0,0,1,0,85.34,8,8,0,1,0,11.92,10.66,80,80,0,0,0,0-106.66Z\"/></svg>", "keyboard": "<svg width=\"20\" height=\"20\" aria-hidden=\"true\" fill=\"currentColor\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M224,48H32A16,16,0,0,0,16,64V192a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V64A16,16,0,0,0,224,48ZM64,168H48a8,8,0,0,1,0-16H64a8,8,0,0,1,0,16Zm96,0H96a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Zm48,0H192a8,8,0,0,1,0-16h16a8,8,0,0,1,0,16Zm0-32H48a8,8,0,0,1,0-16H208a8,8,0,0,1,0,16Zm0-32H48a8,8,0,0,1,0-16H208a8,8,0,0,1,0,16Z\"/></svg>", "hard-drive": "<svg width=\"20\" height=\"20\" aria-hidden=\"true\" fill=\"currentColor\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M224,64H32A16,16,0,0,0,16,80v96a16,16,0,0,0,16,16H224a16,16,0,0,0,16-16V80A16,16,0,0,0,224,64Zm-36,76a12,12,0,1,1,12-12A12,12,0,0,1,188,140Z\"/></svg>", "info": "<svg width=\"20\" height=\"20\" aria-hidden=\"true\" fill=\"currentColor\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm-4,48a12,12,0,1,1-12,12A12,12,0,0,1,124,72Zm12,112a16,16,0,0,1-16-16V128a8,8,0,0,1,0-16,16,16,0,0,1,16,16v40a8,8,0,0,1,0,16Z\"/></svg>", "squares-four": "<svg width=\"20\" height=\"20\" aria-hidden=\"true\" fill=\"currentColor\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M120,56v48a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V56A16,16,0,0,1,56,40h48A16,16,0,0,1,120,56Zm80-16H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm-96,96H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm96,0H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Z\"/></svg>", "minus": "<svg width=\"20\" height=\"20\" aria-hidden=\"true\" fill=\"currentColor\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32ZM184,136H72a8,8,0,0,1,0-16H184a8,8,0,0,1,0,16Z\"/></svg>", "square": "<svg width=\"20\" height=\"20\" aria-hidden=\"true\" fill=\"currentColor\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M224,48V208a16,16,0,0,1-16,16H48a16,16,0,0,1-16-16V48A16,16,0,0,1,48,32H208A16,16,0,0,1,224,48Z\"/></svg>", "x": "<svg width=\"20\" height=\"20\" aria-hidden=\"true\" fill=\"currentColor\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 256 256\" fill=\"currentColor\"><path d=\"M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32ZM181.66,170.34a8,8,0,0,1-11.32,11.32L128,139.31,85.66,181.66a8,8,0,0,1-11.32-11.32L116.69,128,74.34,85.66A8,8,0,0,1,85.66,74.34L128,116.69l42.34-42.35a8,8,0,0,1,11.32,11.32L139.31,128Z\"/></svg>"};
+const navIcon = {overview:'house',captures:'images',video:'video-camera',audio:'speaker-high',controls:'keyboard',storage:'hard-drive',diagnostics:'info'};
+function actionButton(label,hotkey,action,cls='',disabled=false){const key={save:'save','open-overlay':'overlay',screenshot:'screenshot',manual:'manual'}[action];if(key&&model?.controlsApplied)hotkey=model.controlsApplied.shortcuts[key];return btn(`<span class="action-label">${label}</span>${hotkey?`<kbd class="shortcut">${hotkey}</kbd>`:''}`,action,'action-button '+cls,disabled);}
+function overviewStatus(){
+ if(model.disconnected)return ['problem','Status unavailable'];
+ if(model.low)return ['problem','Capture stopped'];
+ if(model.replay==='unavailable')return ['problem','Source unavailable'];
+ if(model.jobs.length>=3)return ['warning','Save queue full'];
+ if(model.mic==='missing')return ['warning','Microphone unavailable'];
+ if(model.systemMissing)return ['warning','System audio unavailable'];
+ if(model.replay==='paused')return ['neutral',model.manual==='recording'?'Replay paused · Manual recording':'Replay paused'];
+ if(model.replay==='filling')return ['neutral','Filling replay'];
+ if(model.mode==='Only new footage'&&savable()<1)return ['neutral','Waiting for new footage'];
+ return ['ready','Replay ready to save'];
+}
+const windowIcons={minus:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',square:'<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>',x:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 3.5 9 9m0-9-9 9" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>'};
+function desktopShell(body,current){return `<div class="window desktop-window"><div class="titlebar"><img class="approved-logo" src="assets/f10-logo.png" width="22" height="22" alt="F10"><div class="window-controls">${btn(windowIcons.minus,'window-minimize','window-button')}${btn(windowIcons.square,'window-maximize','window-button')}${btn(windowIcons.x,'window-close','window-button close-window')}</div></div><div class="shell"><nav class="app-nav" aria-label="Desktop navigation">${desktop.map(key=>`<a href="#${key}?scenario=${current.scenario}" ${key===(['recovery','discard'].includes(current.screen)?'captures':current.screen)?'aria-current="page"':''}>${shellIcons[navIcon[key]]}<span>${labels[key]}</span></a>`).join('')}<div class="bottom">${actionButton(shellIcons['squares-four']+'<span>Overlay</span>','Alt+Z','open-overlay','overlay-launch')}</div></nav><div class="content">${body}</div></div></div>`;}
+
+function replayAcquisitionIndicator(label){
+ const active=!model.disconnected&&!model.low&&['ready','filling'].includes(model.replay);
+ if(active)return '<span class="buffering-indicator" tabindex="0" role="img" aria-label="Currently buffering"><span class="buffering-dot" aria-hidden="true"></span><span class="indicator-tooltip" role="tooltip">Currently buffering</span></span>';
+ if(label==='Paused')return '<span class="buffering-indicator" tabindex="0" role="img" aria-label="Replay paused"><span class="replay-pause-icon" aria-hidden="true"></span><span class="indicator-tooltip" role="tooltip">Replay paused</span></span>';
+ return `<span class="recording-state">${label}</span>`;
+}
+function overview(){
+ const blocked=model.disconnected||model.low||savable()<1||model.jobs.length>=3;
+ const saveText=model.jobs.length>=3?'Save queue full':'Save replay';
+ const [stateTone,stateLabel]=overviewStatus();
+ const replayLabel=model.disconnected?'Unknown':model.low?'Stopped':model.replay==='unavailable'?'Source unavailable':model.replay==='paused'?'Paused':model.replay==='filling'?'Filling':'Buffering';
+ const manualState=model.disconnected?'unknown':model.manual;
+ return `<div class="overview-view"><div class="pagehead overview-heading"><h1>Overview</h1><span class="state-pill ${stateTone}" role="status" tabindex="-1"><span class="state-dot" aria-hidden="true"></span>${stateLabel}</span></div>
+ <a class="applied-summary settings-link" href="#video?scenario=${route().scenario}" aria-label="Open Capture and Video settings"><span class="summary-label">${model.disconnected?'Last known source':'Capture source'}</span><strong>${esc(model.source)}</strong><span class="hint">${model.videoApplied.resolution} · ${model.videoApplied.fps} FPS · ${model.videoApplied.codec} · ${model.videoApplied.bitrate} Mbps</span></a>
+ <div class="recording-grid"><section class="recording-panel replay-panel"><div class="section-title"><h2>Instant replay</h2>${replayAcquisitionIndicator(replayLabel)}</div><div class="big replay-time">${model.disconnected?'Unknown':duration(model.mode==='Only new footage'?savable():model.available)} <small>${model.mode==='Only new footage'?'available to save':'of '+duration(model.target)+' retained'}</small></div><div class="bar"><span style="width:${Math.min(100,model.available/model.target*100)}%"></span></div><p class="hint">${esc(model.mode)}${model.mode==='Only new footage'?' · '+duration(model.available)+' retained':''}</p><div class="actions">${actionButton(saveText,'F10','save','primary',blocked)}${btn(model.replay==='paused'?'Resume replay':'Pause replay','pause','secondary',model.disconnected||model.low||model.replay==='unavailable')}</div></section>
+ <section class="recording-panel manual-panel"><div class="section-title"><h2>Manual recording</h2>${overlayManualState(false)}</div><div class="manual-time ${manualState==='recording'?'active':''}">${['recording','finalizing'].includes(manualState)?`<span aria-label="${manualState==='recording'?'Elapsed time':'Recorded duration'} ${model.elapsed}">${model.elapsed}</span>`:''}</div><div class="actions">${actionButton(model.manual==='recording'?'Stop recording':'Start recording','Alt+F9','manual','secondary',model.disconnected||model.replay==='unavailable'||model.low||model.manual==='finalizing')}</div></section></div>
+ <section class="shared-audio" aria-label="Shared audio for replay and manual recording"><h3>Audio</h3><div class="audio-summary"><div class="audio-device">${shellIcons['speaker-high']}<div><span class="summary-label">System audio</span><a class="settings-link" href="#audio?scenario=${route().scenario}" aria-label="Open system audio settings">${esc(model.system)}</a></div></div><div class="audio-device">${microphoneButton(model.mic,'mic',model.disconnected||model.mic==='missing'||model.mic==='unknown')}<div><span class="summary-label">Microphone</span><a class="settings-link" href="#audio?scenario=${route().scenario}" aria-label="Open microphone settings">${model.mic==='missing'?'No microphone available':model.mic==='unknown'?'Status unknown':'Microphone (example)'}</a></div></div><div class="audio-device track-summary"><svg width="20" height="20" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M224,152v40a16,16,0,0,1-16,16H48a16,16,0,0,1-16-16V152a16,16,0,0,1,16-16H208A16,16,0,0,1,224,152ZM208,48H48A16,16,0,0,0,32,64v40a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V64A16,16,0,0,0,208,48Z"/></svg><div><span class="summary-label">Audio tracks</span><a class="settings-link" href="#audio?scenario=${route().scenario}" aria-label="Open audio track settings">${model.tracks===1?'One mixed track':'Two separate tracks'}</a></div></div></div></section>
+ ${queue()}<div class="overview-footer"><div class="inline">${actionButton('Screenshot','Alt+F1','screenshot','secondary',model.disconnected||model.replay==='unavailable')}${go('Open captures','captures','button quiet')}</div>${btn(shellIcons.square+'<span>Stop all capture</span>','stop-all','quiet stop-all',model.disconnected)}</div></div>`;
+}
+// Sample outcomes share one catalogue across Captures and Overlay Gallery.
+// This creates metadata only; no media is captured, read or written.
+function captureSnapshot(){return {source:model.source,codec:model.videoApplied.codec,tracks:model.tracks,destination:model.storageApplied.recordings};}
+function recordSampleCapture(kind,snapshot={}){
+ const id=model.savedCaptures.length+1,screenshot=kind==='Screenshot';
+ const file={name:`${kind}-2026-10-22-12-10-20-sample-${id}.${screenshot?'png':'mp4'}`,type:screenshot?'Screenshot':kind==='Replay'?'Replay':'Manual recording',date:'22 Oct 2026 · '+(snapshot.time||'12:10:20'),duration:screenshot?'':snapshot.duration||model.elapsed,thumbnail:screenshot?'sample-screenshot.svg':kind==='Replay'?'sample-replay.svg':'sample-manual.svg',detail:`${snapshot.source||model.source} · ${screenshot?'PNG':(snapshot.codec||'H.264')+' · '+(snapshot.tracks||1)+' audio track'+((snapshot.tracks||1)===1?'':'s')}`};
+ model.savedCaptures.unshift(file);return file;
+}
+function captureFiles(kind){
+ const screenshots=kind==='screenshots';
+ const files=screenshots?[
+  {name:'Screenshot-2026-10-22-12-14.png',type:'Screenshot',date:'22 Oct 2026 · 12:14',duration:'',thumbnail:'sample-screenshot.svg',detail:'Main display · PNG'}
+ ]:[
+  {name:'Replay-2026-10-22-12-10.mp4',type:'Replay',date:'22 Oct 2026 · 12:10',duration:'5:00',thumbnail:'sample-replay.svg',detail:'Main display · H.264 · 2 audio tracks',missing:model.fileUnavailable},
+  {name:'Manual-2026-10-22-11-35.mp4',type:'Manual recording',date:'22 Oct 2026 · 11:35',duration:'18:12',thumbnail:'sample-manual.svg',detail:'Main display · H.264'}
+ ];
+ if(model.largeLibrary){
+  const count=screenshots?30:10;
+  for(let index=files.length;index<count;index++){
+   const minute=String(59-index).padStart(2,'0');
+   files.push({name:`${screenshots?'Screenshot':'Replay'}-2026-10-21-20-${minute}.${screenshots?'png':'mp4'}`,type:screenshots?'Screenshot':'Replay',date:`21 Oct 2026 · 20:${minute}`,duration:screenshots?'':'5:00',thumbnail:screenshots?'sample-screenshot.svg':index%2?'sample-manual.svg':'sample-replay.svg',detail:screenshots?'Main display · PNG':'Main display · H.264'});
+  }
+ }
+ if(!screenshots)files.push(...model.recoveredCaptures);
+ return [...model.savedCaptures.filter(file=>(file.type==='Screenshot')===screenshots),...files].filter(file=>!model.removedCaptures.includes(file.name));
+}
+function captureSelectionSummary(names=model.captureSelection){
+ const recordings=names.filter(name=>name.endsWith('.mp4')).length;
+ const screenshots=names.length-recordings;
+ return [recordings?`${recordings} recording${recordings===1?'':'s'}`:'',screenshots?`${screenshots} screenshot${screenshots===1?'':'s'}`:''].filter(Boolean).join(' and ');
+}
+function captures(){
+ const screenshots=captureTab==='screenshots';
+ const samples=captureFiles(captureTab);
+ const selected=model.captureSelection;
+ const allSelected=samples.length>0&&samples.every(file=>selected.includes(file.name));
+ return `<div class="captures-view"><div class="pagehead captures-heading"><div><h1>Captures</h1><p class="hint">Saved recordings and screenshots.</p></div>${model.recoveryItems.length?go('Recovery · '+model.recoveryItems.length,'recovery','button quiet small'):''}</div>
+ ${model.jobs.length?`<div class="capture-active-exports">${queue()}</div>`:''}
+ <div class="capture-tabs" role="tablist" aria-label="Saved capture type"><button type="button" id="recordings-tab" role="tab" aria-selected="${!screenshots}" tabindex="${screenshots?-1:0}" aria-controls="capture-panel" data-action="captures-recordings">Recordings</button><button type="button" id="screenshots-tab" role="tab" aria-selected="${screenshots}" tabindex="${screenshots?0:-1}" aria-controls="capture-panel" data-action="captures-screenshots">Screenshots</button></div>
+ <div class="capture-selection-toolbar"><span id="capture-selection-summary" role="status">${selected.length?`${selected.length} selected · ${captureSelectionSummary()}`:`${samples.length} ${captureTab}`}</span><div class="inline">${selected.length?btn('Clear selection','clear-capture-selection','small quiet'):''}<button type="button" class="small danger capture-remove-button" data-action="remove-captures" aria-label="Remove selected" title="Remove selected" ${selected.length?'':'disabled'}><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M9 3h6v2h5v2H4V5h5z"/><path fill-rule="evenodd" d="M6 9h12l-1 12H7L6 9Zm3 2v7h1v-7H9Zm5 0v7h1v-7h-1Z"/></svg></button></div></div>
+ <section id="capture-panel" role="tabpanel" aria-labelledby="${screenshots?'screenshots-tab':'recordings-tab'}"><div class="capture-table-wrap" data-capture-tab="${captureTab}" tabindex="0" role="region" aria-label="Saved ${captureTab}"><table class="table capture-table"><thead><tr><th scope="col"><label class="capture-select-heading"><input type="checkbox" id="capture-select-all" data-capture-select-all aria-label="Select all ${captureTab} in this tab" ${allSelected?'checked':''} ${samples.length?'':'disabled'}>${screenshots?'Screenshot':'Recording'}</label></th><th scope="col">Date / time</th>${screenshots?'':'<th scope="col">Duration</th>'}<th scope="col">Actions</th></tr></thead><tbody>${samples.map(file=>`<tr class="${selected.includes(file.name)?'capture-selected':''}"><td><div class="capture-file"><input type="checkbox" id="capture-select-${file.name}" data-capture-select="${file.name}" aria-label="Select ${file.name}" ${selected.includes(file.name)?'checked':''}><img class="capture-thumbnail" src="assets/${file.thumbnail}" alt="" width="88" height="50"><div><strong>${file.name}</strong><p class="hint">${file.type} · ${file.detail}</p>${file.missing?'<span class="file-unavailable">Saved · File unavailable</span>':''}</div></div></td><td class="capture-date">${file.date}</td>${screenshots?'':`<td>${file.duration}</td>`}<td><div class="capture-actions">${btn('Open file','open','small',Boolean(file.missing))}${btn('Open folder','folder','small')}${file.missing?btn('Recheck','recheck-file','small'):''}</div></td></tr>`).join('')}${samples.length?'':`<tr><td colspan="${screenshots?3:4}" class="empty">No ${captureTab} yet.</td></tr>`}</tbody></table></div></section>
+ ${model.jobs.length?'':queue()}<section class="section"><h3>Recent request results</h3><div class="list"><div class="listrow"><div><strong>Canceled · 12:09</strong><p>No file created.</p></div></div><div class="listrow"><div><strong>Failed · 12:08</strong><p>Output folder unavailable.</p></div>${go('Review save folder','storage?scenario='+route().scenario+'&focus=captures-folder','button small')}</div>${model.results.map(r=>`<div class="listrow"><div><strong>${esc(r)}</strong><p>Sample interaction in this review only.</p></div></div>`).join('')}</div></section></div>`;
+}
+function initialVideoProfile(){return {source:'Whole display',display:'Main display · primary (example)',window:'',minutes:5,mode:'Full replay each time',resolution:'Native',fps:'60',bitrate:'20',codec:'H.264'};}
+function videoKeys(profile){return Object.keys(profile).filter(key=>key!==(profile.source==='Whole display'?'window':'display'));}
+function videoDiff(a,b){return videoKeys(a).filter(key=>String(a[key])!==String(b[key]));}
+function videoNeedsRestart(profile){return videoDiff(profile,model.videoApplied).some(key=>['source','display','window','resolution','fps','bitrate','codec'].includes(key));}
+function commitVideoProfile(profile){
+ const restart=videoNeedsRestart(profile),wasPaused=model.replay==='paused';
+ model.videoApplied={...profile};model.videoDraft={...profile};model.videoPending=null;model.videoError='';
+ model.target=Number(profile.minutes)*60;model.available=Math.min(model.available,model.target);model.mode=profile.mode;
+ model.source=profile.source==='Whole display'?profile.display:profile.window;
+ if(restart){model.session='R'+nextSession++;model.available=0;model.newFootage=0;if(!wasPaused&&!model.disconnected&&!model.low&&model.replay!=='unavailable')model.replay='filling';}
+ return restart;
+}
+function video(){
+ const draft=model.videoDraft,base=model.videoPending||model.videoApplied,dirty=videoDiff(draft,base).length>0;
+ const restart=videoNeedsRestart(draft),busy=['recording','finalizing'].includes(model.manual);
+ const control=(key,items)=>`<select id="video-${key}" data-video="${key}">${items.map(([value,label,disabled])=>`<option value="${esc(value)}" ${String(draft[key])===String(value)?'selected':''} ${disabled?'disabled':''}>${esc(label)}</option>`).join('')}</select>`;
+ const fieldRow=(label,key,control,note='')=>row(`<label for="video-${key}">${label}</label>${String(draft[key])!==String(base[key])?'<span class="video-edited">Edited</span>':''}`,note,control);
+ const applied=model.videoApplied;
+ return `<div class="video-view">${head('Capture & Video','Settings for instant replay and manual recording.')}
+ <p class="video-applied"><span class="hint">Currently applied</span><br><strong>${esc(applied.source==='Whole display'?applied.display:applied.window||'Application window')} · ${applied.resolution} · ${applied.fps} FPS · ${applied.codec} · ${applied.bitrate} Mbps</strong></p>
+ ${model.videoPending?'<p class="video-pending" role="status">Changes saved. They will apply after manual recording finishes saving.</p>':''}
+ <h2 class="settings-group-title">Capture</h2>
+ ${fieldRow('Capture source','source',control('source',[['Whole display','Whole display'],['Selected application window','Application window']]))}
+ ${draft.source==='Whole display'?fieldRow('Display','display',`<div class="inline">${control('display',[['Main display · primary (example)','Main display (primary)'],['Second display (example)','Second display']])}${btn('Identify','identify','small')}</div>`):fieldRow('Application window','window',control('window',[['','Choose an application window…'],['Game window · example','Game window (example)']]))}
+ <h2 class="settings-group-title">Instant replay</h2>
+ ${fieldRow('Replay duration','minutes',`<div class="duration-inputs"><input type="range" min="1" max="30" step="1" value="${esc(draft.minutes)}" data-video="minutes" aria-label="Replay duration slider"><input id="video-minutes" type="number" min="1" max="30" step="1" required value="${esc(draft.minutes)}" data-video="minutes" aria-label="Replay duration in minutes"><span>min</span></div>`)}
+ ${fieldRow('Save mode','mode',control('mode',[['Full replay each time','Full replay each time'],['Only new footage','Only new footage']]))}
+ <h2 class="settings-group-title">Video</h2>
+ ${fieldRow('Output resolution','resolution',control('resolution',['Native','720p','1080p','1440p','2160p'].map(value=>[value,value])))}
+ ${fieldRow('Frame rate','fps',control('fps',['24','30','60','120'].map(value=>[value,value+' FPS'])))}
+ ${fieldRow('Bitrate','bitrate',`<div class="inline video-bitrate"><input id="video-bitrate" type="number" min="5" max="100" step="1" required value="${esc(draft.bitrate)}" data-video="bitrate"><span>Mbps</span></div>`)}
+ ${fieldRow('Codec','codec',control('codec',[['H.264','H.264'],['HEVC','HEVC'],['AV1','AV1 · Unavailable on this GPU',true]]))}
+ <div class="footer video-save-footer"><div><p class="field-error" role="alert" ${model.videoError?'':'hidden'}>${esc(model.videoError)}</p><p class="hint">${dirty?(restart?(busy?'Changes will apply after manual recording finishes saving. Replay will refill.':'Applying these changes restarts replay history. Accepted saves stay protected.'):'These changes apply without restarting capture.'):(model.videoPending?'Your saved changes are waiting for manual recording to finish.':'No unsaved changes.')}</p></div><div class="inline">${btn('Reset edits','reset-video','quiet',!dirty)}${btn('Apply changes','apply-video','primary',!dirty||model.disconnected)}</div></div></div>`;
+}
+function initialAudioProfile(){return {system:model.system==='Off'?'Off':model.system||'Headphones (example)',microphone:model.mic==='off'?'Off':'Microphone (example)',mode:'Open while enabled',tracks:String(model.tracks)};}
+function audioDirty(){return Object.keys(model.audioDraft).some(key=>model.audioDraft[key]!==((model.audioPending||model.audioApplied)[key]));}
+function commitAudioProfile(profile){
+ const previous=model.audioApplied;model.audioApplied={...profile};model.audioDraft={...profile};model.audioPending=null;model.audioError='';
+ model.system=profile.system;model.tracks=Number(profile.tracks);
+ if(profile.system!==previous.system)model.systemMissing=false;
+ if(profile.microphone==='Off')model.mic='off';
+ else if(model.micPermissionDenied)model.mic='missing';
+ else if(!model.micPermissionDenied&&(profile.microphone!==previous.microphone||previous.microphone==='Off'))model.mic='on';
+ model.audioTesting=false;model.holdPressed=false;
+}
+function audioMeter(kind){
+ const p=model.audioApplied,volume=model.audioLevels[kind];
+ const blocked=kind==='system'?(p.system==='Off'?'Off':model.systemMissing?'Device unavailable':''):(p.microphone==='Off'?'Off':model.mic==='missing'?'Device unavailable':model.mic==='muted'?'Muted':p.mode==='Hold to talk'&&!model.holdPressed?'Waiting for hold-to-talk key':'');
+ const level=blocked?0:Math.round((kind==='system'?56:38)*volume/100);
+ return audioLevel(kind==='system'?'System audio level':'Microphone level',level,blocked||(!volume?'Volume 0 percent':'Sample level'));
+}
+function refreshAudioLevels(){
+ const overlayMic=q('overlay-microphone-note');if(overlayMic&&model.audioApplied.mode==='Hold to talk'&&model.mic==='on')overlayMic.textContent=model.holdPressed?'Microphone live':'Hold '+(model.controlsApplied.shortcuts.hold||'unassigned shortcut')+' to talk';
+ for(const kind of ['system','microphone']){const meter=q('audio-'+kind+'-meter'),value=q('audio-'+kind+'-volume-value');if(meter)meter.innerHTML=audioMeter(kind);if(value)value.textContent=model.audioLevels[kind]+'%';const overlayValue=q('overlay-'+kind+'-volume-value');if(overlayValue)overlayValue.textContent=model.audioLevels[kind]+'%';}
+}
+function audio(){
+ const draft=model.audioDraft,base=model.audioPending||model.audioApplied,dirty=audioDirty();
+ const selected=(key,options)=>`<select id="audio-${key}" data-audio="${key}">${options.map(([value,label])=>`<option value="${esc(value)}" ${draft[key]===value?'selected':''}>${esc(label)}</option>`).join('')}</select>`;
+ const changed=key=>draft[key]!==base[key]?'<span class="video-edited">Edited</span>':'';
+ const volume=kind=>`<div class="audio-volume"><label for="audio-${kind}-volume">Volume</label><input id="audio-${kind}-volume" type="range" min="0" max="100" step="1" value="${model.audioLevels[kind]}" data-audio-level="${kind}" aria-label="${kind==='system'?'System audio volume':'Microphone volume'}"><output id="audio-${kind}-volume-value" for="audio-${kind}-volume">${model.audioLevels[kind]}%</output></div>`;
+ const pendingDevice=key=>draft[key]!==model.audioApplied[key]?'<p class="audio-device-hint">Meter shows the current device until Apply.</p>':'';
+ const micBlocked=model.audioApplied.microphone==='Off'||model.mic==='missing'||model.disconnected;
+ return `<div class="audio-view">${head('Audio','Settings for instant replay and manual recording.')}
+ ${model.audioPending?'<p class="video-pending" role="status">Changes saved. They will apply after manual recording finishes saving.</p>':''}
+ <section class="audio-group" aria-labelledby="audio-system-title"><h2 id="audio-system-title">System audio</h2><label class="field-label" for="audio-system">Device${changed('system')}</label>
+ ${selected('system',[['Off','Off'],['Headphones (example)',model.systemMissing?'Headphones (unavailable)':'Headphones (example)'],['Speakers (example)','Speakers (example)']])}
+ <div id="audio-system-meter" class="audio-meter-line">${audioMeter('system')}</div>${pendingDevice('system')}${volume('system')}</section>
+ <section class="audio-group" aria-labelledby="audio-microphone-title"><h2 id="audio-microphone-title">Microphone</h2><label class="field-label" for="audio-microphone">Device${changed('microphone')}</label>
+ ${selected('microphone',[['Off','Off'],['Microphone (example)',model.mic==='missing'?'Microphone (unavailable)':'Microphone (example)'],['USB microphone (example)','USB microphone (example)']])}
+ <div class="audio-microphone-live">${microphoneButton(model.mic,'mic',micBlocked)}<div id="audio-microphone-meter">${audioMeter('microphone')}</div>${btn(model.audioTesting?'Stop test':'Test microphone','audio-test','small quiet',micBlocked||model.mic==='muted')}</div>
+ ${pendingDevice('microphone')}${volume('microphone')}
+ <label class="field-label" for="audio-mode">Mode${changed('mode')}</label>${selected('mode',[['Open while enabled','Open while enabled'],['Hold to talk','Hold to talk']])}
+ ${draft.mode==='Hold to talk'?`<p class="audio-mode-hint">${model.controlsApplied.shortcuts.hold?go('Shortcut: '+esc(model.controlsApplied.shortcuts.hold),'controls','audio-control-link'):go('Assign a hold-to-talk shortcut','controls','audio-control-link')}${model.controlsApplied.shortcuts.hold?'':'<span class="hint"> · Unassigned</span>'}</p>`:''}</section>
+ <section class="audio-group" aria-labelledby="audio-tracks-title"><h2 id="audio-tracks-title">Audio tracks${changed('tracks')}</h2><label class="sr-only" for="audio-tracks">Saved audio tracks</label>${selected('tracks',[['1','One mixed track'],['2','Two separate tracks']])}${draft.tracks==='2'?'<p class="audio-device-hint">Track 1: System audio · Track 2: Microphone</p>':''}</section>
+ <div class="footer audio-save-footer"><div><p class="field-error" role="alert" ${model.audioError?'':'hidden'}>${esc(model.audioError)}</p><p class="hint">${dirty?(draft.tracks!==model.audioApplied.tracks&&['recording','finalizing'].includes(model.manual)?'Track changes will apply after manual recording finishes saving.':'Mute and volume apply immediately.'):(model.audioPending?'Saved changes are waiting for manual recording to finish.':'No unsaved changes.')}</p></div><div class="inline">${btn('Reset edits','reset-audio','quiet',!dirty)}${btn('Apply changes','apply-audio','primary',!dirty||model.disconnected)}</div></div></div>`;
+}
+const shortcutDefinitions=[['save','Save replay','F10'],['overlay','Open / close overlay','Alt+Z'],['screenshot','Screenshot','Alt+F1'],['manual','Start / stop manual recording','Alt+F9'],['mic','Microphone mute','Alt+F2'],['hold','Hold to talk','']];
+function initialControlsProfile(){return {shortcuts:Object.fromEntries(shortcutDefinitions.map(([key,,value])=>[key,value])),startup:true,overlaySide:'left',indicator:true,indicatorSize:100,indicatorSticky:false,indicatorFps:false,indicatorReplay:true,indicatorManual:true,indicatorMic:true,position:'Top right',saveNotices:true,problemNotices:true};}
+function copyControls(profile){return {...profile,shortcuts:{...profile.shortcuts}};}
+function controlsDirty(){return JSON.stringify(model.controlsDraft)!==JSON.stringify(model.controlsApplied);}
+function shortcutErrors(){
+ const errors={},shortcuts=model.controlsDraft.shortcuts;
+ for(const [key,label] of shortcutDefinitions){const value=shortcuts[key];if(!value)continue;
+  const duplicate=shortcutDefinitions.find(([other])=>other!==key&&shortcuts[other]===value);
+  if(duplicate&&value!==model.controlsApplied.shortcuts[key])errors[key]=`${value} is already used by ${duplicate[1]}.`;
+  if(['Alt+F4','Ctrl+Alt+Delete','Win+L'].includes(value))errors[key]='This combination is reserved by Windows. Choose another shortcut.';
+ }
+ if(!shortcuts.hold&&model.audioApplied.mode==='Hold to talk')errors.hold='Choose Open while enabled in Audio before clearing this shortcut.';
+ return errors;
+}
+function eventShortcut(event){
+ if(['Control','Alt','Shift','Meta'].includes(event.key))return '';
+ const key=event.key===' '?'Space':event.key.length===1?event.key.toUpperCase():event.key;
+ return [event.ctrlKey?'Ctrl':'',event.altKey?'Alt':'',event.shiftKey?'Shift':'',event.metaKey?'Win':'',key].filter(Boolean).join('+');
+}
+function captureShortcut(event){
+ if(!model?.editingShortcut)return false;
+ event.preventDefault();event.stopImmediatePropagation();
+ const key=model.editingShortcut;
+ if(event.key==='Escape'){model.editingShortcut=null;render();q('shortcut-'+key)?.focus({preventScroll:true});return true;}
+ if(event.repeat)return true;
+ const combination=eventShortcut(event);if(!combination)return true;
+ model.controlsDraft.shortcuts[key]=combination;model.editingShortcut=null;render();q('shortcut-'+key)?.focus({preventScroll:true});return true;
+}
+function controls(){
+ const draft=model.controlsDraft,errors=shortcutErrors(),dirty=controlsDirty();
+ const toggle=(key,label)=>`<div class="control-toggle-row"><label for="control-${key}">${label}</label><input id="control-${key}" class="control-toggle" type="checkbox" role="switch" data-control="${key}" ${draft[key]?'checked':''}></div>`;
+ return `<div class="controls-view">${head('Controls','Shortcuts and app preferences.')}
+ <h2 class="settings-group-title">Shortcuts</h2><div class="shortcut-list">${shortcutDefinitions.map(([key,label,defaultValue])=>`<div class="shortcut-row"><div><label id="shortcut-label-${key}" for="shortcut-${key}">${label}</label>${draft.shortcuts[key]!==model.controlsApplied.shortcuts[key]?'<span class="video-edited">Edited</span>':''}</div><div class="shortcut-edit-actions"><button type="button" id="shortcut-${key}" class="shortcut-capture ${model.editingShortcut===key?'listening':''}" data-action="edit-shortcut-${key}" aria-label="Change ${label} shortcut" aria-describedby="shortcut-error-${key}" aria-invalid="${Boolean(errors[key])}">${model.editingShortcut===key?'Press shortcut…':`<kbd>${esc(draft.shortcuts[key]||'Unassigned')}</kbd>`}</button>${btn('Reset','reset-shortcut-'+key,'small quiet',draft.shortcuts[key]===defaultValue)}</div><p id="shortcut-error-${key}" class="field-error shortcut-error" role="alert" ${errors[key]?'':'hidden'}>${esc(errors[key]||'')}</p></div>`).join('')}</div>
+ ${model.editingShortcut?'<p class="hint shortcut-listen-hint">Press a key combination. Escape cancels.</p>':''}
+ <h2 class="settings-group-title">Startup</h2>${toggle('startup','Start F10 with Windows')}
+ <h2 class="settings-group-title">Overlay</h2><label class="field-label" for="control-overlaySide">Open overlay from</label><select id="control-overlaySide" data-control="overlaySide"><option value="left" ${draft.overlaySide==='left'?'selected':''}>Left</option><option value="right" ${draft.overlaySide==='right'?'selected':''}>Right</option></select>
+ <h2 class="settings-group-title">Recording indicator</h2>${toggle('indicator','Show recording indicator')}
+ ${draft.indicator?`<div class="indicator-controls"><label for="control-position">Position</label><select id="control-position" data-control="position">${['Top right','Top left','Bottom right','Bottom left'].map(corner=>`<option ${corner===draft.position?'selected':''}>${corner}</option>`).join('')}</select>${btn(model.indicatorPreview?'Hide preview':'Preview','preview-indicator','small quiet')}</div><div class="indicator-size-row"><label for="control-indicatorSize">Size</label><input id="control-indicatorSize" type="range" min="75" max="150" step="5" value="${draft.indicatorSize}" data-control="indicatorSize" aria-label="Indicator size"><output id="indicator-size-value" for="control-indicatorSize">${draft.indicatorSize}%</output></div>${toggle('indicatorReplay','Show instant replay status')}${toggle('indicatorManual','Show manual recording status')}${toggle('indicatorMic','Show microphone status')}${toggle('indicatorFps','Show application FPS')}${!indicatorHasContent(draft)?'<p class="hint">Select content to show the indicator.</p>':''}${toggle('indicatorSticky','Sticky indicator')}<p class="hint">Keep visible outside games and full-screen apps.</p>${model.indicatorPreview?`<div class="indicator-preview" role="group" aria-label="Recording indicator position preview">${['Top left','Top right','Bottom left','Bottom right'].map(corner=>`<button type="button" class="preview-corner" style="--hud-scale:${draft.indicatorSize/100}" data-corner="${corner.toLowerCase().replace(' ','-')}" data-action="place-indicator-${corner.toLowerCase().replace(' ','-')}" aria-label="Place indicator at ${corner.toLowerCase()}" title="${draft.position===corner?'Drag to move; release to snap to the nearest corner':corner}" aria-pressed="${draft.position===corner}">${draft.position===corner&&indicatorHasContent(draft)?`${indicatorStrip(draft)}`:`<span class="corner-bracket" aria-hidden="true"></span><span>${corner}</span>`}</button>`).join('')}</div>`:''}`:''}
+ <h2 class="settings-group-title">Notifications</h2>${toggle('saveNotices','Save notifications')}${toggle('problemNotices','Problem notifications')}
+ <p class="hint controls-notice-hint">Problems stay visible in Overview and settings.</p>
+ <div class="footer controls-save-footer"><p class="hint">${Object.keys(errors).length?'Resolve the shortcut conflict before applying.':dirty?'Changes apply without restarting replay.':'No unsaved changes.'}</p><div class="inline">${btn('Reset edits','reset-controls','quiet',!dirty&&!model.editingShortcut)}${btn('Apply changes','apply-controls','primary',!dirty||Object.keys(errors).length>0||Boolean(model.editingShortcut))}</div></div></div>`;
+}
+function noticeAllowed(item){const settings=model?.controlsApplied;if(!settings)return true;return item.category==='save'?settings.saveNotices:((item.category==='problem'||['problem','warning'].includes(item.tone))?settings.problemNotices:true);}
+let reviewFolderTarget='setup';
+function initialStorageProfile(){return {recordings:'Videos / F10',screenshots:'Pictures / F10',cache:'Local app data / F10 / replay-cache',budget:'10'};}
+function storageBase(){return {...model.storageApplied,...(model.storagePending||{})};}
+function storageDirty(){const base=storageBase();return Object.keys(base).some(key=>String(base[key])!==String(model.storageDraft[key]));}
+function storageSaveHint(){return storageDirty()?(model.storageDraft.cache!==storageBase().cache?'Changing the cache folder refills replay history once recording and exports finish.':'New requests use the updated folders. Existing files stay where they are.'):(model.storagePending?'Saved cache changes are waiting for ongoing work.':'No unsaved changes.');}
+function refreshStorageEdits(){
+ const base=storageBase(),dirty=storageDirty();
+ document.querySelectorAll('[data-storage]').forEach(input=>{const key=input.dataset.storage,marker=q('storage-edited-'+key),error=q('storage-error-'+key);if(marker)marker.hidden=String(model.storageDraft[key])===String(base[key]);input.setAttribute('aria-invalid',Boolean(model.storageErrors[key]));if(error){error.hidden=!model.storageErrors[key];error.textContent=model.storageErrors[key]||'';}});
+ for(const action of ['apply-storage','reset-storage']){const button=document.querySelector('[data-action="'+action+'"]');if(button)button.disabled=!dirty;}
+ if(q('storage-save-hint'))q('storage-save-hint').textContent=storageSaveHint();
+}
+function storageEstimate(){return Math.max(model.storageCacheUsed,Math.round((model.target*Number(model.videoApplied.bitrate)/8000+.2)*100)/100);}
+function storageSize(number){return Number(number.toFixed(2))+' GB';}
+function applyCacheLocation(cache,budget){
+ model.storageApplied.cache=cache;model.storageApplied.budget=String(budget);model.storageCacheUsed=0;
+ model.available=0;model.newFootage=0;model.session='R'+nextSession++;
+ if(['ready','filling'].includes(model.replay)&&!model.disconnected&&!model.low)model.replay='filling';
+}
+function maybeApplyStoragePending(){
+ if(!model?.storagePending||['recording','finalizing'].includes(model.manual)||model.jobs.length)return;
+ const keepDraft=storageDirty(),pending=model.storagePending;
+ applyCacheLocation(pending.cache,pending.budget);model.storagePending=null;
+ if(!keepDraft)model.storageDraft={...model.storageApplied};
+ notice(model.replay==='paused'?'Cache location updated. Replay remains paused.':model.replay==='filling'?'Cache location updated. Replay history is refilling.':'Cache location updated. Capture remains stopped.',{title:'Storage changes applied'});
+}
+function openReviewFolderPicker(target){
+ reviewFolderTarget=target;
+ const labels={setup:'save folder',recordings:'recordings folder',screenshots:'screenshots folder',cache:'replay cache folder'};
+ const choices=target==='cache'?['Local app data / F10 / replay-cache','D:/F10 Cache','E:/F10 Cache']:target==='screenshots'?['Pictures / F10','D:/Screenshots','E:/Screenshots']:['Videos / F10','D:/Clips','Videos / Gameplay'];
+ const current=target==='setup'?setupDraft.folder:model.storageDraft[target];
+ if(current.trim()&&!choices.includes(current))choices.unshift(current);
+ q('folder-picker-title').textContent='Select '+labels[target];q('folder-choice').innerHTML=choices.map(path=>`<option>${esc(path)}</option>`).join('');q('folder-choice').value=current.trim()||choices[0];q('folder-picker').showModal();
+}
+function storage(){
+ const draft=model.storageDraft,base=storageBase(),estimate=storageEstimate(),dirty=storageDirty();
+ const directory=(key,label)=>{const id=key==='recordings'?'captures-folder-setting':'storage-'+key;return `<div class="storage-directory"><label class="field-label" for="${id}">${label}<span id="storage-edited-${key}" class="video-edited" ${draft[key]===base[key]?'hidden':''}>Edited</span></label><div class="folder-control"><input id="${id}" data-storage="${key}" aria-label="${label}" aria-invalid="${Boolean(model.storageErrors[key])}" aria-describedby="storage-error-${key}" value="${esc(draft[key])}"><button type="button" class="folder-button" data-action="browse-storage-${key}" aria-label="Choose ${label.toLowerCase()}" title="Choose ${label.toLowerCase()}">${solidIcons['folder-open-fill']}</button></div><p id="storage-error-${key}" class="field-error" role="alert" ${model.storageErrors[key]?'':'hidden'}>${esc(model.storageErrors[key]||'')}</p></div>`;};
+ return `<div class="storage-view">${head('Storage','Folders and replay cache.')}
+ <h2 class="settings-group-title">Saved files</h2>${directory('recordings','Recordings folder')}${directory('screenshots','Screenshots folder')}
+ <h2 class="settings-group-title">Temporary replay</h2>${directory('cache','Replay cache folder')}
+ ${model.storagePending?'<p class="storage-pending" role="status">Cache change saved. Waiting for manual recording and accepted exports to finish.</p>':''}
+ <div class="storage-budget-row"><label for="storage-budget">Cache limit<span id="storage-edited-budget" class="video-edited" ${String(draft.budget)===String(base.budget)?'hidden':''}>Edited</span></label><div class="inline"><input id="storage-budget" data-storage="budget" type="number" min="0.01" step="0.01" required aria-invalid="${Boolean(model.storageErrors.budget)}" aria-describedby="storage-error-budget" value="${esc(draft.budget)}"><span>GB</span></div></div>
+ <p id="storage-error-budget" class="field-error" role="alert" ${model.storageErrors.budget?'':'hidden'}>${esc(model.storageErrors.budget||'')}</p>
+ <div class="storage-cache-usage"><div class="storage-usage-label"><span>Replay cache used</span><strong>${storageSize(model.storageCacheUsed)} / ${storageSize(Number(model.storageApplied.budget))}</strong></div><div class="storage-usage-bar"><span style="width:${Math.min(100,model.storageCacheUsed/Number(model.storageApplied.budget)*100)}%"></span></div><p class="hint">Estimated requirement: ${storageSize(estimate)} · ${go('Video settings','video','storage-settings-link')}</p></div>
+ <div class="footer storage-save-footer"><p id="storage-save-hint" class="hint">${storageSaveHint()}</p><div class="inline">${btn('Reset edits','reset-storage','quiet',!dirty)}${btn('Apply changes','apply-storage','primary',!dirty)}</div></div></div>`;
+}
+function diagnosticStates(){
+ const unknown=model.disconnected,profile=model.videoApplied;
+ const playback=model.audioApplied.system==='Off'?'Off':model.systemMissing?'Unavailable':model.audioLevels.system===0?'Volume 0%':'Enabled';
+ const microphone=model.audioApplied.microphone==='Off'?'Off':model.micPermissionDenied?'Access denied':model.mic==='missing'?'Unavailable':model.mic==='muted'?'Muted':model.audioLevels.microphone===0?'Volume 0%':model.audioApplied.mode==='Hold to talk'?'Hold to talk':'Enabled';
+ return [
+  ['Recording service',unknown?'Disconnected':'Connected',unknown?'Recording status is unknown.':''],
+  ['Capture source',unknown?'Unknown':model.replay==='unavailable'?'Unavailable':'Available',unknown?'Last known: '+model.source:model.source],
+  ['Instant replay',unknown?'Unknown':model.replay==='paused'?'Paused':model.replay==='unavailable'?'Source unavailable':model.replay==='stopped'?'Stopped':model.replay==='filling'?'Filling':'Ready',unknown?'':duration(model.available)+' of '+duration(model.target)+' retained'],
+  ['Manual recording',unknown?'Unknown':({recording:'Recording',finalizing:'Finalizing',stopped:'Stopped'}[model.manual]||'Unknown'),model.manual==='recording'&&!unknown?model.elapsed:''],
+  ['Audio',unknown?'Unknown':'System audio: '+playback+' · Microphone: '+microphone,unknown?'Last-known selections are available in Audio.':model.tracks===1?'One mixed track':'Two separate tracks']
+ ];
+}
+function diagnosticProblems(){return currentProblems(true).filter(item=>['problem','warning'].includes(item.tone));}
+function recordDiagnosticEvents(){
+ for(const item of diagnosticProblems())if(!model.diagnosticSeen.includes(item.id)){model.diagnosticSeen.push(item.id);model.diagnosticHistory.push({code:item.id.split('-').slice(2).join('-'),message:item.title});}
+}
+function restartBlocker(){
+ if(model.disconnected)return 'Reconnect to check recording status.';
+ if(['recording','finalizing'].includes(model.manual))return model.manual==='recording'?'Stop manual recording and wait for it to finish saving.':'Wait for manual recording to finish saving.';
+ if(model.jobs.length)return 'Wait for accepted replay exports to finish.';
+ if(model.low)return 'Free up space or choose another save folder first.';
+ if(model.replay==='unavailable')return 'Restore the selected capture source or choose another source first.';
+ return '';
+}
+function createDiagnosticReport(){
+ const p=model.videoApplied;
+ return [
+  'F10 diagnostic report (review sample)',
+  'Snapshot: '+new Date().toISOString(),
+  'Application/build: F10 / example build',
+  'OS: Windows (example; not inspected)',
+  'GPU: NVIDIA (example; not inspected)',
+  'Driver: Not inspected in the review board',
+  '',...diagnosticStates().map(([name,value])=>name+': '+value),
+  '',(model.disconnected?'Last-known recording profile':'Applied recording profile')+':',
+  'Source type: '+(model.source.startsWith('Selected application window')?'Application window':p.source),
+  'Video: '+p.resolution+' / '+p.fps+' FPS / '+p.codec+' / '+p.bitrate+' Mbps',
+  'Replay duration: '+model.target/60+' min / '+model.mode,
+  'Audio tracks: '+model.tracks,
+  'Pending settings: '+([model.videoPending?'Video':null,model.audioPending?'Audio':null,model.storagePending?'Storage':null].filter(Boolean).join(', ')||'None'),
+  '', 'Current problems:',...(diagnosticProblems().length?diagnosticProblems().map(item=>item.title+': '+item.message):['None']),
+  '', 'Recent relevant events:',...(model.diagnosticHistory.length?model.diagnosticHistory.slice(-8).map(item=>item.code+': '+item.message):['None']),
+  '', 'Paths: [redacted]', 'Filenames: omitted', 'Device identifiers: [redacted]', 'Media: not included', 'Uploads: none'
+ ].join('\n');
+}
+function diagnostics(){
+ const problems=diagnosticProblems(),blocker=restartBlocker();
+ const actionLink=item=>item.id.endsWith('-worker')?btn('Reconnect','diagnostics-reconnect','small'):item.id.endsWith('-source')?go('Review source','video','button small'):item.id.endsWith('-storage')||item.id.endsWith('-output-folder')?go('Review save folder','storage?scenario='+route().scenario+'&focus=captures-folder','button small'):go('Open Audio','audio','button small');
+ return `<div class="diagnostics-view">${head('Diagnostics','Recording status and local reports.')}
+ <h2 class="settings-group-title">Recording status</h2><dl class="diagnostic-status">${diagnosticStates().map(([name,value,note])=>`<div><dt>${name}</dt><dd><strong>${esc(value)}</strong>${note?'<span class="hint">'+esc(note)+'</span>':''}</dd></div>`).join('')}</dl>
+ <section class="diagnostic-section" aria-labelledby="diagnostic-problems-title"><h2 id="diagnostic-problems-title">Current problems</h2>${problems.length?`<div class="list">${problems.map(item=>`<div class="listrow"><div><strong>${esc(item.title)}</strong><p>${esc(item.message)}</p></div>${actionLink(item)}</div>`).join('')}</div>`:'<p class="hint">No current problems.</p>'}
+ <details id="diagnostic-history"><summary>Recent events</summary>${model.diagnosticHistory.length?`<ul>${model.diagnosticHistory.slice(-8).map(item=>'<li><code>'+esc(item.code)+'</code> · '+esc(item.message)+'</li>').join('')}</ul>`:'<p class="hint">No recent problems or troubleshooting actions.</p>'}</details></section>
+ <section class="diagnostic-section" aria-labelledby="diagnostic-recovery-title"><h2 id="diagnostic-recovery-title">Troubleshooting</h2><div class="diagnostic-action-row"><div><p>Restart clears unsaved replay history.</p><p id="diagnostic-restart-hint" class="hint">${esc(blocker||'Saved clips stay in place. Replay will refill unless paused.')}</p></div>${model.disconnected?btn('Reconnect','diagnostics-reconnect','small'):btn('Restart replay buffer','restart','small',Boolean(blocker))}</div></section>
+ <section class="diagnostic-section" aria-labelledby="diagnostic-report-title"><h2 id="diagnostic-report-title">Diagnostic report</h2><p class="hint">Preview a redacted report before saving it locally.</p><div class="actions">${btn(model.diagnosticReport?'Hide preview':'Preview report','preview','quiet')}${model.diagnosticReport?btn('Refresh report','refresh-report','quiet'):''}</div>
+ ${model.diagnosticReport?`<p class="hint">Snapshot of the sample state. Refresh to include later changes.</p><pre id="diagnostic-report-preview" class="metadata" tabindex="0">${esc(model.diagnosticReport)}</pre><div class="actions">${btn('Export report','export-report','primary')}</div><p class="hint">This review downloads the sample text above. Nothing is uploaded.</p>`:''}</section></div>`;
+}
+function diagnosticAction(name){
+ if(name==='diagnostics-reconnect'){model.diagnosticHistory.push({code:'reconnect',message:'Sample reconnect attempted; connection remains unavailable.'});render();notice('The sample service is still unavailable. Recording status remains unknown.',{title:'Unable to reconnect',tone:'problem'});return true;}
+ if(name==='preview'||name==='refresh-report'){model.diagnosticReport=name==='preview'&&model.diagnosticReport?null:createDiagnosticReport();render();return true;}
+ if(name==='restart'){if(restartBlocker())return true;q('restart-replay-dialog').showModal();return true;}
+ if(name==='cancel-replay-restart'){q('restart-replay-dialog').close();document.querySelector('[data-action="restart"]')?.focus();return true;}
+ if(name==='confirm-replay-restart'){
+  q('restart-replay-dialog').close();if(restartBlocker())return true;
+  const paused=model.replay==='paused';model.session='R'+nextSession++;model.available=0;model.newFootage=0;model.storageCacheUsed=0;model.replay=paused?'paused':'filling';model.banner='';
+  model.diagnosticHistory.push({code:'replay-restart',message:paused?'Replay history cleared; replay remains paused.':'Replay history cleared; replay is refilling.'});render();document.querySelector('[data-action="restart"]')?.focus();notice(paused?'Replay history was cleared. Replay remains paused.':'Replay history was cleared and is refilling.',{title:'Replay restarted',tone:'success'});return true;
+ }
+ if(name==='export-report'){
+  if(!model.diagnosticReport)return true;
+  if(q('report-export-outcome').value==='failure'){model.diagnosticHistory.push({code:'report-export-failed',message:'Sample report could not be saved.'});notice('The sample report could not be saved. The preview is kept so you can try again.',{title:'Report export failed',tone:'problem'});return true;}
+  try{const url=URL.createObjectURL(new Blob([model.diagnosticReport],{type:'text/plain;charset=utf-8'})),link=document.createElement('a');link.href=url;link.download='f10-diagnostics-review-sample.txt';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);notice('Sample report download started. Nothing was uploaded.',{title:'Report export started',tone:'success'});}catch{notice('The report could not be exported. Your preview is kept.',{title:'Report export failed',tone:'problem'});}
+  return true;
+ }
+ return false;
+}
+
+function setup(){
+ const options=(items,current)=>items.map(([value,label])=>`<option value="${esc(value)}" ${value===current?'selected':''}>${esc(label)}</option>`).join('');
+ const device=(id,name,items,current,after='')=>`<div class="field"><label class="field-label" for="setup-${id}">${name}</label><select id="setup-${id}" data-setup="${id}">${options(items,current)}</select>${after}</div>`;
+ const mic=setupDraft.microphone==='unavailable'?'missing':setupDraft.microphone==='off'?'off':setupDraft.micState;
+ return `<div class="standalone"><div class="setup-heading"><img class="approved-logo" src="assets/f10-logo.png" alt="F10" width="36" height="36"><h1>Initial F10 setup</h1></div><div class="setup-grid">
+ ${device('source','Capture source',[['display','Whole display'],['window','Application window']],setupDraft.source,`<p class="field-hint">${setupDraft.source==='display'?'Records everything visible on this display.':'Records only this window.'}</p>`)}
+ ${setupDraft.source==='display'?device('display','Display',[['Main display (primary)','Main display (primary)'],['Second display (example)','Second display (example)']],setupDraft.display):device('window','Application window',[['Game window (example)','Game window (example)']],setupDraft.window)}
+ <div class="field"><label class="field-label" for="setup-duration-number">Replay duration</label>${durationControl('setup')}${setupErrorMarkup('duration')}</div>
+ <div class="field"><label class="field-label" for="setup-folder">Save folder</label><div class="folder-control"><input id="setup-folder" data-setup="folder" required aria-describedby="setup-folder-error" aria-invalid="${Boolean(setupErrors.folder)}" value="${esc(setupDraft.folder)}"><button type="button" class="folder-button" data-action="browse-folder" aria-label="Choose save folder" title="Choose save folder"><svg width="20" height="20" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="currentColor"><path d="M245,110.64A16,16,0,0,0,232,104H216V88a16,16,0,0,0-16-16H130.67L102.94,51.2a16.14,16.14,0,0,0-9.6-3.2H40A16,16,0,0,0,24,64V208h0a8,8,0,0,0,8,8H211.1a8,8,0,0,0,7.59-5.47l28.49-85.47A16.05,16.05,0,0,0,245,110.64ZM93.34,64,123.2,86.4A8,8,0,0,0,128,88h72v16H69.77a16,16,0,0,0-15.18,10.94L40,158.7V64Z"/></svg></button></div>${setupErrorMarkup('folder')}</div>
+<div class="full"><p class="hint storage-estimate">Estimated replay: <span data-replay-estimate>${(replayMinutes*.152).toFixed(2)}</span> GB · Cache budget: 10 GB</p></div>
+ ${device('system','System audio device',[['Headphones (example)','Headphones (example)'],['Speakers (example)','Speakers (example)'],['off','Off'],['unavailable','No device available']],setupDraft.system,`<div class="system-level">${audioLevel('System audio level',['unavailable','off'].includes(setupDraft.system)?0:42,setupDraft.system==='unavailable'?'Unavailable':setupDraft.system==='off'?'Off':'Sample level')}</div>`)}
+ <div class="field"><label class="field-label" for="setup-microphone">Microphone device</label><select id="setup-microphone" data-setup="microphone">${options([['Microphone (example)','Microphone (example)'],['off','Off'],['unavailable','No microphone available']],setupDraft.microphone)}</select><div class="inline mic-under-device">${microphoneButton(mic,'setup-mic',mic==='missing')}${audioLevel('Microphone level',mic==='on'?28:0,mic==='missing'?'Unavailable':mic==='off'?'Off':mic==='muted'?'Muted':'Sample level')}</div></div>
+ ${device('tracks','Audio tracks',[['One mixed track','One mixed track'],['Two tracks: System audio / Microphone','Two tracks: System audio / Microphone']],setupDraft.tracks,setupDraft.tracks==='One mixed track'?'':'<p class="field-hint">Separate system audio and microphone tracks for editing.</p>')}
+ <div class="field"><span class="field-label">Video Default Settings</span><p class="hint">Native · 60 FPS · H.264 · 20 Mbps</p></div>
+ <div class="full"><label class="checkbox"><input type="checkbox" data-setup="startup" ${setupDraft.startup?'checked':''}>Start F10 with Windows</label></div>
+ </div><div class="footer setup-footer">${btn('Finish','activate','primary')}</div></div>`;
+}
+function overlayFiles(kind='all'){
+ const files=[...(kind==='screenshots'?[]:captureFiles('recordings')),...(kind==='recordings'?[]:captureFiles('screenshots'))];
+ return files.sort((a,b)=>(b.name.match(/\d{4}-\d{2}-\d{2}-\d{2}-\d{2}/)?.[0]||'').localeCompare(a.name.match(/\d{4}-\d{2}-\d{2}-\d{2}-\d{2}/)?.[0]||''));
+}
+function overlayThumbnail(file){return `<button type="button" class="overlay-thumbnail ${model.overlaySelected===file.name?'selected':''}" data-action="overlay-preview-${encodeURIComponent(file.name)}" aria-label="Preview ${esc(file.name)}" title="${esc(file.name)}"><img src="assets/${file.thumbnail}" alt=""><span>${file.duration||'PNG'}</span></button>`;}
+function overlaySettings(){
+ const volume=(key,label)=>`<label class="overlay-field" for="overlay-${key}-volume">${label}<div class="inline"><input id="overlay-${key}-volume" type="range" min="0" max="100" data-audio-level="${key}" ${model.disconnected?'disabled':''} value="${model.audioLevels[key]}"><output id="overlay-${key}-volume-value">${model.audioLevels[key]}%</output></div></label>`;
+ return `<div class="overlay-subheading">${btn('‹ Back','overlay-home','quiet small')}<h2>Overlay settings</h2></div><p class="hint">Changes apply immediately.</p><label class="overlay-field" for="overlay-side">Open overlay from</label><select id="overlay-side" data-overlay-setting="side"><option value="left" ${model.controlsApplied.overlaySide==='left'?'selected':''}>Left</option><option value="right" ${model.controlsApplied.overlaySide==='right'?'selected':''}>Right</option></select>
+ <label class="overlay-field" for="overlay-save-mode">Replay save mode</label><select id="overlay-save-mode" data-overlay-setting="saveMode" ${model.disconnected?'disabled':''}>${['Full replay each time','Only new footage'].map(mode=>`<option ${model.mode===mode?'selected':''}>${mode}</option>`).join('')}</select>
+ ${volume('system','System audio volume')}${volume('microphone','Microphone volume')}
+ <div class="control-toggle-row"><label for="overlay-save-notices">Save notifications</label><input id="overlay-save-notices" type="checkbox" class="control-toggle" role="switch" data-overlay-setting="saveNotices" ${model.controlsApplied.saveNotices?'checked':''}></div>
+ <div class="control-toggle-row"><label for="overlay-problem-notices">Problem notifications</label><input id="overlay-problem-notices" type="checkbox" class="control-toggle" role="switch" data-overlay-setting="problemNotices" ${model.controlsApplied.problemNotices?'checked':''}></div>
+ <p class="hint">Source, devices and video settings are in the desktop app.</p><div class="actions">${go('Open desktop settings','video','button quiet small')}</div>`;
+}
+function overlayViewer(){
+ const file=overlayFiles().find(item=>item.name===model.overlaySelected);if(!file)return '';
+ const screenshot=file.type==='Screenshot';
+ return `<section class="overlay-viewer" aria-label="Capture preview"><div class="overlay-viewer-heading"><div><h2>${screenshot?'Screenshot':'Recording'}</h2><p>${esc(file.name)}</p></div><button type="button" class="overlay-icon-button" data-action="overlay-close-preview" aria-label="Close capture preview" title="Close capture preview">${windowIcons.x}</button></div>
+ ${file.missing?'<div class="overlay-missing"><h3>File unavailable</h3><p>The saved file cannot be opened.</p></div>':`<div class="overlay-preview-image"><img src="assets/${file.thumbnail}" alt="${screenshot?'Screenshot':'Recording frame'}"></div>`}
+ <p class="hint">${esc(file.detail)}${file.duration?' · '+file.duration:''}</p>
+ ${!screenshot&&!file.missing?`<div class="overlay-player"><button type="button" data-action="overlay-play" class="quiet small" aria-label="${model.overlayPlaying?'Pause recording':'Play recording'}">${model.overlayPlaying?'Ⅱ':'▶'}</button><div class="overlay-player-line"></div><span>0:00 / ${file.duration}</span></div>`:''}
+ <div class="overlay-media-toolbar">
+ ${!screenshot&&!file.missing?`<div class="overlay-preview-audio"><button type="button" id="overlay-preview-mute" class="overlay-icon-button" data-action="overlay-preview-mute" aria-label="${model.overlayPreviewVolume?'Mute':'Unmute'} preview audio" title="${model.overlayPreviewVolume?'Mute':'Unmute'} preview audio" data-muted="${!model.overlayPreviewVolume}">${shellIcons['speaker-high']}<span class="preview-muted-slash" aria-hidden="true"></span></button><label class="sr-only" for="overlay-preview-volume">Preview playback volume</label><input id="overlay-preview-volume" type="range" min="0" max="100" value="${model.overlayPreviewVolume}" data-preview-volume><output id="overlay-preview-volume-value" for="overlay-preview-volume">${model.overlayPreviewVolume}%</output></div>`:''}
+ <div class="overlay-media-file-actions"><button type="button" class="overlay-icon-button" data-action="overlay-file-location" aria-label="Open file location" title="Open file location">${solidIcons['folder-open-fill']}</button><button type="button" class="overlay-icon-button" data-action="overlay-delete-item" aria-label="Delete item" title="${file.missing?'File unavailable':'Delete item'}" ${file.missing?'disabled':''}><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M9 3h6v2h5v2H4V5h5z"/><path fill-rule="evenodd" d="M6 9h12l-1 12H7L6 9Zm3 2v7h1v-7H9Zm5 0v7h1v-7h-1Z"/></svg></button></div></div>
+ <div class="overlay-viewer-footer">${btn('‹ Previous','overlay-previous-preview','quiet small')}${btn('Next ›','overlay-next-preview','quiet small')}</div></section>`;
+}
+// Selected Lucide Animated hourglass; source and licences: assets/ASSETS.md.
+function processingGlyph(){return '<svg class="processing-hourglass" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg>';}
+function overlayManualState(showElapsed=true){
+ const state=model.disconnected?'unknown':model.manual;
+ const labels={recording:'Recording',stopped:'Stopped',finalizing:'Finalizing recording',unknown:'Recording status unknown'};
+ const icons={recording:'<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6" fill="currentColor"/></svg>',stopped:'<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="4" width="12" height="12" rx="1.5" fill="currentColor"/></svg>',finalizing:processingGlyph(),unknown:'<span class="manual-unknown-mark" aria-hidden="true">?</span>'};
+ const label=labels[state]||labels.unknown;
+ return `<span class="overlay-manual-state"><span class="buffering-indicator manual-state-icon ${state}" tabindex="0" role="img" aria-label="${label}">${icons[state]||icons.unknown}<span class="indicator-tooltip" role="tooltip">${label}</span></span>${showElapsed&&['recording','finalizing'].includes(state)?`<span class="overlay-manual-elapsed" aria-label="${state==='recording'?'Elapsed time':'Recorded duration'} ${model.elapsed}">${model.elapsed}</span>`:''}</span>`;
+}
+function overlay(){
+ const [tone,label]=overviewStatus(),view=model.overlayView,unknown=model.disconnected;
+ const gallery=overlayFiles(model.overlayGalleryTab),recent=overlayFiles().slice(0,4);
+ const micBlocked=unknown||['missing','unknown','off'].includes(model.mic),micNote=model.audioApplied.microphone==='Off'?'Off':model.micPermissionDenied?'Microphone access denied':model.mic==='missing'?'Microphone unavailable':model.mic==='muted'?'Muted':model.audioApplied.mode==='Hold to talk'?(model.holdPressed?'Microphone live':'Hold '+(model.controlsApplied.shortcuts.hold||'unassigned shortcut')+' to talk'):model.audioApplied.microphone;
+ const home=`<button type="button" class="overlay-menu-heading" data-action="overlay-gallery">${shellIcons.images}<span>Gallery</span><span>›</span></button><div class="overlay-recent">${recent.map(overlayThumbnail).join('')||'<p class="hint">No saved captures yet.</p>'}</div>
+ <section class="overlay-replay"><div class="overlay-row-title"><h2>Instant replay</h2>${replayAcquisitionIndicator(model.replay==='paused'?'Paused':model.replay==='ready'||model.replay==='filling'?'Buffering':'Unavailable')}</div><p class="hint">${unknown?'Retained history unknown':duration(model.available)+' retained'} · ${esc(model.mode)}</p><div class="actions">${actionButton('Save replay','','save','primary',unknown||model.low||model.jobs.length>=3||savable()<1)}${btn(model.replay==='paused'?'Resume':'Pause','pause','quiet small',unknown||model.low||model.replay==='unavailable')}</div></section>
+ <section class="overlay-action-section"><div class="overlay-row-title">${shellIcons['video-camera']}<h2>Manual recording</h2>${overlayManualState()}</div>${actionButton(model.manual==='recording'?'Stop recording':'Start recording','','manual','quiet',unknown||model.low||model.replay==='unavailable'||model.manual==='finalizing')}</section>
+ <section class="overlay-action-section">${actionButton(shellIcons.images+'<span>Screenshot</span>','','screenshot','quiet',unknown||model.replay==='unavailable')}</section>
+ <section class="overlay-microphone"><div><h2>Microphone</h2><p id="overlay-microphone-note" class="hint">${esc(micNote)}</p></div>${microphoneButton(model.mic,'mic',micBlocked,model.controlsApplied.shortcuts.mic||'Unassigned')}</section>
+`;
+ const body=view==='settings'?overlaySettings():view==='gallery'?`<div class="overlay-subheading">${btn('‹ Back','overlay-home','quiet small')}<h2>Gallery</h2></div><div class="capture-tabs overlay-gallery-tabs" role="tablist" aria-label="Overlay gallery type">${['recordings','screenshots'].map(kind=>`<button type="button" id="overlay-${kind}-tab" role="tab" aria-selected="${model.overlayGalleryTab===kind}" tabindex="${model.overlayGalleryTab===kind?0:-1}" aria-controls="overlay-gallery-panel" data-action="overlay-gallery-${kind}">${kind==='recordings'?'Recordings':'Screenshots'}</button>`).join('')}</div><div id="overlay-gallery-panel" class="overlay-gallery-grid" role="tabpanel" aria-labelledby="overlay-${model.overlayGalleryTab}-tab">${gallery.map(file=>`<div>${overlayThumbnail(file)}<p>${esc(file.date)}</p></div>`).join('')||'<p class="hint">No saved captures yet.</p>'}</div>`:home;
+ return `<div class="overlay-scene" data-side="${model.controlsApplied.overlaySide}" data-preview="${Boolean(model.overlaySelected)}"><div class="overlay-background" aria-hidden="true"><div class="overlay-background-window"><strong>F10</strong><span>Desktop window stays open</span><h3>Overview</h3><p>Background preview</p><div></div><div></div></div></div>
+ ${model.overlayOpen?`<aside class="overlay-drawer" aria-label="F10 overlay"><header class="overlay-header"><img class="approved-logo" src="assets/f10-logo.png" width="24" height="24" alt="F10"><strong>F10</strong><button type="button" class="overlay-icon-button" data-action="overlay-settings" aria-label="Overlay settings" title="Overlay settings"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="m9 2-1 3-3 1-3 3 2 3-2 3 3 3 3 1 1 3h6l1-3 3-1 3-3-2-3 2-3-3-3-3-1-1-3H9Zm3 6a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z" fill-rule="evenodd"/></svg></button><button type="button" class="overlay-icon-button" data-action="close-overlay" aria-label="Close overlay" title="Close overlay (Esc)">${windowIcons.x}</button></header>
+ <div class="overlay-drawer-body" data-overlay-scroll="${view==='gallery'?model.overlayGalleryTab:view}"><div class="state-pill ${tone}" role="status">${esc(label)}</div>${body}</div></aside>${overlayViewer()}`:''}</div><p class="overlay-review-note">${!model.overlayOpen?btn('Open overlay <kbd>'+esc(model.controlsApplied.shortcuts.overlay)+'</kbd>','open-overlay','quiet small'):''} Background and media are illustrative. The overlay can open over the desktop, applications and games while F10 runs.</p>`;
+}
+function refreshOverlayPreviewVolume(){
+ const volume=model.overlayPreviewVolume,input=q('overlay-preview-volume'),output=q('overlay-preview-volume-value'),mute=q('overlay-preview-mute');
+ if(input)input.value=volume;if(output)output.textContent=volume+'%';if(mute){mute.setAttribute('aria-label',(volume?'Mute':'Unmute')+' preview audio');mute.title=(volume?'Mute':'Unmute')+' preview audio';mute.dataset.muted=String(!volume);}
+}
+function overlayAction(name){
+ if(name==='overlay-preview-mute'){model.overlayPreviewVolume=model.overlayPreviewVolume?0:model.overlayPreviewLastVolume;refreshOverlayPreviewVolume();return true;}
+ if(name==='overlay-file-location'){if(!model.overlaySelected)return true;notice('Review only: reveal the selected sample file in its folder. No folder was opened.',{title:'Open file location'});return true;}
+ if(name==='overlay-delete-item'){
+  const file=overlayFiles().find(item=>item.name===model.overlaySelected);if(!file||file.missing)return true;
+  removalContext='overlay';removalSelection=[file.name];q('capture-remove-title').textContent='Remove item?';q('capture-remove-summary').textContent='Move this '+(file.type==='Screenshot'?'screenshot':'recording')+' to Recycle Bin?';q('capture-remove-files').innerHTML='<li>'+esc(file.name)+'</li>';q('capture-remove-dialog').showModal();return true;
+ }
+
+ if(name==='overlay-home'||name==='overlay-settings'||name==='overlay-gallery'){model.overlayView=name==='overlay-home'?'home':name==='overlay-settings'?'settings':'gallery';render();return true;}
+ if(name.startsWith('overlay-gallery-')){model.overlayGalleryTab=name.slice(16);model.overlaySelected=null;render();return true;}
+ if(name.startsWith('overlay-preview-')){model.overlaySelected=decodeURIComponent(name.slice(16));model.overlayPlaying=false;render();return true;}
+ if(name==='overlay-close-preview'){model.overlaySelected=null;model.overlayPlaying=false;render();return true;}
+ if(name==='overlay-play'){model.overlayPlaying=!model.overlayPlaying;render();return true;}
+ if(name==='overlay-previous-preview'||name==='overlay-next-preview'){const files=overlayFiles(model.overlayView==='gallery'?model.overlayGalleryTab:'all'),index=files.findIndex(file=>file.name===model.overlaySelected);if(files.length)model.overlaySelected=files[(index+(name==='overlay-next-preview'?1:-1)+files.length)%files.length].name;model.overlayPlaying=false;render();return true;}
+ return false;
+}
+function overlaySetting(element){
+ const key=element.dataset.overlaySetting,value=element.type==='checkbox'?element.checked:element.value;
+ if(key==='saveMode'){const old=model.videoApplied.mode;model.mode=value;model.videoApplied.mode=value;if(model.videoDraft.mode===old)model.videoDraft.mode=value;if(model.videoPending)model.videoPending.mode=value;}
+ else{const field=key==='side'?'overlaySide':key,old=model.controlsApplied[field];model.controlsApplied[field]=value;if(model.controlsDraft[field]===old)model.controlsDraft[field]=value;}
+ render();
+}
+
+// Review-only environment samples; no foreground inspection or FPS measurement.
+let indicatorContext='game',indicatorFpsAvailable=true;
+let indicatorIssueKey='',indicatorIssueUntil=0,indicatorIssueTimer=null;
+function indicatorProblem(){return currentProblems(true).find(item=>['problem','warning'].includes(item.tone));}
+function syncIndicatorIssue(visible){
+ const issue=indicatorProblem(),key=issue?.id||'';
+ if(key!==indicatorIssueKey){indicatorIssueKey=key;indicatorIssueUntil=0;clearTimeout(indicatorIssueTimer);indicatorIssueTimer=null;}
+ if(!visible||!key||indicatorIssueUntil)return;
+ indicatorIssueUntil=performance.now()+5000;
+ indicatorIssueTimer=setTimeout(()=>{indicatorIssueTimer=null;if(route().screen==='indicator')render();},5010);
+}
+function hudGlyph(kind){
+ if(kind==='finalizing')return processingGlyph();
+ const shapes={dot:'<circle cx="10" cy="10" r="5"/>',stop:'<rect x="5" y="5" width="10" height="10" rx="1"/>',pause:'<rect x="5" y="4" width="4" height="12" rx=".7"/><rect x="11" y="4" width="4" height="12" rx=".7"/>',warning:'<path d="M8.3 3.5a2 2 0 0 1 3.4 0l6 10.5a2 2 0 0 1-1.7 3H4a2 2 0 0 1-1.7-3z"/><path d="M9.2 6h1.6v5H9.2zm0 7h1.6v1.6H9.2z" fill="#121212"/>'};
+ return shapes[kind]?`<svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">${shapes[kind]}</svg>`:'?';
+}
+function indicatorHasContent(profile){return profile.indicatorReplay||profile.indicatorManual||profile.indicatorMic||profile.indicatorFps;}
+function indicatorStrip(profile){
+ const unknown=model.disconnected;
+ const replayState=unknown?'unknown':model.replay==='paused'?'paused':model.replay==='unavailable'?'unavailable':model.low||model.replay==='stopped'?'stopped':'buffering';
+ const replaySymbol=hudGlyph({unknown:'unknown',paused:'pause',unavailable:'warning',stopped:'stop',buffering:'dot'}[replayState]);
+ const replayLabel={unknown:'Replay status unknown',paused:'Replay paused',unavailable:'Replay source unavailable',stopped:'Replay stopped',buffering:'Replay buffering'}[replayState];
+ const manualState=unknown?'unknown':model.manual;
+ const manualSymbol=hudGlyph({recording:'dot',finalizing:'finalizing',stopped:'stop',unknown:'unknown'}[manualState]);
+ const mic=unknown?'unknown':model.mic;
+ const micLabel={on:'Microphone on',muted:'Microphone muted',off:'Microphone off',missing:'Microphone unavailable',unknown:'Microphone status unknown'}[mic]||'Microphone status unknown';
+ const issue=indicatorProblem();
+ return `<span class="hud-strip" style="--hud-scale:${profile.indicatorSize/100}">${profile.indicatorReplay?`<span class="hud-channel" role="img" aria-label="${replayLabel}${unknown?'':', '+duration(model.available)+' retained'}"><span class="hud-symbol replay-${replayState}" aria-hidden="true">${replaySymbol}</span><span>Replay${unknown?' ?':' '+duration(model.available)}</span></span>`:''}${profile.indicatorManual?`<span class="hud-channel" role="img" aria-label="Manual ${esc(manualState)}${['recording','finalizing'].includes(manualState)?', '+model.elapsed:''}"><span class="hud-symbol manual-${esc(manualState)}" aria-hidden="true">${manualSymbol}</span>${['recording','finalizing'].includes(manualState)?`<span>${model.elapsed}</span>`:''}</span>`:''}${profile.indicatorMic?`<span class="hud-mic mic-${mic}" role="img" aria-label="${micLabel}">${solidIcons[mic==='on'?'microphone-fill':'microphone-slash-fill']}${['missing','unknown'].includes(mic)?'<b aria-hidden="true">'+(mic==='unknown'?'?':'!')+'</b>':''}</span>`:''}${profile.indicatorFps?`<span class="hud-fps" aria-label="Application FPS ${indicatorFpsAvailable?'144':'unavailable'}">${indicatorFpsAvailable?'144':'N/A'} <span>FPS</span></span>`:''}${issue?`<span class="hud-warning" role="img" aria-label="${esc(issue.title)}">${hudGlyph('warning')}</span>`:''}</span>`;
+}
+function indicator(){
+ const profile=model.controlsApplied,visible=profile.indicator&&indicatorHasContent(profile)&&(profile.indicatorSticky||['game','fullscreen'].includes(indicatorContext));
+ syncIndicatorIssue(visible);
+ const issue=indicatorProblem(),showMessage=issue&&performance.now()<indicatorIssueUntil;
+ return `<div class="game-surface indicator-scene">${visible?`<div class="hud" style="--hud-scale:${profile.indicatorSize/100}" data-corner="${profile.position.toLowerCase().replace(' ','-')}">${indicatorStrip(profile)}${showMessage?`<p class="hud-issue" role="status">${esc(issue.title)}</p>`:''}</div>`:`<p class="hint indicator-hidden-note">${!profile.indicator?'Recording indicator is off.':!indicatorHasContent(profile)?'Select indicator content in Controls.':'Indicator hidden in this foreground context.'}</p>`}<div class="surface-note">Review only: ${esc(indicatorContext)} background. ${go('Configure indicator','controls','')} · Passive indicator; FPS values are samples. Native app detection, FPS measurement and capture exclusion still need implementation.</div></div>`;
+}
+function tray(){
+ const unknown=model.disconnected,recording=model.manual==='recording',paused=model.replay==='paused';
+ const key=name=>model.controlsApplied.shortcuts[name]||'';
+ const glyph=(path)=>`<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${path}</svg>`;
+ const saveIcon=glyph('<path d="M10 3h4v8h5l-7 7-7-7h5zM4 19h16v3H4z"/>');
+ const settingsIcon=glyph('<path d="m9 2-1 3-3 1-3 3 2 3-2 3 3 3 3 1 1 3h6l1-3 3-1 3-3-2-3 2-3-3-3-3-1-1-3H9Zm3 6a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z" fill-rule="evenodd"/>');
+ const exitIcon=glyph('<path d="M3 3h9v3H6v12h6v3H3zM15 6l7 6-7 6v-4H9v-4h6z"/>');
+ const playIcon=glyph('<path d="M7 3v18l15-9z"/>');
+ const entry=(label,icon,action='',hotkey='',reason='',to='')=>{
+  const body=`<span class="tray-item-icon">${icon}</span><span>${esc(label)}</span>${hotkey?`<kbd>${esc(hotkey)}</kbd>`:'<span></span>'}`;
+  return to?`<a class="tray-item" href="#${to}?scenario=${route().scenario}">${body}</a>`:`<button type="button" class="tray-item" data-action="${action}" ${reason?`disabled title="${esc(reason)}" aria-label="${esc(label+': '+reason)}"`:''}>${body}</button>`;
+ };
+ const sourceBlocked=unknown?'Recording status unknown':model.replay==='unavailable'?'Capture source unavailable':'';
+ const saveReason=unknown?'Recording status unknown':model.outputUnavailable?'Save folder unavailable':model.low?'Low storage':model.jobs.length>=3?'Save queue full':savable()<1?'No replay footage available':'';
+ const manualReason=unknown?'Recording status unknown':model.manual==='finalizing'?'Recording is finalizing':recording?'':model.outputUnavailable?'Save folder unavailable':model.low?'Low storage':sourceBlocked;
+ const micReason=unknown?'Recording status unknown':model.mic==='unknown'?'Microphone status unknown':model.mic==='missing'?'Select an available microphone in Audio':model.mic==='off'?'Enable a microphone in Audio':'';
+ const replayState=unknown?'unknown':paused?'paused':model.replay==='unavailable'?'unavailable':model.low?'stopped':'buffering';
+ const replayText=unknown?'Status unknown':model.replay==='unavailable'?'Source unavailable':model.low?'Stopped':model.outputUnavailable?'Save folder unavailable':model.jobs.length>=3?'Save queue full':paused?'Paused':model.replay==='filling'?'Filling':model.mode==='Only new footage'&&savable()<1?'Waiting for footage':'Ready to save';
+ const replayIcon=hudGlyph({unknown:'unknown',paused:'pause',unavailable:'warning',stopped:'stop',buffering:'dot'}[replayState]);
+ const manualState=unknown?'unknown':model.manual;
+ const manualText=unknown?'Status unknown':recording?'Recording '+model.elapsed:model.manual==='finalizing'?'Finalizing '+model.elapsed:'Stopped';
+ const manualIcon=hudGlyph({recording:'dot',finalizing:'finalizing',stopped:'stop',unknown:'unknown'}[manualState]);
+ const micLabel=model.mic==='on'?'Mute microphone':model.mic==='muted'?'Unmute microphone':model.mic==='off'?'Microphone off':unknown||model.mic==='unknown'?'Microphone status unknown':'Microphone unavailable';
+ return `<div class="game-surface tray-scene"><nav class="tray tray-current" aria-label="F10 tray menu"><header class="tray-header"><h3>F10</h3><div class="tray-status-row"><span class="hud-symbol replay-${replayState}">${replayIcon}</span><span>Instant replay</span><strong>${esc(replayText)}${unknown?'':' · '+duration(model.available)}</strong></div><div class="tray-status-row"><span class="hud-symbol manual-${manualState}">${manualIcon}</span><span>Manual recording</span><strong>${esc(manualText)}</strong></div></header>
+ ${entry('Open F10',shellIcons.house,'','','','overview')}<hr>
+ ${entry('Save replay',saveIcon,'save',key('save'),saveReason)}
+ ${entry(model.manual==='finalizing'?'Finalizing recording…':recording?'Stop recording':'Start recording',recording?hudGlyph('stop'):shellIcons['video-camera'],'manual',key('manual'),manualReason)}
+ ${entry('Screenshot',shellIcons.images,'screenshot',key('screenshot'),sourceBlocked)}
+ ${entry(paused?'Resume replay':'Pause replay',paused?playIcon:hudGlyph('pause'),'pause','',unknown?'Recording status unknown':model.low?'Low storage':sourceBlocked)}
+ ${entry(micLabel,solidIcons[model.mic==='on'?'microphone-fill':'microphone-slash-fill'],'mic',key('mic'),micReason)}<hr>
+ ${entry('Open captures',shellIcons.images,'','','','captures')}${entry('Settings',settingsIcon,'','','','video')}${entry('Open overlay',shellIcons['squares-four'],'open-overlay',key('overlay'))}<hr>
+ ${entry('Exit F10',exitIcon,'begin-exit')}</nav><p class="surface-note">Review only: menu commands update sample state. Single left-click opens Overview; right-click opens this menu in the native design. Exit follows current sample work; no process closes.</p></div>`;
+}
+function recovery(){
+ return `<div class="recovery-view"><div class="pagehead recovery-heading"><a class="button quiet recovery-back" href="#captures?scenario=${route().scenario}" aria-label="Back to Captures" title="Back to Captures"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="m10 4-8 8 8 8 2-2-4-4h14v-4H8l4-4z"/></svg></a><h1>Recovery</h1></div><div class="recovery-list">${model.recoveryItems.map(item=>`<article class="recovery-item"><div><h3>${esc(item.label)}</h3><p class="hint">${esc(item.date)} · Last known ${esc(item.duration)}</p>${item.state==='recovering'?`<p class="recovery-progress" role="status">${hudGlyph('finalizing')}Recovering…</p>`:''}${item.error?`<p class="field-error" role="alert">${esc(item.error)}</p>`:''}</div><div class="recovery-item-actions">${btn(item.state==='failed'?'Retry':'Recover','recover-item-'+item.id,'primary small',item.state==='recovering')}${btn('Discard','discard-recovery-'+item.id,'quiet small danger',item.state==='recovering')}${item.error?go('Review save folder','storage?scenario='+route().scenario+'&focus=captures-folder','button quiet small'):''}</div></article>`).join('')||'<p class="empty">No unfinished recordings.</p>'}</div></div>`;
+}
+function openRecoveryDiscard(id){
+ const item=model.recoveryItems.find(item=>item.id===id);
+ if(!item||item.state==='recovering')return;
+ model.recoveryDiscardId=id;q('recovery-discard-item').textContent=item.label+' · '+item.date;
+ q('recovery-discard-dialog').showModal();
+}
+function discard(){return recovery();}
+function apply(){return `<div class="standalone"><h1>Video changes</h1><p class="muted">Apply changes once in Capture &amp; Video. Changes that restart capture refill replay history and preserve accepted saves.</p><p class="section">During manual recording, settings are saved and apply automatically after recording stops and finishes saving. Replay stays paused if you deliberately paused it.</p><div class="actions">${go('Open Capture & Video','video','button primary')}</div><p class="hint">Cache-location changes retain their separate storage transition rules.</p></div>`;}
+function exitHasWork(){return model.manual==='finalizing'||model.jobs.length>0;}
+function exitProgressKey(){return model.manual+'|'+model.jobs.map(job=>job.id).join(',');}
+function beginExit(){
+ model.replay='paused';model.banner='';if(model.manual==='recording')model.manual='finalizing';
+ model.exitState={intent:true,phase:exitHasWork()?'waiting':'exited',stalled:false,noticeDismissed:false,failures:[],lastProgress:exitProgressKey(),forced:false};
+ if(model.disconnected){model.exitState.phase='failed';model.exitState.failures=[{label:'Recording status unavailable',message:'Reconnect to check unfinished work.'}];}
+}
+function updateExit(){
+ const state=model.exitState;if(!state?.intent||state.phase==='exited')return;
+ const key=exitProgressKey();
+ if(state.lastProgress!==key){state.stalled=false;state.noticeDismissed=false;state.lastProgress=key;}
+ if(!exitHasWork()){state.stalled=false;state.phase=state.failures.length?'failed':'exited';}
+ if(q('force-exit-dialog').open&&!exitHasWork())q('force-exit-dialog').close();
+}
+function exitWorkSummary(){return [model.manual==='finalizing'?'Manual recording':null,model.jobs.length?model.jobs.length+' replay save'+(model.jobs.length===1?'':'s'):null].filter(Boolean).join(' and ');}
+function returnFromExit(target='overview'){
+ if(model.exitState)model.exitState.intent=false;
+ if(q('force-exit-dialog').open)q('force-exit-dialog').close();
+ location.hash=target+'?scenario='+route().scenario;
+}
+function loadExitExample(value){
+ if(value==='current'){model.exitExample=value;beginExit();render();return;}
+ resetModel(route().scenario);model.exitExample=value;model.disconnected=false;model.low=false;model.outputUnavailable=false;model.manual='stopped';model.jobs=[];model.replay='ready';
+ if(['busy','stalled'].includes(value)){
+  model.manual='recording';
+  model.jobs=['12:10:00','12:10:20','12:10:40'].map(time=>({id:nextJob++,time,duration:duration(model.available),mode:model.mode,source:model.source,destination:model.storageApplied.recordings,session:model.session}));
+ }
+ beginExit();
+ if(value==='stalled')model.exitState.stalled=true;
+ if(value==='failure'){model.exitState.phase='failed';model.exitState.failures=[{label:'Replay save',message:'Save folder unavailable.'}];model.results.push('Failed replay save · Save folder unavailable.');}
+ render();
+}
+function exitAction(name){
+ if(name==='begin-exit'){model.exitExample='current';beginExit();if(route().screen==='quit')render();else location.hash='quit?scenario='+route().scenario;return true;}
+ if(name==='exit-return'||name==='exit-review-failure'){returnFromExit(name==='exit-review-failure'?'captures':'overview');return true;}
+ if(name==='exit-dismiss-stall'){model.exitState.noticeDismissed=true;render();document.querySelector('[data-action="exit-force"]')?.focus({preventScroll:true});return true;}
+ if(name==='exit-keep-waiting'){if(q('force-exit-dialog').open)q('force-exit-dialog').close();model.exitState.noticeDismissed=true;render();document.querySelector('[data-action="exit-return"]')?.focus({preventScroll:true});return true;}
+ if(name==='exit-force'){
+  if(!exitHasWork()||!model.exitState?.stalled)return true;
+  q('force-exit-summary').textContent=exitWorkSummary()+'.';q('force-exit-dialog').showModal();return true;
+ }
+ if(name==='exit-force-confirm'){
+  if(!exitHasWork()){q('force-exit-dialog').close();render();return true;}
+  model.exitState.retainedWork={manual:model.manual,jobs:model.jobs.map(job=>({...job}))};model.exitState.forced=true;model.exitState.phase='exited';model.exitState.intent=false;q('force-exit-dialog').close();render();return true;
+ }
+ if(name==='exit-after-failure'){if(!exitHasWork()){model.exitState.phase='exited';model.exitState.intent=false;render();}return true;}
+ return false;
+}
+function quit(){
+ const state=model.exitState;
+ if(state.phase==='exited')return `<div class="exit-review-result" role="region" aria-label="Exit review result"><p class="review-note">Review only: the sample F10 window has closed${state.forced?' after force exit':''}. No application or process was stopped.${state.forced?' Unfinished sample work remains retained.':''}</p></div>`;
+ const failed=state.failures.length>0,waiting=exitHasWork();
+ const rows=[model.manual==='finalizing'?`<div class="exit-work-row"><span class="exit-work-icon">${hudGlyph('finalizing')}</span><span>Manual recording</span><strong>Saving</strong></div>`:'',model.jobs.length?`<div class="exit-work-row"><span class="exit-work-icon">${hudGlyph('finalizing')}</span><span>Replay saves</span><strong>1 saving${model.jobs.length>1?' · '+(model.jobs.length-1)+' queued':''}</strong></div>`:''].join('');
+ return `<div class="exit-preview"><section class="exit-window" aria-label="F10 exit progress"><header class="exit-heading"><img class="approved-logo" src="assets/f10-logo.png" width="24" height="24" alt="F10"><h1>${failed?'Recordings need attention':'Finishing recordings'}</h1><button type="button" class="exit-close" data-action="exit-return" aria-label="Return to F10" title="Return to F10">${windowIcons.x}</button></header>${state.stalled&&!state.noticeDismissed?`<aside class="floating-notice warning exit-stall-notice" role="status"><div class="notice-body"><strong>Taking longer than expected</strong><p>You can keep waiting or force F10 to exit.</p></div><button type="button" class="notice-dismiss" data-action="exit-dismiss-stall" aria-label="Dismiss exit notification" title="Dismiss notification">${windowIcons.x}</button></aside>`:''}${rows?`<div class="exit-work" aria-label="Pending recordings">${rows}</div>`:''}${failed?`<div class="exit-failures" role="alert">${state.failures.map(failure=>`<div><strong>${esc(failure.label)}</strong><p>${esc(failure.message)}</p></div>`).join('')}</div>`:''}<div class="exit-actions">${failed?`${btn('Review in Captures','exit-review-failure','primary')}${btn('Exit F10','exit-after-failure','quiet',waiting)}`:`${btn('Return to F10','exit-return','quiet')}${state.stalled?`${btn('Keep waiting','exit-keep-waiting','primary')}${btn('Force exit…','exit-force','quiet danger')}`:''}`}</div></section></div>`;
+}
+function flows(){return `<div class="standalone"><div class="kicker">Product state axes</div><h1>Recording states stay independent</h1><p class="muted">Full diagrams and unresolved details are in the companion review notes.</p><div class="diagram section"><div class="step"><strong>First run → Finish → Filling → Ready</strong>Save available history from one second; full duration once retained.</div><div class="connector">Pause retains replay footage; Resume starts fresh replay coverage.</div><div class="step"><strong>Manual stopped → Recording → Finalizing → Saved / Recovery</strong>Replay pause does not stop manual. Capture-ending interruptions require explicit manual restart.</div><div class="connector">Accepted saves freeze source, session, mode, endpoint and destination.</div><div class="step"><strong>Accepted → Waiting / Exporting → Saved / Failed / Canceled</strong>One exporting + two waiting. Only committed successful replay files advance their own session's checkpoint.</div><div class="connector">Mode-only change keeps the checkpoint; new capture session starts fresh.</div><div class="step"><strong>Source / worker / audio availability are separate</strong>Monitor capture continues across app minimize/close. Selected-window loss never becomes desktop capture. Missing audio can be silent while healthy video continues.</div><div class="connector">Stop all and Quit stop acquisition, then finish accepted work.</div><div class="step"><strong>Quit → Finish work → Exit; stalled → Keep waiting / Force quit</strong>Next launch offers explicit Recover / Discard; manual remains stopped.</div></div><div class="actions"><a class="button primary" href="README.md">Read full state flows and open review points</a></div></div>`;}
+const content={overview,captures,video,audio,controls,storage,diagnostics,setup,overlay,indicator,tray,recovery,discard,apply,quit,flows};
+function render(){const previousDrawer=document.querySelector('.overlay-drawer-body');if(previousDrawer&&model)model.overlayScroll[previousDrawer.dataset.overlayScroll]=previousDrawer.scrollTop;const previousList=document.querySelector('.capture-table-wrap');if(previousList)captureScroll[previousList.dataset.captureTab]=previousList.scrollTop;const previousContent=document.querySelector('.desktop-window .content');const previousContentScroll=previousContent?.scrollTop||0;const current=route();if(lastRenderedScreen==='controls'&&current.screen!=='controls'&&model)model.editingShortcut=null;if(lastRenderedScreen==='audio'&&current.screen!=='audio'&&model)model.audioTesting=false;const focusSaveFolder=current.screen==='storage'&&current.focus==='captures-folder'&&lastRenderedScreen!=='storage';const focused=document.activeElement;const restore=lastRenderedScreen===current.screen?{id:focused.id,action:focused.dataset?.action,start:focused.selectionStart,end:focused.selectionEnd}:null;if(activeScenario!==current.scenario)resetModel(current.scenario);maybeApplyStoragePending();recordDiagnosticEvents();if(current.screen==='quit'){if(!model.exitState||(!model.exitState.intent&&model.exitState.phase!=='exited'))beginExit();updateExit();}q('exit-example-review').hidden=current.screen!=='quit';q('exit-example').value=model.exitExample;q('report-export-review').hidden=current.screen!=='diagnostics';q('recovery-outcome-review').hidden=!['recovery','discard'].includes(current.screen);q('complete-recovery').disabled=!model.recoveryItems.some(item=>item.state==='recovering');q('indicator-context-review').hidden=current.screen!=='indicator';q('indicator-fps-review').hidden=current.screen!=='indicator';q('indicator-context').value=indicatorContext;q('indicator-fps-data').value=indicatorFpsAvailable?'available':'unavailable';q('screen').value=current.screen;q('scenario').value=current.scenario;q('scenario').disabled=!['overview','captures','video','audio','controls','storage','diagnostics','overlay','indicator','tray'].includes(current.screen);q('complete').disabled=!model.jobs.length||(current.screen==='quit'&&model.exitState?.phase==='exited');q('manual-complete').hidden=model.manual!=='finalizing'||(current.screen==='quit'&&model.exitState?.phase==='exited');const body=content[current.screen]();q('stage').innerHTML=desktop.includes(current.screen)||['recovery','discard'].includes(current.screen)?desktopShell(body,current):body;document.querySelectorAll('.window-button').forEach(button=>{const label={'window-minimize':'Minimize window','window-maximize':'Maximize window','window-close':'Close window'}[button.dataset.action];button.setAttribute('aria-label',label);button.title=label;});document.title=`${labels[current.screen]} · F10 M0 wireframes`;if(lastRenderedScreen===current.screen&&document.querySelector('.desktop-window .content'))document.querySelector('.desktop-window .content').scrollTop=previousContentScroll;lastRenderedScreen=current.screen;if(current.screen==='discard'&&!q('recovery-discard-dialog').open){const item=model.recoveryItems.find(item=>item.state!=='recovering');if(item)openRecoveryDiscard(item.id);}const currentDrawer=document.querySelector('.overlay-drawer-body');if(currentDrawer)currentDrawer.scrollTop=model.overlayScroll[currentDrawer.dataset.overlayScroll]||0;const currentList=document.querySelector('.capture-table-wrap');if(currentList){currentList.scrollTop=captureScroll[captureTab];const files=captureFiles(captureTab);const count=files.filter(file=>model.captureSelection.includes(file.name)).length;q('capture-select-all').indeterminate=count>0&&count<files.length;}syncNotices();if(restore){const target=restore.id?q(restore.id):restore.action?[...document.querySelectorAll('[data-action]')].find(e=>e.dataset.action===restore.action):null;if(target&&!target.disabled){target.focus({preventScroll:true});if(typeof restore.start==='number'&&target.setSelectionRange)target.setSelectionRange(restore.start,restore.end);}}if(focusSaveFolder){q('captures-folder-setting').focus({preventScroll:true});q('captures-folder-setting').closest('.storage-directory').scrollIntoView({block:'center'});}}
+const transientNotices=[];
+let nextNoticeId=1;
+function currentProblems(includeDismissed=false){
+ if(!model)return [];
+ const items=[];
+ const add=(key,title,message,tone,recovery)=>items.push({id:'problem-'+model.session+'-'+key,title,message,tone,recovery,persistent:true,priority:tone==='problem'?0:tone==='warning'?1:2});
+ if(model.disconnected)add('worker','Recording status unknown','Connection lost. Reconnect to check recording status.','problem',['Open Diagnostics','diagnostics']);
+ if(model.outputUnavailable)add('output-folder','Output folder unavailable','Select an available save folder. Existing clips remain in place.','problem',['Review save folder','storage']);
+ if(model.low)add('storage','Capture stopped','Storage is low. Free up space or choose another folder.','problem',['Open Storage','storage']);
+ if(model.replay==='unavailable')add('source','Source unavailable','The selected capture source is unavailable. Retained replay footage can still be saved.','problem',['Choose source','video']);
+ if(model.systemMissing)add('system-audio','System audio unavailable','The selected playback device is unavailable. Video and microphone audio continue.','warning',['Open Audio','audio']);
+ if(model.micPermissionDenied&&model.mic!=='off')add('microphone-permission','Microphone access denied','Allow microphone access in Windows, then enable the microphone again in F10. Video and system audio continue.','warning',['Open Audio','audio']);
+ else if(model.mic==='missing')add('microphone','Microphone unavailable',model.replay==='unavailable'?'The selected microphone is unavailable. Its audio track is silent.':'Video and system audio continue. The microphone track is silent.','warning',['Open Audio','audio']);
+ if(route().screen==='captures'&&model.recoveryItems.length)add('recovery','Unfinished recording',model.recoveryItems.length+' unfinished recording'+(model.recoveryItems.length===1?'':'s')+' need'+(model.recoveryItems.length===1?'s':'')+' review.','warning',['Review recovery','recovery']);
+ if(model.banner&&!items.length)add('info-'+model.banner,'Recording update',model.banner,'info',null);
+ const dismissed=model.dismissedNotices||[];
+ return includeDismissed?items:items.filter(item=>!dismissed.includes(item.id));
+}
+function pauseNotice(id,kind,paused){
+ const item=transientNotices.find(item=>item.id===id);
+ if(!item||item.remaining===null)return;
+ if(item.timer!==null){clearTimeout(item.timer);item.remaining=Math.max(0,item.remaining-(performance.now()-item.started));item.timer=null;}
+ item[kind]=paused;
+ if(!item.hovered&&!item.focused){item.started=performance.now();item.timer=setTimeout(()=>dismissNotice(id,false),item.remaining);}
+}
+function dismissNotice(id,restoreFocus=true){
+ const index=transientNotices.findIndex(item=>item.id===id);
+ if(index>=0){clearTimeout(transientNotices[index].timer);transientNotices.splice(index,1);}
+ else {model.dismissedNotices=model.dismissedNotices||[];model.dismissedNotices.push(id);}
+ syncNotices();
+ if(restoreFocus){const target=document.querySelector('#notice-stack .notice-dismiss')||document.querySelector('.state-pill')||q('screen');target?.focus({preventScroll:true});}
+}
+function syncNotices(){
+ const shell=document.querySelector('.desktop-window');
+ let host=q('notice-stack');
+ if(!host){host=document.createElement('div');host.id='notice-stack';host.className='notice-stack'+(shell?'':' global-notices');host.setAttribute('role','region');host.setAttribute('aria-label','Notifications');(shell||document.body).append(host);}
+ else if(shell&&host.parentElement!==shell){shell.append(host);host.className='notice-stack';}
+ else if(!shell&&host.parentElement!==document.body){document.body.append(host);host.className='notice-stack global-notices';}
+ if(['indicator','quit'].includes(route().screen)){host.hidden=true;host.replaceChildren();return;}
+ const items=[...currentProblems(),...transientNotices].filter(noticeAllowed).sort((a,b)=>a.priority-b.priority);
+ host.hidden=items.length===0;
+ const ids=new Set(items.map(item=>item.id));
+ for(const node of [...host.children])if(!ids.has(node.dataset.noticeId))node.remove();
+ for(const [index,item] of items.entries()){
+  let node=[...host.children].find(node=>node.dataset.noticeId===item.id);
+  const created=!node;
+  if(!node){
+   node=document.createElement('aside');node.className='floating-notice '+item.tone;node.dataset.noticeId=item.id;
+   node.setAttribute('role',item.tone==='problem'?'alert':'status');node.setAttribute('aria-label',item.title);node.setAttribute('aria-atomic','true');
+   const recovery=item.recovery?go(item.recovery[0],item.recovery[1]+'?scenario='+route().scenario,'button small notice-action'):'';
+   const actions=item.actions?item.actions.map(([label,action])=>btn(label,action,'small notice-action')).join(''):'';
+   node.innerHTML=`<div class="notice-body"><strong>${esc(item.title)}</strong><p>${esc(item.message)}</p>${recovery||actions?`<div class="notice-actions">${recovery}${actions}</div>`:''}</div><button type="button" class="notice-dismiss" aria-label="Dismiss notification" title="Dismiss notification">${windowIcons.x}</button>`;
+   node.querySelector('.notice-dismiss').addEventListener('click',()=>dismissNotice(item.id));
+   if(!item.persistent){node.addEventListener('pointerenter',()=>pauseNotice(item.id,'hovered',true));node.addEventListener('pointerleave',()=>pauseNotice(item.id,'hovered',false));node.addEventListener('focusin',()=>pauseNotice(item.id,'focused',true));node.addEventListener('focusout',event=>{if(!node.contains(event.relatedTarget))pauseNotice(item.id,'focused',false);});}
+  }
+  if(host.children[index]!==node)host.insertBefore(node,host.children[index]||null);
+  if(!item.persistent&&created){item.hovered=node.matches(':hover');pauseNotice(item.id,'focused',node.contains(document.activeElement));}
+  else if(!item.persistent&&item.timer===null)pauseNotice(item.id,'focused',node.contains(document.activeElement));
+ }
+}
+function notice(text,options={}){
+ const tone=options.tone||'info';
+ const title=options.title||'F10',category=options.category||(tone==='problem'?'problem':/Replay save|Replay saved|No new footage/.test(title)?'save':'general');
+ if(!noticeAllowed({tone,category}))return;
+ transientNotices.push({id:'notice-'+nextNoticeId++,title,category,message:text,tone,actions:options.actions||null,remaining:tone==='problem'?null:5000,timer:null,started:0,hovered:false,focused:false,priority:tone==='problem'?0:tone==='warning'?1:2});
+ syncNotices();
+}
+
+function action(name){
+ if(exitAction(name))return;
+ if(name.startsWith('recover-item-')){const item=model.recoveryItems.find(item=>item.id===Number(name.slice(13)));if(item&&item.state!=='recovering'){item.state='recovering';item.error='';render();}return;}
+ if(name.startsWith('discard-recovery-')){openRecoveryDiscard(Number(name.slice(17)));return;}
+ if(name==='cancel-recovery-discard'){const id=model.recoveryDiscardId;q('recovery-discard-dialog').close();model.recoveryDiscardId=null;if(route().screen==='discard')location.hash='recovery?scenario='+route().scenario;else document.querySelector('[data-action="discard-recovery-'+id+'"]')?.focus();return;}
+ if(name==='confirm-recovery-discard'){const item=model.recoveryItems.find(item=>item.id===model.recoveryDiscardId);if(!item||item.state==='recovering')return;model.recoveryItems=model.recoveryItems.filter(candidate=>candidate.id!==item.id);model.recoveryDiscardId=null;q('recovery-discard-dialog').close();if(route().screen==='discard')location.hash='recovery?scenario='+route().scenario;else render();notice('The selected unfinished recording was discarded.',{title:'Recording discarded'});return;}
+
+ if(diagnosticAction(name)||overlayAction(name))return;
+ if(name.startsWith('browse-storage-')){openReviewFolderPicker(name.slice(15));return;}
+ if(name==='reset-storage'){model.storageDraft=storageBase();model.storageErrors={};render();return;}
+ if(name==='apply-storage'){
+  const draft=model.storageDraft,errors={};
+  for(const [key,label] of [['recordings','recordings'],['screenshots','screenshots'],['cache','replay cache']])if(!draft[key].trim())errors[key]='Choose a '+label+' folder.';
+  const budget=Number(draft.budget),estimate=storageEstimate();
+  if(!Number.isFinite(budget)||budget<=0)errors.budget='Enter a cache limit greater than 0 GB.';
+  else if(budget<estimate)errors.budget='Use at least '+storageSize(estimate)+' for the current replay settings, or change Video settings.';
+  model.storageErrors=errors;if(Object.keys(errors).length){render();const key=Object.keys(errors)[0];q(key==='recordings'?'captures-folder-setting':'storage-'+key).focus();return;}
+  const cacheChanged=draft.cache!==model.storageApplied.cache;
+  model.storageApplied.recordings=draft.recordings;model.storageApplied.screenshots=draft.screenshots;
+  if(cacheChanged&&(['recording','finalizing'].includes(model.manual)||model.jobs.length)){
+   model.storagePending={cache:draft.cache,budget:String(draft.budget)};render();notice('Folder choices saved. The cache move will apply after recording and accepted exports finish.',{title:'Storage changes saved'});return;
+  }
+  model.storagePending=null;
+  if(cacheChanged)applyCacheLocation(draft.cache,draft.budget);else model.storageApplied.budget=String(draft.budget);
+  model.storageDraft={...model.storageApplied};render();notice(cacheChanged?(model.replay==='paused'?'Cache location updated. Replay remains paused.':model.replay==='filling'?'Cache location updated. Replay history is refilling.':'Cache location updated. Capture remains stopped.'):'New requests use the updated folders. Existing files stay in place.',{title:'Storage settings applied'});return;
+ }
+
+ if(name.startsWith('edit-shortcut-')){model.editingShortcut=name.slice(14);render();q('shortcut-'+model.editingShortcut).focus({preventScroll:true});return;}
+ if(name.startsWith('reset-shortcut-')){const key=name.slice(15);model.controlsDraft.shortcuts[key]=shortcutDefinitions.find(([id])=>id===key)[2];model.editingShortcut=null;render();q('shortcut-'+key).focus({preventScroll:true});return;}
+ if(name==='reset-controls'){model.controlsDraft=copyControls(model.controlsApplied);model.editingShortcut=null;render();return;}
+ if(name.startsWith('place-indicator-')){const corner=name.slice(16).replace('-',' ');model.controlsDraft.position=corner[0].toUpperCase()+corner.slice(1);render();return;}
+ if(name==='preview-indicator'){model.indicatorPreview=!model.indicatorPreview;render();return;}
+ if(name==='apply-controls'){
+  if(Object.keys(shortcutErrors()).length||model.editingShortcut)return;
+  model.controlsApplied=copyControls(model.controlsDraft);model.holdPressed=false;
+  for(let index=transientNotices.length-1;index>=0;index--)if(!noticeAllowed(transientNotices[index])){clearTimeout(transientNotices[index].timer);transientNotices.splice(index,1);}
+  render();notice('Preferences updated without restarting capture.',{title:'Controls applied'});return;
+ }
+
+ if(name==='reset-audio'){model.audioDraft={...(model.audioPending||model.audioApplied)};model.audioError='';render();return;}
+ if(name==='apply-audio'){
+  const draft=model.audioDraft;
+  if(draft.mode==='Hold to talk'&&!model.controlsApplied.shortcuts.hold){model.audioError='Assign a hold-to-talk shortcut in Controls first.';render();return;}
+  if(draft.tracks!==model.audioApplied.tracks&&['recording','finalizing'].includes(model.manual)){model.audioPending={...draft};model.audioError='';render();notice('Audio changes will apply after manual recording finishes saving.',{title:'Audio changes saved'});return;}
+  commitAudioProfile(draft);render();notice('Selected devices and audio track settings updated in this preview.',{title:'Audio settings applied'});return;
+ }
+ if(name==='audio-test'){model.audioTesting=!model.audioTesting;render();if(model.audioTesting)notice('Sample level preview only. No microphone is opened or audio recorded.',{title:'Microphone test preview'});return;}
+
+ if(name==='reset-video'){model.videoDraft={...(model.videoPending||model.videoApplied)};model.videoError='';render();return;}
+ if(name==='apply-video'){
+  const draft=model.videoDraft;
+  if(!Number.isInteger(Number(draft.minutes))||Number(draft.minutes)<1||Number(draft.minutes)>30){model.videoError='Enter 1 to 30 minutes.';render();q('video-minutes').focus();return;}
+  if(!Number.isInteger(Number(draft.bitrate))||Number(draft.bitrate)<5||Number(draft.bitrate)>100){model.videoError='Enter 5 to 100 Mbps.';render();q('video-bitrate').focus();return;}
+  if(draft.source==='Selected application window'&&!draft.window){model.videoError='Choose an application window.';render();q('video-window').focus();return;}
+  model.videoError='';
+  if(videoNeedsRestart(draft)&&['recording','finalizing'].includes(model.manual)){model.videoPending={...draft};render();notice('Changes will apply after manual recording finishes saving.',{title:'Video changes saved'});return;}
+  const restarted=commitVideoProfile(draft);render();notice(restarted?(model.replay==='paused'?'Video settings applied. Replay stays paused and will refill when resumed.':'Replay history is refilling. Accepted saves remain protected.'):'Capture continues without restarting.',{title:'Video settings applied'});return;
+ }
+
+ if(name==='clear-capture-selection'){model.captureSelection=[];render();q(captureTab+'-tab').focus({preventScroll:true});return;}
+ if(name==='remove-captures'){
+  removalContext='captures';q('capture-remove-title').textContent='Remove selected files?';removalSelection=[...model.captureSelection];if(!removalSelection.length)return;
+  q('capture-remove-summary').textContent=`Move ${captureSelectionSummary(removalSelection)} to Recycle Bin?`;
+  q('capture-remove-files').innerHTML=removalSelection.map(name=>`<li>${esc(name)}</li>`).join('');
+  q('capture-remove-dialog').showModal();return;
+ }
+ if(name==='cancel-capture-removal'){q('capture-remove-dialog').close();return;}
+ if(name==='confirm-capture-removal'){
+  const count=removalSelection.length;model.removedCaptures.push(...removalSelection);model.captureSelection=model.captureSelection.filter(name=>!removalSelection.includes(name));removalSelection=[];
+  q('capture-remove-dialog').close();if(removalContext==='overlay'){model.overlaySelected=null;model.overlayPlaying=false;}render();if(removalContext==='overlay')document.querySelector('.overlay-gallery-tabs [aria-selected="true"]')?.focus({preventScroll:true});else document.querySelector('.captures-view .capture-tabs [aria-selected="true"]')?.focus({preventScroll:true});
+  notice(`Review only: ${count} sample item${count===1?'':'s'} removed from the list. No files changed.`,{title:'Sample removal complete'});return;
+ }
+ if(name==='captures-recordings'||name==='captures-screenshots'){captureTab=name==='captures-recordings'?'recordings':'screenshots';render();q(captureTab+'-tab').focus({preventScroll:true});return;}
+ if(name==='recheck-file'){notice('The sample file is still unavailable. Its successful save history is unchanged.',{title:'File unavailable'});return;}
+
+
+ if(name==='open-overlay'){model.overlayOpen=true;model.overlayView='home';model.overlaySelected=null;if(route().screen==='overlay')render();else location.hash='overlay?scenario='+route().scenario;return;}
+ if(name.startsWith('window-')){notice({'window-minimize':'Preview: minimize the app window. Recording continues.','window-maximize':'Preview: maximize or restore the app window.','window-close':'Preview: hide the app window. Recording continues; Exit remains in the tray menu.'}[name]);return;}
+
+ if(name==='screenshot'){recordSampleCapture('Screenshot',captureSnapshot());render();notice('Saved screenshot from '+model.source+'.',{title:'Screenshot saved',tone:'success',category:'save',actions:[['Open file','open'],['Open folder','folder']]});return;}
+ if(name==='save'){if(model.jobs.length>=3||savable()<1||model.low||model.disconnected){notice('This replay request could not be accepted.',{title:'Replay not accepted',tone:'problem'});return;}model.jobs.push({...captureSnapshot(),id:nextJob++,time:'12:10:20',duration:duration(savable()),mode:model.mode,source:model.source,destination:model.storageApplied.recordings,session:model.session});model.results.push('Accepted replay request');render();notice(model.jobs.length===1?'Your replay is exporting.':'Your replay is waiting to export.',{title:'Replay save accepted'});return;}
+ if(/^cancel-\d+$/.test(name)){model.jobs=model.jobs.filter(job=>job.id!==Number(name.slice(7)));model.results.push('Canceled replay request');render();notice('No clip was saved for this request.',{title:'Replay save canceled'});return;}
+ if(name==='pause'){if(model.replay==='paused'){model.replay='filling';model.available=0;model.newFootage=0;model.session='R'+nextSession++;model.banner='Fresh replay history. Any ongoing manual recording continues.';}else{model.replay='paused';model.banner=model.manual==='recording'?'Replay paused. Manual recording and enabled audio continue.':'Replay paused. Completed footage remains available to save.';}render();return;}
+ if(name==='manual'){if(model.manual==='finalizing'){notice('Wait for manual finalization before starting another recording.');return;}if(model.manual!=='recording'){model.manualDestination=model.storageApplied.recordings;model.manualCapture=captureSnapshot();}model.manual=model.manual==='recording'?'finalizing':'recording';render();notice(model.manual==='finalizing'?'Sample manual recording is finalizing; replay continues.':'Sample manual recording started; replay state unchanged.');return;}
+ if(name==='mic'){if(model.disconnected||model.mic==='missing')return;model.mic=model.mic==='on'?'muted':'on';if(model.mic!=='on')model.audioTesting=false;render();return;}
+ if(name==='setup-mic'){if(setupDraft.microphone==='unavailable')return;if(setupDraft.microphone==='off'){setupDraft.microphone='Microphone (example)';setupDraft.micState='off';}setupDraft.micState=setupDraft.micState==='on'?'muted':'on';render();return;}
+ if(name==='stop-all'){model.replay='paused';if(model.manual==='recording')model.manual='finalizing';model.banner='New acquisition stopped. Accepted exports and manual finalization still need outcomes.';render();return;}
+ if(name==='browse-folder'){openReviewFolderPicker('setup');return;}
+ if(name==='cancel-folder'){q('folder-picker').close();return;}
+ if(name==='choose-folder'){
+  const target=reviewFolderTarget;
+  if(target==='setup'){setupDraft.folder=q('folder-choice').value;if(setupDraft.folder.trim())setSetupError('folder','');}
+  else{model.storageDraft[target]=q('folder-choice').value;delete model.storageErrors[target];}
+  q('folder-picker').close();render();document.querySelector('[data-action="'+(target==='setup'?'browse-folder':'browse-storage-'+target)+'"]').focus({preventScroll:true});return;
+ }
+ if(name==='activate'){const number=q('setup-duration-number');const durationInvalid=!number.checkValidity();const folderInvalid=!setupDraft.folder.trim();setSetupError('duration',durationInvalid?'Enter 1 to 30 minutes.':'');setSetupError('folder',folderInvalid?'Choose a save folder.':'');if(durationInvalid||folderInvalid){q(durationInvalid?'setup-duration-number':'setup-folder').focus();return;}resetModel('filling');model.target=replayMinutes*60;model.videoApplied={...initialVideoProfile(),source:setupDraft.source==='display'?'Whole display':'Selected application window',display:setupDraft.display==='Main display (primary)'?'Main display · primary (example)':setupDraft.display,window:setupDraft.window==='Game window (example)'?'Game window · example':setupDraft.window,minutes:replayMinutes};model.videoDraft={...model.videoApplied};model.source=setupDraft.source==='display'?model.videoApplied.display:model.videoApplied.window;model.mic=setupDraft.microphone==='unavailable'?'missing':setupDraft.microphone==='off'?'off':setupDraft.micState;model.systemMissing=setupDraft.system==='unavailable';model.system=setupDraft.system==='unavailable'?'Unavailable':setupDraft.system==='off'?'Off':setupDraft.system;model.tracks=setupDraft.tracks==='One mixed track'?1:2;model.audioApplied=initialAudioProfile();model.audioDraft={...model.audioApplied};model.controlsApplied.startup=setupDraft.startup;model.controlsDraft=copyControls(model.controlsApplied);model.storageApplied.recordings=setupDraft.folder;model.storageDraft={...model.storageApplied};location.hash='overview?scenario=filling';render();return;}
+ if(name==='close-overlay'){model.overlayOpen=false;model.overlaySelected=null;model.overlayPlaying=false;render();return;}
+ if(name==='force'){notice('Review: explicit confirmation must explain unfinished work; no process is stopped here.');return;}
+ if(name==='recover'){notice('Review: recovery validates retained material before reporting a saved file.');return;}
+ if(name==='discard'){notice('Review: discard applies only to the selected unfinished material; no files are deleted here.');return;}
+ notice('Review only · '+({'screenshot':'PNG from the applied source; no pixels are captured.','identify':'Identify the selected display; no desktop UI is opened.','open':'Open an example saved file; no media is read.','folder':'Open the chosen captures folder.','test':'Explicit microphone test; no input device is opened.','apply-audio':'Apply eligible audio changes without losing accepted footage.','apply-controls':'Validate shortcut conflicts; eligible changes do not reset replay.','manual-stop-review':'Stop/finalize manual recording, keep edits pending, then request Apply.','wait':'Keep accepted work pending; no automatic abandonment.'}[name]||name));
+}
+q('force-exit-dialog').addEventListener('cancel',event=>{event.preventDefault();action('exit-keep-waiting');});
+q('recovery-discard-dialog').addEventListener('cancel',event=>{event.preventDefault();action('cancel-recovery-discard');});
+q('complete-recovery').addEventListener('click',()=>{
+ const item=model.recoveryItems.find(item=>item.state==='recovering');if(!item)return;
+ if(q('recovery-outcome').value==='failure'){item.state='failed';item.error='Save folder unavailable.';render();return;}
+ model.recoveredCaptures.push({name:'Recovered-2026-10-22-11-35.mp4',type:'Recovered recording',date:item.date,duration:item.duration,thumbnail:'sample-manual.svg',detail:'Manual recording · H.264'});
+ model.recoveryItems=model.recoveryItems.filter(candidate=>candidate.id!==item.id);render();notice('Your recording is ready.',{title:'Recording recovered',tone:'success',category:'save',actions:[['Open file','open'],['Open folder','folder']]});
+});
+q('screen').innerHTML=screens.map(([key,label])=>`<option value="${key}">${label}</option>`).join('');
+q('scenario').innerHTML=scenarios.map(([key,label])=>`<option value="${key}">${label}</option>`).join('');
+q('screen').addEventListener('change',()=>location.hash=q('screen').value+'?scenario='+q('scenario').value);
+q('scenario').addEventListener('change',()=>{activeScenario='';location.hash=route().screen+'?scenario='+q('scenario').value;render();});
+q('manual-complete').addEventListener('click',()=>{if(model.manual!=='finalizing')return;recordSampleCapture('Manual',{...(model.manualCapture||captureSnapshot()),duration:model.elapsed});model.manualCapture=null;model.manual='stopped';if(model.audioPending){commitAudioProfile(model.audioPending);notice('Saved audio settings are now applied.',{title:'Audio settings applied'});}if(model.videoPending){const restarted=commitVideoProfile(model.videoPending);render();notice(restarted?(model.replay==='paused'?'Saved video settings are now applied. Replay remains paused.':'Saved video settings are now applied; replay history will refill.'):'Saved video settings are now applied.',{title:'Manual finalization complete'});}else{render();notice('Sample manual recording finished saving.',{title:'Manual finalization complete'});}});
+q('complete').addEventListener('click',()=>{if(!model.jobs.length)return;const job=model.jobs.shift();if(job.session===model.session&&job.mode==='Only new footage'&&model.newFootage<1){model.results.push('Skipped: no new footage · requested '+job.time);notice('No file was created.',{title:'No new footage'});}else{if(job.session===model.session)model.newFootage=0;recordSampleCapture('Replay',job);model.results.push('Saved · '+job.duration+' · requested '+job.time);notice('Saved replay requested at '+job.time+'.',{title:'Replay saved',tone:'success',actions:[['Open file','open'],['Open folder','folder']]});}render();});
+let indicatorDrag=null,suppressIndicatorClickUntil=0;
+function moveIndicatorPreview(event){
+ if(!indicatorDrag||event.pointerId!==indicatorDrag.pointerId)return;
+ const drag=indicatorDrag;
+ if(!drag.moved&&Math.hypot(event.clientX-drag.startX,event.clientY-drag.startY)<4)return;
+ drag.moved=true;
+ const frame=drag.frame.getBoundingClientRect();
+ drag.x=Math.max(10,Math.min(drag.frame.clientWidth-drag.width-10,event.clientX-frame.left-drag.frame.clientLeft-drag.offsetX));
+ drag.y=Math.max(10,Math.min(drag.frame.clientHeight-drag.height-10,event.clientY-frame.top-drag.frame.clientTop-drag.offsetY));
+ Object.assign(drag.button.style,{left:drag.x+'px',top:drag.y+'px',right:'auto',bottom:'auto',width:drag.width+'px'});
+ drag.button.classList.add('dragging');
+}
+function finishIndicatorPreview(commit){
+ if(!indicatorDrag)return;
+ const drag=indicatorDrag;indicatorDrag=null;
+ if(drag.button.hasPointerCapture(drag.pointerId))drag.button.releasePointerCapture(drag.pointerId);
+ if(!drag.moved)return;
+ if(commit){
+  const right=drag.frame.clientWidth-drag.width-10,bottom=drag.frame.clientHeight-drag.height-10;
+  const anchors=[['Top left',10,10],['Top right',right,10],['Bottom left',10,bottom],['Bottom right',right,bottom]];
+  const distance=([,x,y])=>(drag.x-x)**2+(drag.y-y)**2;
+  let closest=anchors.find(([corner])=>corner===model.controlsDraft.position);
+  for(const anchor of anchors)if(distance(anchor)<distance(closest)-.01)closest=anchor;
+  model.controlsDraft.position=closest[0];
+ }
+ suppressIndicatorClickUntil=performance.now()+250;render();
+ const selected=document.querySelector('.preview-corner[aria-pressed="true"]');selected?.focus({preventScroll:true});
+}
+document.addEventListener('pointerdown',event=>{
+ const button=event.target.closest('.preview-corner[aria-pressed="true"]');
+ if(!button||event.button!==0)return;
+ const frame=button.closest('.indicator-preview'),rect=button.getBoundingClientRect();
+ indicatorDrag={button,frame,pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,offsetX:event.clientX-rect.left,offsetY:event.clientY-rect.top,width:rect.width,height:rect.height,moved:false,x:0,y:0};
+ button.setPointerCapture(event.pointerId);event.preventDefault();
+});
+document.addEventListener('pointermove',moveIndicatorPreview);
+document.addEventListener('pointerup',event=>{if(indicatorDrag&&event.pointerId===indicatorDrag.pointerId){moveIndicatorPreview(event);finishIndicatorPreview(true);}});
+document.addEventListener('pointercancel',()=>finishIndicatorPreview(false));
+document.addEventListener('keydown',event=>{if(indicatorDrag&&event.key==='Escape'){event.preventDefault();finishIndicatorPreview(false);}},true);
+
+document.addEventListener('click',event=>{if(route().screen!=='overlay'||!model?.overlayOpen||document.querySelector('dialog[open]'))return;const target=event.target;if(!target.closest('.overlay-scene')||target.closest('.overlay-drawer,.overlay-viewer'))return;event.preventDefault();event.stopImmediatePropagation();action('close-overlay');},true);
+document.addEventListener('click',event=>{if(event.target.closest('.indicator-preview')&&performance.now()<suppressIndicatorClickUntil){event.preventDefault();return;}const control=event.target.closest('[data-action]');if(control&&!control.disabled)action(control.dataset.action);});
+document.addEventListener('input',event=>{const element=event.target;if(element.id==='control-indicatorSize'){model.controlsDraft.indicatorSize=Number(element.value);q('indicator-size-value').value=element.value+'%';document.querySelectorAll('.preview-corner,.preview-corner .hud-strip').forEach(node=>node.style.setProperty('--hud-scale',element.value/100));return;}if(element.matches('[data-preview-volume]')){model.overlayPreviewVolume=Number(element.value);if(model.overlayPreviewVolume)model.overlayPreviewLastVolume=model.overlayPreviewVolume;refreshOverlayPreviewVolume();return;}if(element.matches('[data-storage]')){model.storageDraft[element.dataset.storage]=element.value;delete model.storageErrors[element.dataset.storage];refreshStorageEdits();return;}if(element.matches('[data-audio-level]')){model.audioLevels[element.dataset.audioLevel]=Number(element.value);refreshAudioLevels();return;}if(element.matches('[data-duration]')){if(route().screen==='setup')setupDurationInput=element.value;if(!element.checkValidity())return;if(route().screen==='setup')setSetupError('duration','');replayMinutes=Number(element.value);element.closest('[data-duration-group]').querySelectorAll('[data-duration]').forEach(input=>input.value=replayMinutes);document.querySelectorAll('[data-replay-estimate]').forEach(label=>label.textContent=(replayMinutes*.152).toFixed(2));}if(element.matches('[data-setup]')){setupDraft[element.dataset.setup]=element.type==='checkbox'?element.checked:element.value;if(element.dataset.setup==='folder'&&element.value.trim())setSetupError('folder','');}});
+document.addEventListener('change',event=>{const element=event.target;if(element.id==='exit-example'){loadExitExample(element.value);return;}if(element.id==='indicator-context'){indicatorContext=element.value;render();return;}if(element.id==='indicator-fps-data'){indicatorFpsAvailable=element.value==='available';render();return;}if(element.matches('[data-overlay-setting]')){overlaySetting(element);return;}if(element.matches('[data-control]')){model.controlsDraft[element.dataset.control]=element.type==='checkbox'?element.checked:element.type==='range'?Number(element.value):element.value;if(!model.controlsDraft.indicator)model.indicatorPreview=false;render();return;}if(element.matches('[data-audio]')){model.audioDraft[element.dataset.audio]=element.value;model.audioError='';render();return;}if(element.matches('[data-video]')){model.videoDraft[element.dataset.video]=element.value;model.videoError='';render();return;}if(element.matches('[data-capture-select]')){model.captureSelection=model.captureSelection.filter(name=>name!==element.dataset.captureSelect);if(element.checked)model.captureSelection.push(element.dataset.captureSelect);render();return;}if(element.matches('[data-capture-select-all]')){const names=captureFiles(captureTab).map(file=>file.name);model.captureSelection=model.captureSelection.filter(name=>!names.includes(name));if(element.checked)model.captureSelection.push(...names);render();return;}if(element.matches('[data-setup]')){setupDraft[element.dataset.setup]=element.type==='checkbox'?element.checked:element.value;if(['source','system','microphone','tracks'].includes(element.dataset.setup))render();}});
+document.addEventListener('keydown',event=>{if(document.querySelector('dialog[open]'))return;if(route().screen==='quit'&&model.exitState?.phase!=='exited'){if(event.key==='Escape'){event.preventDefault();returnFromExit();}return;}if(captureShortcut(event))return;if(model?.audioApplied?.mode==='Hold to talk'&&model.controlsApplied.shortcuts.hold&&eventShortcut(event)===model.controlsApplied.shortcuts.hold){event.preventDefault();model.holdPressed=true;model.holdKeyCode=event.code;refreshAudioLevels();return;}if(event.target.matches('.overlay-gallery-tabs [role=tab]')&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const kind=event.key==='Home'?'recordings':event.key==='End'?'screenshots':model.overlayGalleryTab==='recordings'?'screenshots':'recordings';action('overlay-gallery-'+kind);q('overlay-'+kind+'-tab')?.focus();return;}if(event.target.matches('.capture-tabs [role=tab]')&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();action(event.key==='Home'?'captures-recordings':event.key==='End'?'captures-screenshots':captureTab==='recordings'?'captures-screenshots':'captures-recordings');return;}if(!event.repeat&&(route().screen==='setup'?(event.altKey&&event.code==='F2'):eventShortcut(event)===model.controlsApplied.shortcuts.mic)){event.preventDefault();if(route().screen==='setup'){if(setupDraft.microphone==='unavailable')notice('Microphone unavailable. Select an available device.');else if(setupDraft.microphone==='off'||setupDraft.micState==='off')notice('Enable the microphone using its icon first.');else action('setup-mic');}else if(model.mic==='off')notice('Select and enable a microphone in Audio first.');else action('mic');return;}if(!event.repeat&&route().screen==='overlay'&&eventShortcut(event)===model.controlsApplied.shortcuts.overlay){event.preventDefault();action(model.overlayOpen?'close-overlay':'open-overlay');return;}if(event.key==='Escape'&&route().screen==='overlay'&&model.overlayOpen){event.preventDefault();action('close-overlay');}});
+document.addEventListener('keyup',event=>{if(model?.holdPressed&&(event.code===model.holdKeyCode||['Control','Alt','Shift','Meta'].includes(event.key))){model.holdPressed=false;refreshAudioLevels();}});
+window.addEventListener('hashchange',render);render();
+</script>
+</body>
+</html>

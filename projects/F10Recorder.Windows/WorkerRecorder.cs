@@ -9,6 +9,7 @@ internal sealed class WorkerRecorder : IWindowsRecorder
     readonly Func<WorkerRequest, Task<WorkerReply>> send;
     WorkerStatus status;
     long sequence;
+    long capabilityRevision;
     bool disposed, stopping, applying;
     bool modeKnown = true;
     string pendingApply, applyInstance;
@@ -45,6 +46,7 @@ internal sealed class WorkerRecorder : IWindowsRecorder
     public string ApplicationName => status.ApplicationName;
     public int CaptureProcessId => status.Metrics?.CaptureProcessId ?? 0;
     public RecorderMetrics Metrics => status.Metrics;
+    public string EngineCapabilityContext => status.Instance + ":" + status.EngineCapabilityContext;
     public event Action Changed, OpenSettingsRequested, OverlayRequested, QuitRequested, PreparingScreenshot;
     public event Action<string, string, NotificationKind, int> Notification;
     public event Action<string, bool> Saved;
@@ -52,9 +54,11 @@ internal sealed class WorkerRecorder : IWindowsRecorder
     {
         if (disposed || next == null) return;
         if (retiredInstances.Contains(next.Instance)) return;
+        string previousContext = EngineCapabilityContext;
         if (next.Instance != status.Instance) { retiredInstances.Add(status.Instance); status = next; sequence = next.Sequence; }
         else if (next.Revision >= status.Revision) status = next;
         else return;
+        if (previousContext != EngineCapabilityContext || status.Applying || status.Phase is CapturePhase.Recovering or CapturePhase.Reconnecting or CapturePhase.Unknown) capabilityRevision++;
         if (!status.Applying && pendingApply != null && (status.CompletedApply == pendingApply || status.Instance != applyInstance))
         { modeKnown = true; pendingApply = null; }
         if (pendingApply == null) modeKnown = !status.Applying;
@@ -87,7 +91,7 @@ internal sealed class WorkerRecorder : IWindowsRecorder
             {
                 if (lifetime.IsCancellationRequested) break;
                 Log.Write("Recorder connection unavailable: " + ex.Message);
-                post(() => { if (!disposed) { modeKnown = false; status.Ready = false; status.CanSave = false; status.Phase = CapturePhase.Reconnecting; status.State = "Recorder unavailable · reconnecting…"; Changed?.Invoke(); } });
+                post(() => { if (!disposed) { capabilityRevision++; modeKnown = false; status.Ready = false; status.CanSave = false; status.Phase = CapturePhase.Reconnecting; status.State = "Recorder unavailable · reconnecting…"; Changed?.Invoke(); } });
                 if (ex is WorkerProtocolMismatchException)
                 {
                     post(() => { if (!disposed) { status.State = ex.Message; Notification?.Invoke("Recorder build mismatch", ex.Message, NotificationKind.Warning, 6000); Changed?.Invoke(); } });
@@ -128,6 +132,21 @@ internal sealed class WorkerRecorder : IWindowsRecorder
         await ApplyCommand(new WorkerRequest { Command = "apply", Settings = next, Value = startup });
     }
     public Task RepairMediaAsync() => ApplyCommand(new WorkerRequest { Command = "repairMedia" });
+    public async Task<RecordingEngineCapabilities> ProbeMediaAsync()
+    {
+        long revision = capabilityRevision;
+        string instance = status.Instance, context = status.EngineCapabilityContext;
+        var request = new WorkerRequest { Command = "probeMedia" };
+        var reply = await (send == null ? WorkerProtocol.CallAsync(DataDirectory, request, lifetime.Token) : send(request));
+        if (reply.Error != null) throw new InvalidOperationException(reply.Error);
+        if (revision != capabilityRevision || status.Instance != instance || status.EngineCapabilityContext != context ||
+            reply.Status == null || reply.Status.Instance != instance || reply.Status.EngineCapabilityContext != context)
+            throw new IOException("Recorder changed during the engine check. Check again.");
+        Update(reply.Status);
+        if (revision != capabilityRevision || status.Applying || status.Phase is CapturePhase.Recovering or CapturePhase.Reconnecting or CapturePhase.Unknown)
+            throw new IOException("Recorder became unavailable during the engine check. Check again.");
+        return reply.Capabilities ?? throw new IOException("Recorder did not return recording engine capabilities. Reconnect to the current build.");
+    }
     async Task ApplyCommand(WorkerRequest request)
     {
         if (Applying) throw new InvalidOperationException("Wait for the current settings change.");

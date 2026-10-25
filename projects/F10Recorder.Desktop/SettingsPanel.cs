@@ -25,14 +25,19 @@ internal sealed class SettingsPanel : UserControl
     readonly TextBlock state = Ui.Label("Paused", 15, Ui.Warning, FontWeight.SemiBold), stateDetail = Ui.Label("", 12, Ui.Muted), estimate = Ui.Label("", 12, Ui.Muted), error = Ui.Label("", 13, Ui.Warning), codecStatus = Ui.Label("Checking your GPU…", 12, Ui.Muted);
     readonly TextBlock audioFormat = Ui.Label("", 13, Ui.Muted), playbackDevice = Ui.Label("Windows default · automatic", 13, Ui.Muted);
     readonly Button apply;
+    readonly Button repairEngine = Ui.Button("Repair recording engine"), recheckEngine = Ui.Button("Check engine again");
+    readonly TextBlock engineStatus = Ui.Label("Checking recording engine…", 12, Ui.Muted);
     readonly ContentControl page = new();
     readonly List<StackPanel> pages = [];
     readonly List<Button> navigation = [];
     bool updating, loaded, probing = true;
+    string capabilityContext;
+    bool probeInvalidated;
     public Action CloseRequested;
     internal Settings Submitted { get; private set; }
     internal string Error => error.Text;
     internal bool CodecCheckFinished => !probing;
+    internal string EngineStatus => engineStatus.Text;
     internal int SelectedPage { get; private set; }
 
     public SettingsPanel(IWindowsRecorder session)
@@ -73,6 +78,8 @@ internal sealed class SettingsPanel : UserControl
         var logs = Ui.Button("Diagnostic logs", () => { try { RecorderHost.OpenFolder(recorder.DataDirectory); } catch (Exception ex) { error.Text = ex.Message; } }); logs.Padding = new Thickness(0); logs.Background = Brushes.Transparent; logs.Foreground = Ui.Muted; info.Children.Add(logs); footerGrid.Children.Add(info);
         var close = Ui.Button("Close", () => CloseRequested?.Invoke()); Grid.SetColumn(close, 1); footerGrid.Children.Add(close);
         apply = Ui.Button("Apply changes", primary: true); apply.Name = "ApplySettings"; apply.Click += async (_, _) => await ApplyAsync(); Grid.SetColumn(apply, 2); footerGrid.Children.Add(apply);
+        repairEngine.Name = "RepairRecordingEngine"; recheckEngine.Name = "RecheckRecordingEngine"; engineStatus.Name = "RecordingEngineStatus";
+        repairEngine.Click += async (_, _) => await RepairEngineAsync(); recheckEngine.Click += async (_, _) => await ProbeAsync();
         footer.Children.Add(footerGrid); Grid.SetRow(footer, 3); root.Children.Add(footer); Content = root;
         recording.PropertyChanged += (_, e) => { if (!updating && e.Property == ToggleButton.IsCheckedProperty) recorder.Pause(recording.IsChecked != true); };
         minutes.PropertyChanged += (_, e) => { if (e.Property == NumericUpDown.ValueProperty) Estimate(); }; bitrate.PropertyChanged += (_, e) => { if (e.Property == NumericUpDown.ValueProperty) Estimate(); };
@@ -134,7 +141,10 @@ internal sealed class SettingsPanel : UserControl
         body.Children.Add(Ui.Label("Clips", 15, null, FontWeight.SemiBold)); body.Children.Add(Ui.Label("MP4 folders follow the selected application in window mode, or the foreground application in monitor mode.", 12, Ui.Muted)); body.Children.Add(Folder(clips));
         var label = Ui.Label("Screenshots", 15, null, FontWeight.SemiBold); label.Margin = new Thickness(0, 24, 0, 0); body.Children.Add(label); body.Children.Add(Ui.Label("PNG files use a separately configured location.", 12, Ui.Muted)); body.Children.Add(Folder(screenshots));
         var engine = Ui.Label("Recording engine", 15, null, FontWeight.SemiBold); engine.Margin = new Thickness(0, 26, 0, 6); body.Children.Add(engine);
-        body.Children.Add(Ui.Label("Setup reuses a compatible FFmpeg installation or provides a verified private copy automatically.", 12, Ui.Muted)); return body;
+        body.Children.Add(Ui.Label("F10 uses only its approved, verified recording engine. Repair replaces missing or rejected engine files and preserves your preferences and saved media. An internet connection may be needed.", 12, Ui.Muted));
+        body.Children.Add(engineStatus);
+        var engineActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 12, 0, 0) };
+        engineActions.Children.Add(recheckEngine); engineActions.Children.Add(repairEngine); body.Children.Add(engineActions); return body;
     }
     Control Folder(TextBox text)
     {
@@ -162,24 +172,51 @@ internal sealed class SettingsPanel : UserControl
             AutomationProperties.SetHelpText(button, selected ? "Current settings section." : "Open this settings section.");
         }
     }
-    async Task ProbeAsync()
+    internal async Task ProbeAsync()
     {
+        string selected = (codec.SelectedItem as EncoderOption)?.Codec ?? recorder.Config.VideoCodec;
+        probing = true; codec.ItemsSource = Array.Empty<EncoderOption>(); codec.SelectedItem = null;
+        capabilityContext = null; probeInvalidated = false;
+        string checkingContext = recorder.EngineCapabilityContext;
+        codecStatus.Text = engineStatus.Text = "Checking approved engine and GPU initialization…"; UpdateState();
         try
         {
-            var choices = await Task.Run(() => EncoderCapabilities.Probe(MediaDependency.ResolveExecutable()));
-            codec.ItemsSource = choices; codec.SelectedItem = choices.FirstOrDefault(c => c.Codec == recorder.Config.VideoCodec) ?? choices.FirstOrDefault();
-            codecStatus.Text = choices.Count > 0 ? "Available: " + string.Join(" / ", choices.Select(c => c.Codec.Replace("_nvenc", "").ToUpperInvariant())) : "No GPU encoder initialized. Check the NVIDIA driver or repair the installation.";
+            var receipt = await recorder.ProbeMediaAsync(); var choices = receipt.Encoders;
+            UpdateState();
+            if (probeInvalidated || checkingContext != recorder.EngineCapabilityContext) throw new IOException("Recording engine state changed during the check. Check again.");
+            capabilityContext = recorder.EngineCapabilityContext;
+            codec.ItemsSource = choices; codec.SelectedItem = choices.FirstOrDefault(c => c.Codec == selected) ?? choices.FirstOrDefault();
+            codecStatus.Text = choices.Length > 0 ? "Initialized: " + string.Join(" / ", choices.Select(c => c.Codec.Replace("_nvenc", "").ToUpperInvariant())) + ". Generated 256×256 frame at 30 FPS; other capture settings require their own checks." : "No GPU encoder initialized. Check the NVIDIA driver, then check again.";
+            engineStatus.Text = "Approved engine " + receipt.PackageVersion + " verified at " + receipt.CheckedUtc + ". " + codecStatus.Text;
         }
-        catch (Exception ex) { codecStatus.Text = ex.Message; }
+        catch (Exception ex) { codec.ItemsSource = Array.Empty<EncoderOption>(); codec.SelectedItem = null; codecStatus.Text = engineStatus.Text = ex.Message; }
+        finally { probing = false; UpdateState(); }
+    }
+    internal async Task RepairEngineAsync()
+    {
+        if (probing || recorder.Applying) return;
+        probing = true; codec.ItemsSource = Array.Empty<EncoderOption>(); codec.SelectedItem = null;
+        codecStatus.Text = engineStatus.Text = "Repairing recording engine…"; error.Text = ""; UpdateState();
+        try { await recorder.RepairMediaAsync(); await ProbeAsync(); }
+        catch (Exception ex) { error.Text = codecStatus.Text = engineStatus.Text = ex.Message; }
         finally { probing = false; UpdateState(); }
     }
     public void UpdateState()
     {
+        if (probing && (recorder.Applying || recorder.Phase is CapturePhase.Recovering or CapturePhase.Reconnecting or CapturePhase.Unknown)) probeInvalidated = true;
+        if (!probing && capabilityContext != null && (capabilityContext != recorder.EngineCapabilityContext || recorder.Applying || recorder.Phase is CapturePhase.Recovering or CapturePhase.Reconnecting or CapturePhase.Unknown))
+        {
+            capabilityContext = null; codec.ItemsSource = Array.Empty<EncoderOption>(); codec.SelectedItem = null;
+            codecStatus.Text = engineStatus.Text = "Recording engine state changed. Check again before choosing a codec.";
+        }
         updating = true; recording.IsChecked = !recorder.Paused; updating = false;
         var status = ReplayPresentation.Describe(recorder.Phase, recorder.State, recorder.Paused, recorder.Ready, recorder.CanSave, recorder.Applying, recorder.Saving, recorder.SaveRegistered, recorder.Metrics?.BufferedSeconds ?? 0);
         state.Text = status.Heading; state.Foreground = status.Healthy && recorder.SaveRegistered ? Ui.Accent : Ui.Warning; stateDetail.Text = status.Detail;
         quickSave.IsEnabled = status.CanSave; quickScreenshot.IsEnabled = !recorder.Applying && !recorder.ScreenshotInProgress;
         apply.IsEnabled = !probing && codec.SelectedItem != null && !recorder.Applying;
+        codec.IsEnabled = !probing && !recorder.Applying;
+        recheckEngine.IsEnabled = repairEngine.IsEnabled = !probing && !recorder.Applying;
+        repairEngine.Content = recorder.Applying ? "Working…" : "Repair recording engine";
         apply.Content = recorder.Applying ? "Applying…" : "Apply changes"; recording.IsEnabled = !recorder.Applying && recorder.Phase != CapturePhase.Reconnecting && recorder.Phase != CapturePhase.Unknown;
     }
     void RefreshWindows()

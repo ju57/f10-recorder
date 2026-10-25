@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <title>Illustrative game recording frame, warehouse</title>
+  <path fill="#6f8188" d="M0 0h320v180H0z"/>
+  <path fill="#424e54" d="M0 0h320v36H0z"/>
+  <path fill="#576268" d="m0 36 133 35v57L0 166zm320 0L187 71v57l133 38z"/>
+  <path fill="#929796" d="m0 180 133-57h54l133 57z"/>
+  <path fill="#a1acac" d="M133 69h54v56h-54z"/>
+  <path fill="#728b93" d="M143 77h34v46h-34z"/>
+  <path fill="#a47751" d="M25 100h65v49H25zM210 109h46v39h-46z"/>
+  <path stroke="#c29970" stroke-width="3" d="M25 111h65m-44-11v49m21-49v49m143-29h46m-25-11v39"/>
+  <path stroke="#b5bcb8" stroke-width="3" d="M16 7v154M304 7v154M44 17h232M83 32h155"/>
+  <path fill="#262f32" d="m196 180 14-27 26-9 32 6 29 30z"/>
+  <path stroke="#ebefda" stroke-width="2" d="M153 90h5m4 0h5m-7-7v5m0 4v5"/>
+  <path fill="#20262b" opacity=".7" d="M8 8h43v34H8zM116 6h88v12h-88zM8 162h68v10H8z"/>
+</svg>

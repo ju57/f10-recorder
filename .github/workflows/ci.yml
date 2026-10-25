@@ -51,6 +51,19 @@ jobs:
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-ownership artifacts/replay-ownership-ci
       - name: Verify capture status without capture or GPU
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --capture-status artifacts/capture-status-ci
+      - name: Verify engine capability responses without capture or GPU
+        shell: pwsh
+        run: |
+          dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --engine-capabilities artifacts/engine-capabilities-ci
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --engine-capabilities artifacts/engine-capabilities-control-ci --sensitivity-control
+          if ($LASTEXITCODE -ne 1) { throw 'Capability sensitivity control did not fail as expected.' }
+          $control = Get-Content artifacts/engine-capabilities-control-ci/verification.json -Raw | ConvertFrom-Json
+          $unexpected = @($control.checks | Where-Object result -ne 'passed')
+          if ($control.result -ne 'failed' -or -not $control.sensitivityControl -or @($control.checks).Count -ne 4 -or $unexpected.Count -ne 1 -or $unexpected[0].name -ne 'missing-capability-response-must-reject') {
+            throw 'Capability sensitivity control failed for an unintended reason.'
+          }
+          exit 0
       - name: Verify test launch effects without UI or capture
         shell: pwsh
         run: ./tests/verification-launch-checks.ps1

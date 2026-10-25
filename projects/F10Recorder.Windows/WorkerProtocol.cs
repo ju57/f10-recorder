@@ -53,6 +53,7 @@ internal sealed class WorkerStatus
 {
     public string Instance;
     public string CompletedApply;
+    public string EngineCapabilityContext;
     public long Revision;
     public Settings Config;
     public bool Paused, Ready, Applying, Saving, ScreenshotInProgress, SaveRegistered, OverlayRegistered, ScreenshotRegistered, Stopping;
@@ -70,12 +71,13 @@ internal sealed class WorkerReply
     public int Version = WorkerProtocol.Version;
     public string Error;
     public WorkerStatus Status;
+    public RecordingEngineCapabilities Capabilities;
 }
 internal sealed class WorkerProtocolMismatchException(string message) : IOException(message);
 
 internal static class WorkerProtocol
 {
-    internal const int Version = 3;
+    internal const int Version = 4;
     internal static bool WasStopped(string data)
     {
         try { return JsonSerializer.Deserialize<WorkerPersistentState>(File.ReadAllText(Path.Combine(data, "worker-state.json")), Json)?.UserStopped == true; }
@@ -103,7 +105,7 @@ internal static class WorkerProtocol
     internal static async Task<WorkerReply> CallAsync(string data, WorkerRequest request, CancellationToken cancellation = default)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-        deadline.CancelAfter(request.Command == "repairMedia" ? TimeSpan.FromSeconds(180) : request.Command is "apply" or "quit" ? TimeSpan.FromSeconds(40) : TimeSpan.FromSeconds(5));
+        deadline.CancelAfter(request.Command == "repairMedia" ? TimeSpan.FromSeconds(180) : request.Command is "apply" or "quit" or "probeMedia" ? TimeSpan.FromSeconds(40) : TimeSpan.FromSeconds(5));
         using var pipe = new NamedPipeClientStream(".", WorkerIdentity.PipeName(data), PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
         await pipe.ConnectAsync(deadline.Token).ConfigureAwait(false);
         await WriteAsync(pipe, request, deadline.Token).ConfigureAwait(false);
