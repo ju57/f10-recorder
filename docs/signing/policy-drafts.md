@@ -4,13 +4,13 @@ Prepared 25 October 2026 for [issue #48](https://github.com/ju57/f10-recorder/is
 
 ## Code signing policy — proposed public copy
 
-F10 Recorder is maintained publicly by **ju57** at [ju57/f10-recorder](https://github.com/ju57/f10-recorder). We intend to sign approved F10 Windows application and installer releases using SignPath Foundation, subject to provider acceptance and verified build provenance. Signing is not currently available through an approved F10 Foundation configuration.
+F10 is maintained publicly by **ju57** at [ju57/f10-recorder](https://github.com/ju57/f10-recorder). We intend to sign approved F10 Windows application and installer releases using SignPath Foundation, subject to provider acceptance and verified build provenance. Signing is not currently available through an approved F10 Foundation configuration.
 
 After approval and activation, replace that status sentence with the required credit, preserving its links:
 
 > Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
 
-The certificate publisher will be the Foundation if accepted; **ju57** and **F10 Recorder** remain public maintainer/product branding. A signature does not certify recorder feature completeness or every release gate. A new signed binary may still receive a SmartScreen warning; [Microsoft explains the reputation signals](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation).
+The certificate publisher will be the Foundation if accepted; **ju57** and **F10** remain public maintainer/product branding. A signature does not certify recorder feature completeness or every release gate. A new signed binary may still receive a SmartScreen warning; [Microsoft explains the reputation signals](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation).
 
 Proposed accountable people: owner/committer **@ju57**, source/build reviewer **@ju57 pending confirmation and any additional reviewer**, signing approver **@ju57 pending confirmation**. Before publishing the active policy, replace all pending assignments with the confirmed public roster or permission-group links. Resolve provider acceptance of overlapping roles and name an incident contact; do not publish this draft as an established team. AI assistance does not supply a human signing approval.
 
@@ -20,7 +20,7 @@ Confirmed team members will use MFA for source and signing access. CI submission
 
 ## Privacy policy — proposed public copy
 
-F10 Recorder saves replay video, screenshots and recording preferences locally. The current prototype captures its applied monitor or selected window and optional system audio. Its rolling replay cache is stored on disk. Saved media remains in the selected local folders; choosing a synchronized or network folder can cause that folder's service to transmit files under its own settings. Select local storage if that behavior is unwanted. Future manual recording and microphone features require updated policy and exact-version verification before being represented as available.
+F10 saves replay video, screenshots and recording preferences locally. The current prototype captures its applied monitor or selected window and optional system audio. Its rolling replay cache is stored on disk. Saved media remains in the selected local folders; choosing a synchronized or network folder can cause that folder's service to transmit files under its own settings. Select local storage if that behavior is unwanted. Future manual recording and microphone features require updated policy and exact-version verification before being represented as available.
 
 F10 does not automatically upload recordings, telemetry or crash reports. It stores local diagnostic logs and profile/worker state; these may expose paths, application/device details or errors. Review and redact information before choosing to share it. The accepted beta design includes an inspectable redacted diagnostic export, but this draft does not claim that the complete export feature exists in the prototype. Do not attach raw media or private logs to public issues.
 

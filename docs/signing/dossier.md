@@ -19,7 +19,7 @@ All **12 mandatory gates** remain open: G-CAP, G-COEX, G-REPLAY, G-AV, G-STORE, 
 
 | Field | Proposed submission value / evidence | What remains unknown |
 | --- | --- | --- |
-| Project and public brand | **F10 Recorder**, maintained publicly as **ju57**; [repository](https://github.com/ju57/f10-recorder). Accepted in [beta spec](../beta-spec.md), signing/distribution section. | No separate trademark or corporate identity is established. |
+| Project and public brand | **F10**, maintained publicly as **ju57**; [repository](https://github.com/ju57/f10-recorder). Accepted in the [brand guidelines](../brand-guidelines.md#approved-identity) and [beta spec](../beta-spec.md). | No separate trademark or corporate identity is established. Internal project, executable and existing folder identifiers are not automatically renamed. |
 | Maintainer location | Portugal, supplied by the human task context and accepted plan. | No address, legal name, entity status or identity document was inspected. |
 | Certificate publisher | **SignPath Foundation**, conditional on approval; [Foundation explanation](https://signpath.org/). | No issued certificate, subject string, thumbprint or active subscription exists in the inspected evidence. |
 | Public labels | Preserve ju57/F10 name, product metadata and release attribution. | A GitHub handle is not a validated legal publisher. Do not promise a ju57 certificate subject. |
@@ -67,7 +67,7 @@ This is an evidence outline, **not a verified transcription of application form 
 
 | Submission topic | Prepared text / attachment | Missing fact |
 | --- | --- | --- |
-| Project | “F10 Recorder is an MIT-licensed local rolling replay recorder for Windows/NVIDIA, written in C#/.NET with Avalonia; Linux capture is planned.” README and repository URL. | Final public download/documentation URL and intended artifact version. |
+| Project | “F10 is an MIT-licensed local rolling replay recorder for Windows/NVIDIA, written in C#/.NET with Avalonia; Linux capture is planned.” README and repository URL. | Final public download/documentation URL and intended artifact version. |
 | Requested route | Free SignPath Foundation assessment; ju57 brand retained, Foundation publisher accepted if approved. | Provider decision and application/contact authorization. |
 | Source and builds | Public repository; immutable source/build/dependency plan and exact signing allowlist. | Actual hosted candidate/run/artifact IDs, metadata, hashes and provider project/policy IDs. |
 | Maintenance/reputation | Repository creation date and present public counts stated honestly. | Existing release-form clarification; verifiable adoption/history or affiliations, only if true and consented. |
