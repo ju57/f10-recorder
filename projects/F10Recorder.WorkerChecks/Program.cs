@@ -25,6 +25,7 @@ internal static class WorkerChecks
         if (args.Length == 2 && args[0] == "--replay-ownership") return ReplayOwnershipChecks.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--capture-status") return CaptureStatusChecks.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--profile-migration") return ProfileWorkerChecks.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 2 && args[0] == "--profile-status-transport") return ProfileStatusTransportChecks.Run(Path.GetFullPath(args[1]));
         if (args.Length >= 2 && args[0] == "--engine-capabilities") return EngineCapabilityChecks.Run(Path.GetFullPath(args[1]), args.Contains("--sensitivity-control"));
         int engineRootIndex = Array.IndexOf(args, "--engine-root");
         if (engineRootIndex >= 0) MediaDependency.RootDirectory = Path.GetFullPath(args[engineRootIndex + 1]);

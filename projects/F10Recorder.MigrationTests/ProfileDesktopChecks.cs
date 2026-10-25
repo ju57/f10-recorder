@@ -26,11 +26,12 @@ internal static class ProfileDesktopChecks
         {
             try
             {
-                Require(snapshots.Length == 8, "Expected eight real worker outcomes.");
+                Require(snapshots.Length == 11, "Expected eleven real worker outcomes, including opaque preference transport.");
                 foreach (var status in snapshots)
                 {
                     using var client = new WorkerRecorder(status, _ => throw new Exception("Offscreen migration checks must not issue engine/capture commands."));
                     var panel = new SettingsPanel(client); client.Changed += panel.UpdateState;
+                    Require(status.Config.AdditionalPreferences.Count == 0, "Desktop snapshots must not carry worker-owned opaque preference data.");
                     var controls = panel.GetLogicalDescendants().OfType<Control>().ToArray();
                     var feedback = controls.OfType<TextBlock>().SingleOrDefault(c => c.Name == "ProfileCompatibility");
                     Require(feedback != null && feedback.Text == status.ProfileStatus.Message, "Desktop must expose the worker's migration/correction result.");
@@ -51,6 +52,19 @@ internal static class ProfileDesktopChecks
                         using var bitmap = new RenderTargetBitmap(new PixelSize(900, 160)); bitmap.Render(feedback); bitmap.Save(Path.Combine(data, "profile-correction.png"), PngBitmapEncoderOptions.Default);
                     }
                     cases.Add(new { status.ProfileStatus.Outcome, status.ProfileStatus.ExistingProfile, canResume, result = "passed" });
+                }
+                Require(snapshots.Count(s => s.RetainedPreferenceCount == 1) == 3, "Expected small, Unicode and near-limit opaque preference receipts.");
+                var rejection = JsonSerializer.Deserialize<WorkerReply>(File.ReadAllText(Path.Combine(Path.GetDirectoryName(snapshotsPath), "large-unicode", "correction-reply.json")), WorkerProtocol.Json);
+                var heldStatus = snapshots.Single(s => s.Instance == rejection.Status.Instance);
+                using (var client = new WorkerRecorder(heldStatus, _ => System.Threading.Tasks.Task.FromResult(rejection)))
+                {
+                    var panel = new SettingsPanel(client); client.Changed += panel.UpdateState;
+                    var notice = new System.Threading.Tasks.TaskCompletionSource<string>();
+                    client.Notification += (_, message, _, _) => notice.TrySetResult(message);
+                    client.Pause(false);
+                    string message = await notice.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                    Require(message.Contains("Encoded profile exceeds 1 MiB") && message.Contains("Original preserved") && client.Paused && client.ProfileStatus.ActivationRequired && client.Config.VideoCodec == "hevc_nvenc" && !client.Config.SystemAudio,
+                        "Desktop must surface the actual bounded correction failure while preserving represented intent and the activation hold.");
                 }
                 var selectedCodec = snapshots[0];
                 using (var client = new WorkerRecorder(selectedCodec, request =>

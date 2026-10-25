@@ -39,6 +39,11 @@ controls and a controlled capability response. Neither route opens visible or
 capture-excluded UI, launches an engine, uses a GPU, captures pixels/audio, writes
 startup settings or touches the installed recorder. See
 [profile migration checks](profile-migration.md) for format, commands and limits.
+The worker/Desktop routes include large Unicode and near-limit opaque preferences,
+with bounded status/correction replies and original-byte preservation.
+`-StatusTransportOnly -Plan` previews the separate CI projection/protocol/headless
+client checks. That route opens no native recorder/windows/shortcuts/pipes and
+uses no GPU/capture/startup behavior; only local fixture/report files are created.
 
 `./tests/settings-validation.ps1` exercises a paused direct recorder host with
 missing and untrusted engines in isolated storage. It creates hidden shortcut

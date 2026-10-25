@@ -62,6 +62,15 @@ manual/setup/shell fields. Migration never writes external startup preferences.
 Obsolete `FfmpegPath` is excluded from current settings but remains in the exact
 original; it never controls engine trust.
 
+Worker status sends a separate copy of represented settings, plus
+`RetainedPreferenceCount`. Opaque preference values remain worker-owned and never
+consume the reply envelope. The desktop's correction request still merges with
+the worker's retained preferences before persistence. Disk serialization retains
+opaque data; the framed protocol keeps its 1 MiB limit. A raw document admitted
+at load can still require correction before canonical persistence (for example,
+Unicode escaping can expand it); that rejection must remain bounded/actionable
+and preserve originals without activating capture.
+
 After an authenticated capability response, a partly invalid activation-held
 profile can retain its valid unavailable saved codec while correcting another
 field. That item is labelled a saved unavailable preference, never an initialized
@@ -89,6 +98,7 @@ Preview the actual worker/offscreen routes, then omit `-Plan`:
 ```powershell
 ./tests/profile-migration.ps1 -Plan
 ./tests/profile-migration.ps1 -Plan -DesktopOnly -SnapshotsPath <worker-output>/worker-snapshots.json
+./tests/profile-migration.ps1 -Plan -StatusTransportOnly
 ```
 
 `-Dotnet`, `-BuildDirectory`, `-DataDirectory` and `-NoBuild` support isolated SDK,
@@ -100,7 +110,9 @@ The worker route uses isolated hidden Ctrl+Alt+Shift+F4–F6 shortcuts, bounded
 protocol calls and task-owned hidden-window Save/Screenshot messages, with no
 physical keyboard input. It covers legacy, current paused/stopped, partial-invalid,
 future settings/state, malformed/interrupted state, reconnect and competing-owner
-rejection. Workers use an isolated missing-engine root and stay paused/blocked:
+rejection. It also covers small opaque preferences, literal Unicode expansion and
+near-limit ASCII documents whose full status would exceed the reply envelope.
+Workers use an isolated missing-engine root and stay paused/blocked:
 no visible/capture-excluded UI, encoder/GPU, pixels/audio/mic, startup writes,
 downloads or installed-recorder mutation. Reports retain process IDs, input and
 media-sentinel hashes and owned-worker exit.
@@ -110,11 +122,22 @@ checks its identity-specific unavailable result, without creating a source windo
 or acquiring pixels. It verifies target resolution survives deliberate pause;
 successful screenshot pixel output remains outside this route's acceptance.
 
-Desktop consumes actual worker snapshots through the production client and
+Desktop consumes all eleven actual worker snapshots through the production client and
 offscreen Settings controls, checks stale-worker rejection, and renders correction
-text. A controlled capability response tests no silent codec substitution. No
+text. It also consumes the actual bounded canonical-write rejection through the
+client notification path. A controlled capability response tests no silent codec substitution. No
 platform Window, affinity, GPU, engine probe or live device is used. This verifies
 controls/feedback, not native window/focus/accessibility/DPI acceptance.
+
+`-StatusTransportOnly` is the maintained Windows CI route. It exercises the
+production snapshot projection, framed Write/Read and headless worker client with
+small, Unicode and near-limit ASCII inputs. It checks reconnect, source-object
+and disk preservation and the opaque-count receipt. Its unprojected oversized
+control must still throw before any header/body bytes are written; it does not
+make a manually oversized reply valid. This route creates only isolated local
+files: no native recorder, window, shortcut, named pipe, engine, GPU or capture.
+The real worker route separately protects Snapshot wiring, ownership and actual
+pipe/client behavior.
 
 File sentinels establish byte preservation, not playable-media/A/V acceptance.
 No genuine cross-account/session/reparse-alias trial, live acquisition, saved-video

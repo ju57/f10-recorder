@@ -56,6 +56,7 @@ internal sealed class WorkerStatus
     public string EngineCapabilityContext;
     public long Revision;
     public Settings Config;
+    public int RetainedPreferenceCount;
     public ProfileStatus ProfileStatus = new();
     public bool Paused, Ready, Applying, Saving, ScreenshotInProgress, SaveRegistered, OverlayRegistered, ScreenshotRegistered, Stopping;
     public CapturePhase Phase;
@@ -65,6 +66,20 @@ internal sealed class WorkerStatus
     public long Sequence;
     public RecorderMetrics Metrics;
     public WorkerEvent[] Events = [];
+
+    // The desktop edits represented settings. Opaque future preferences remain
+    // worker-owned: their JSON escaping and size must not consume reply space.
+    internal WorkerStatus ForClient()
+    {
+        var result = (WorkerStatus)MemberwiseClone();
+        if (Config != null)
+        {
+            result.Config = new Settings();
+            foreach (var field in Settings.StoredFields) field.SetValue(result.Config, field.GetValue(Config));
+            result.RetainedPreferenceCount = Math.Max(RetainedPreferenceCount, Config.AdditionalPreferences?.Count ?? 0);
+        }
+        return result;
+    }
 }
 internal sealed class WorkerReply
 {

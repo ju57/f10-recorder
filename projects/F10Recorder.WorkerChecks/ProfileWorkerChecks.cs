@@ -21,10 +21,20 @@ internal static class ProfileWorkerChecks
         if (scenario is not ("current-paused" or "current-stopped")) legacy.Remove("SchemaVersion");
         if (scenario == "part-invalid") legacy["FramesPerSecond"] = 999;
         if (scenario == "future-settings") legacy["SchemaVersion"] = 999;
-        File.WriteAllText(settings, legacy.ToJsonString());
+        string opaque = scenario == "large-unicode" ? new string('é', 180000) : scenario == "small-opaque" ? "preserve-small" : "";
+        if (scenario is "large-unicode" or "small-opaque" or "near-limit-ascii") legacy["OpaquePreference"] = opaque;
+        var fixtureJson = new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        if (scenario == "near-limit-ascii")
+        {
+            opaque = new string('a', WorkerProtocol.MaxBytes - 128 - System.Text.Encoding.UTF8.GetByteCount(legacy.ToJsonString(fixtureJson)));
+            legacy["OpaquePreference"] = opaque;
+        }
+        File.WriteAllText(settings, legacy.ToJsonString(fixtureJson));
         File.WriteAllText(state, scenario == "current-paused" ? "{\"SchemaVersion\":1,\"Paused\":true,\"UserStopped\":false,\"ActivationRequired\":false}" : scenario == "current-stopped" ? "{\"SchemaVersion\":1,\"Paused\":false,\"UserStopped\":true,\"ActivationRequired\":false}" : scenario == "future-state" ? "{\"SchemaVersion\":999,\"Paused\":false}" : scenario == "malformed-state" ? "null" : "{\"Paused\":false,\"UserStopped\":true}");
         if (scenario == "interrupted") File.WriteAllText(Path.Combine(profile, "profile-migration.json"), "{\"phase\":\"settings-written\"}");
         byte[] originalSettings = File.ReadAllBytes(settings), originalState = File.ReadAllBytes(state);
+        report["activeScenario"] = scenario; report["activeInputBytes"] = originalSettings.Length;
+        report["activeInputHash"] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(originalSettings));
         string retained = Path.Combine(profile, "buffer", "session-preserved", "existing.ts"); Directory.CreateDirectory(Path.GetDirectoryName(retained)); File.WriteAllText(retained, "Existing retained input; do not clear on migration.");
         string saved = Path.Combine(profile, "preserved.mp4"); File.WriteAllText(saved, "Saved-file preservation sentinel; not playable media."); string savedHash = MediaDependency.Hash(saved);
         Task<WorkerReply> Call(string command = "status", bool value = false) => WorkerProtocol.CallAsync(profile, new WorkerRequest { Command = command, Value = value, AfterEvent = 0 });
@@ -42,6 +52,11 @@ internal static class ProfileWorkerChecks
             Require(File.ReadAllBytes(settings).SequenceEqual(originalSettings) && File.ReadAllBytes(state).SequenceEqual(originalState), "Opening a migration worker must not rewrite settings or pause/stopped intent.");
             Require(File.Exists(retained), "Opening a migration worker must preserve existing retained cache inputs.");
             Require(reply.Status.ProfileStatus.ExistingProfile && reply.Status.Config.VideoCodec == "hevc_nvenc" && !reply.Status.Config.SystemAudio && reply.Status.Config.DisplayIndex == 0 && reply.Status.Config.WindowExecutable == config.WindowExecutable, scenario + ": worker lost valid source/codec/zero/audio intent.");
+            if (opaque.Length > 0)
+            {
+                Require(reply.Status.Config.AdditionalPreferences.Count == 0 && reply.Status.RetainedPreferenceCount == 1 && RecordingProfile.Load(profile).Settings.AdditionalPreferences["OpaquePreference"].GetString() == opaque, "Opaque preferences must stay intact in the worker profile rather than expanding client status.");
+                Require(JsonSerializer.SerializeToUtf8Bytes(reply, WorkerProtocol.Json).Length <= WorkerProtocol.MaxBytes, "The actual worker reply exceeds the unchanged transport bound.");
+            }
             if (scenario == "legacy")
             {
                 var window = Native.FindWindow(null, WorkerIdentity.ControlTitle(profile)); Native.GetWindowThreadProcessId(window, out uint ownerPid);
@@ -61,6 +76,13 @@ internal static class ProfileWorkerChecks
                 Require(competitor.ExitCode != 0, "Competing worker acquired owned profile.");
             }
             Require(File.ReadAllBytes(settings).SequenceEqual(originalSettings) && File.ReadAllBytes(state).SequenceEqual(originalState) && File.Exists(retained) && MediaDependency.Hash(saved) == savedHash, "Ownership/reconnect changed original inputs/media.");
+            if (scenario == "large-unicode")
+            {
+                var rejected = Call("pause", false).GetAwaiter().GetResult();
+                Require(rejected.Error != null && rejected.Error.Contains("Encoded profile exceeds 1 MiB") && rejected.Error.Contains("Original preserved") && rejected.Status.Paused && rejected.Status.ProfileStatus.ActivationRequired && rejected.Status.Metrics.CaptureProcessId == 0, "Canonical oversize must give an actionable bounded correction without activating capture.");
+                Require(File.ReadAllBytes(settings).SequenceEqual(originalSettings) && File.ReadAllBytes(state).SequenceEqual(originalState) && RecordingProfile.Load(profile).Settings.AdditionalPreferences["OpaquePreference"].GetString() == opaque && File.Exists(retained) && MediaDependency.Hash(saved) == savedHash, "Rejected correction changed original opaque preferences/state/media.");
+                File.WriteAllText(Path.Combine(profile, "correction-reply.json"), JsonSerializer.Serialize(rejected, WorkerProtocol.Json));
+            }
             if (scenario == "current-stopped")
             {
                 var paused = Call("pause", true).GetAwaiter().GetResult();
@@ -98,7 +120,7 @@ internal static class ProfileWorkerChecks
         }
         try
         {
-            foreach (string scenario in new[] { "legacy", "current-paused", "current-stopped", "part-invalid", "future-settings", "future-state", "malformed-state", "interrupted" }) Scenario(scenario);
+            foreach (string scenario in new[] { "legacy", "current-paused", "current-stopped", "part-invalid", "future-settings", "future-state", "malformed-state", "interrupted", "large-unicode", "small-opaque", "near-limit-ascii" }) Scenario(scenario);
             Require(WindowsStartup.Enabled == startupBefore, "Migration changed startup."); report["result"] = "passed";
         }
         catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); }
