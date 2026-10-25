@@ -62,6 +62,22 @@ internal static class ProfileDesktopChecks
                     var panel = new SettingsPanel(client); await panel.ProbeAsync();
                     Require(panel.GetLogicalDescendants().OfType<ComboBox>().Single(c => c.Name == "VideoCodec").SelectedItem == null && client.Config.VideoCodec == "hevc_nvenc", "An unavailable valid codec must remain selected intent, without silently substituting another codec during correction.");
                 }
+                var partialCodec = snapshots.Single(s => s.ProfileStatus.Outcome == "correction-required"); Settings submitted = null;
+                using (var client = new WorkerRecorder(partialCodec, request =>
+                {
+                    if (request.Command == "probeMedia") return System.Threading.Tasks.Task.FromResult(new WorkerReply { Status = partialCodec, Capabilities = new RecordingEngineCapabilities { Encoders = new[] { new EncoderOption { Codec = "h264_nvenc", Name = "Controlled H.264 capability response" } } } });
+                    Require(request.Command == "apply", "Unexpected correction command."); submitted = request.Settings;
+                    var corrected = JsonSerializer.Deserialize<WorkerStatus>(JsonSerializer.Serialize(partialCodec, WorkerProtocol.Json), WorkerProtocol.Json);
+                    corrected.Config = submitted; corrected.CompletedApply = request.OperationId; corrected.Revision++;
+                    corrected.ProfileStatus = new ProfileStatus { ExistingProfile = true, ActivationRequired = true };
+                    return System.Threading.Tasks.Task.FromResult(new WorkerReply { Status = corrected });
+                }))
+                {
+                    var panel = new SettingsPanel(client); client.Changed += panel.UpdateState; await panel.ProbeAsync();
+                    panel.GetLogicalDescendants().OfType<ComboBox>().Single(c => c.Name == "FramesPerSecond").SelectedItem = 30;
+                    Require(panel.GetLogicalDescendants().OfType<Button>().Single(b => b.Name == "ApplySettings").IsEnabled && await panel.ApplyAsync() && submitted.VideoCodec == "hevc_nvenc" && submitted.FramesPerSecond == 30 && client.Paused && client.ProfileStatus.ActivationRequired,
+                        "Correcting FPS must retain a valid unavailable saved codec and the activation hold, after an explicit authenticated capability check.");
+                }
                 report["result"] = "passed";
             }
             catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); }

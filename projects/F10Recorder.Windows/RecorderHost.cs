@@ -112,11 +112,13 @@ internal sealed class RecorderHost : IWindowsRecorder
     public void SaveReplay() { if (!Applying && !disposed) { if (engine == null) throw new InvalidOperationException(ProfileStatus.Message); engine.Save(Config.CaptureMode == "window" ? ApplicationName : foreground.Sample()); } }
     public void Pause(bool value)
     {
-        if (Applying || disposed || Paused == value) return;
+        if (Applying || disposed) return;
+        if (value) savedPauseIntent = true;
+        if (Paused == value) return;
         if (!value && ProfileStatus.ActivationRequired)
         {
             if (!ProfileStatus.CanWrite || ProfileStatus.RequiresCorrection) throw new InvalidOperationException(ProfileStatus.Message);
-            try { profile.Commit(Config, false, false, false); }
+            try { profile.Commit(Config, paused: false, userStopped: false, activationRequired: false); }
             catch { profile = RecordingProfile.Load(DataDirectory); State = ProfileStatus.Message; Changed?.Invoke(); throw; }
             Config = profile.Settings; Paused = false; StartEngine();
         }
@@ -130,7 +132,7 @@ internal sealed class RecorderHost : IWindowsRecorder
         if (engine == null) return;
         engine.Restart(); PresentCaptureStatus(engine.ReadCaptureStatus());
     }
-    internal void PersistState(bool userStopped) { if (!ProfileStatus.ActivationRequired) profile.PersistState(savedPauseIntent, userStopped); }
+    internal void PersistState(bool userStopped) { if (!ProfileStatus.ActivationRequired) profile.PersistState(savedPauseIntent, userStopped || Paused && profile.State.UserStopped); }
     public async Task ApplyAsync(Settings next, bool startup)
     {
         if (Applying || disposed) throw new InvalidOperationException("Wait for the current settings change.");
@@ -153,7 +155,7 @@ internal sealed class RecorderHost : IWindowsRecorder
                 // Current UI editors know represented fields only. Preserve opaque future
                 // preferences/device identities rather than dropping them on correction.
                 next.AdditionalPreferences = new(profile.Settings.AdditionalPreferences);
-                if (ProfileStatus.ActivationRequired) profile.Commit(next, profile.State.Paused, profile.State.UserStopped, true);
+                if (ProfileStatus.ActivationRequired) profile.Commit(next, paused: profile.State.Paused, userStopped: profile.State.UserStopped, activationRequired: true);
                 else next.Save(settingsPath);
                 if (customStartupWriter || startup != previousStartup) startupWriter(startup);
                 Config = next; profile = RecordingProfile.Load(DataDirectory);
@@ -204,9 +206,12 @@ internal sealed class RecorderHost : IWindowsRecorder
         if (ProfileStatus.ActivationRequired) { Notification?.Invoke("Recording profile needs attention", ProfileStatus.Message, NotificationKind.Warning, 6000); return; }
         ScreenshotInProgress = true; PreparingScreenshot?.Invoke(); Changed?.Invoke();
         int display = Config.DisplayIndex; string folder = Config.ScreenshotDirectory;
-        var selected = Config.CaptureMode == "window" ? windowTarget?.ReadForScreenshot() : null;
         try
         {
+            // A paused compatible profile still supports screenshots without
+            // constructing a replay engine or clearing its retained inputs.
+            if (Config.CaptureMode == "window" && !synthetic) windowTarget ??= new WindowCaptureTarget(Config);
+            var selected = Config.CaptureMode == "window" ? windowTarget?.ReadForScreenshot() : null;
             if (PrepareRemoteScreenshot != null) await PrepareRemoteScreenshot();
             await Task.Delay(150);
             string file = await Task.Run(() =>

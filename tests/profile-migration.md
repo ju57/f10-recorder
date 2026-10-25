@@ -62,6 +62,13 @@ manual/setup/shell fields. Migration never writes external startup preferences.
 Obsolete `FfmpegPath` is excluded from current settings but remains in the exact
 original; it never controls engine trust.
 
+After an authenticated capability response, a partly invalid activation-held
+profile can retain its valid unavailable saved codec while correcting another
+field. That item is labelled a saved unavailable preference, never an initialized
+encoder. Apply keeps activation held. Ordinary active/current-profile codec
+selection still requires an available choice; empty/stale/missing capability
+responses do not enable Apply. No GPU compatibility is inferred from preservation.
+
 ## Commands and effects
 
 Portable checks need no Windows/GPU/engine:
@@ -97,6 +104,11 @@ rejection. Workers use an isolated missing-engine root and stay paused/blocked:
 no visible/capture-excluded UI, encoder/GPU, pixels/audio/mic, startup writes,
 downloads or installed-recorder mutation. Reports retain process IDs, input and
 media-sentinel hashes and owned-worker exit.
+
+The paused-window regression uses an impossible fixture executable/class and
+checks its identity-specific unavailable result, without creating a source window
+or acquiring pixels. It verifies target resolution survives deliberate pause;
+successful screenshot pixel output remains outside this route's acceptance.
 
 Desktop consumes actual worker snapshots through the production client and
 offscreen Settings controls, checks stale-worker rejection, and renders correction

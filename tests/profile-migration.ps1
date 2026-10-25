@@ -9,6 +9,7 @@ $effects = [pscustomobject]@{
     Launch=$launch; BuildAndRestore=(-not $NoBuild); RestoreMayUseNetwork=(-not $NoBuild)
     VisibleWindows=$false; CaptureExcludedSurfaces=$false; DesktopOrDeviceAudio=$false
     GpuEncoding=$false; EngineLaunch=$false; HiddenShortcuts=$(if ($DesktopOnly) { 'None' } else { 'Isolated Ctrl+Alt+Shift+F4-F6' }); OffscreenControls=[bool]$DesktopOnly
+    SourceIdentityCheck='Unavailable fixture executable/class only; no source window or image acquisition'
     StartupWrites=$false; InstalledRecorderMutation=$false; VerificationNetwork=$false
     Storage=$DataDirectory
 }

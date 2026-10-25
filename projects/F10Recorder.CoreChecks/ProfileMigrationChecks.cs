@@ -16,7 +16,7 @@ internal static class ProfileMigrationChecks
             ["CaptureMode"] = "window", ["WindowExecutable"] = Path.Combine(data, "absent.exe"), ["WindowClass"] = "AbsentClass"
         };
         if (sensitivityControl) input["VideoCodec"] = "h264_nvenc"; // Fixture mutation: HEVC preservation oracle must disagree.
-        byte[] original = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(input).Replace(",", ",\r\n"))).ToArray();
+        byte[] original = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(input, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }).Replace(",", ",\r\n"))).ToArray();
         File.WriteAllBytes(path, original);
         var loaded = Settings.Load(path);
         Require(loaded.FramesPerSecond == 60 && loaded.VideoCodec == "hevc_nvenc" && !loaded.SystemAudio && loaded.DisplayIndex == 0 && loaded.SaveKey == 118 && loaded.SaveModifiers == 0 && loaded.OutputDirectory == (string)input["OutputDirectory"] && loaded.WindowExecutable == (string)input["WindowExecutable"] && loaded.WindowClass == "AbsentClass",

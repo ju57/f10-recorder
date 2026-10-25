@@ -61,6 +61,19 @@ internal static class ProfileWorkerChecks
                 Require(competitor.ExitCode != 0, "Competing worker acquired owned profile.");
             }
             Require(File.ReadAllBytes(settings).SequenceEqual(originalSettings) && File.ReadAllBytes(state).SequenceEqual(originalState) && File.Exists(retained) && MediaDependency.Hash(saved) == savedHash, "Ownership/reconnect changed original inputs/media.");
+            if (scenario == "current-stopped")
+            {
+                var paused = Call("pause", true).GetAwaiter().GetResult();
+                var intent = RecordingProfile.Load(profile);
+                Require(paused.Error == null && intent.State.Paused && intent.State.UserStopped, "Explicit Pause on an already stopped worker must retain both deliberate pause and stop intent.");
+            }
+            if (scenario == "current-paused")
+            {
+                Call("screenshot").GetAwaiter().GetResult();
+                var timeout = Stopwatch.StartNew(); WorkerReply screenshot;
+                do { screenshot = Call().GetAwaiter().GetResult(); if (screenshot.Status.Events.Any(e => e.Title == "Screenshot not saved")) break; Thread.Sleep(20); } while (timeout.ElapsedMilliseconds < 3000);
+                Require(screenshot.Status.Events.Any(e => e.Title == "Screenshot not saved" && e.Message.Contains("Open the selected application")) && screenshot.Status.Paused && screenshot.Status.Metrics.CaptureProcessId == 0, "Paused window screenshots must resolve the preserved source identity without starting replay.");
+            }
             if (scenario is "part-invalid" or "future-settings" or "future-state" or "malformed-state" or "interrupted")
             {
                 var resume = Call("pause", false).GetAwaiter().GetResult();
@@ -68,7 +81,9 @@ internal static class ProfileWorkerChecks
                 Require(File.ReadAllBytes(settings).SequenceEqual(originalSettings) && File.ReadAllBytes(state).SequenceEqual(originalState), "Rejected Resume changed originals.");
             }
             snapshots.Add(reply.Status);
-            cases.Add(new { scenario, result = "passed", workerPid = worker.Id, instance = reply.Status.Instance, outcome = reply.Status.ProfileStatus.Outcome, settingsHash = MediaDependency.Hash(settings), stateHash = MediaDependency.Hash(state), savedHash });
+            cases.Add(new { scenario, result = "passed", workerPid = worker.Id, instance = reply.Status.Instance, outcome = reply.Status.ProfileStatus.Outcome,
+                originalSettingsHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(originalSettings)), originalStateHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(originalState)),
+                settingsHash = MediaDependency.Hash(settings), stateHash = MediaDependency.Hash(state), savedHash });
         }
         finally
         {
@@ -77,7 +92,7 @@ internal static class ProfileWorkerChecks
                 try { using var deadline = new CancellationTokenSource(3000); WorkerProtocol.CallAsync(profile, new WorkerRequest { Command = "quit" }, deadline.Token).GetAwaiter().GetResult(); } catch (Exception ex) when (ex is IOException or OperationCanceledException) { }
                 if (!worker.WaitForExit(10000)) { worker.Kill(true); worker.WaitForExit(); }
                 report["ownedWorkerExited"] = worker.HasExited; worker.Dispose();
-                if (scenario == "current-stopped") { var stopped = RecordingProfile.Load(profile); Require(!stopped.State.Paused && stopped.State.UserStopped, "Opening/quitting a stopped profile manufactured a user pause or lost stopped intent."); }
+                if (scenario == "current-stopped") { var stopped = RecordingProfile.Load(profile); Require(stopped.State.Paused && stopped.State.UserStopped, "Quit lost the explicit pause/stopped intent."); }
             }
         }
         }

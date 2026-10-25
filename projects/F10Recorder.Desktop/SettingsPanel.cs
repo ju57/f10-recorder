@@ -187,9 +187,14 @@ internal sealed class SettingsPanel : UserControl
             UpdateState();
             if (probeInvalidated || checkingContext != recorder.EngineCapabilityContext) throw new IOException("Recording engine state changed during the check. Check again.");
             capabilityContext = recorder.EngineCapabilityContext;
-            codec.ItemsSource = choices; codec.SelectedItem = choices.FirstOrDefault(c => c.Codec == selected);
+            var savedChoice = choices.FirstOrDefault(c => c.Codec == selected);
+            bool retainUnavailable = savedChoice == null && choices.Length > 0 && recorder.ProfileStatus.ActivationRequired && recorder.ProfileStatus.RequiresCorrection && recorder.ProfileStatus.CanWrite
+                && !recorder.ProfileStatus.Issues.Any(i => i.StartsWith("VideoCodec:", StringComparison.Ordinal));
+            if (retainUnavailable) savedChoice = new EncoderOption { Codec = selected, Name = selected.Replace("_nvenc", "").ToUpperInvariant() + " · saved preference, unavailable" };
+            codec.ItemsSource = retainUnavailable ? choices.Append(savedChoice).ToArray() : choices; codec.SelectedItem = savedChoice;
             codecStatus.Text = choices.Length > 0 ? "Initialized: " + string.Join(" / ", choices.Select(c => c.Codec.Replace("_nvenc", "").ToUpperInvariant())) + ". Generated 256×256 frame at 30 FPS; other capture settings require their own checks." : "No GPU encoder initialized. Check the NVIDIA driver, then check again.";
-            if (choices.Length > 0 && codec.SelectedItem == null) codecStatus.Text += " Your saved " + selected.Replace("_nvenc", "").ToUpperInvariant() + " choice is unavailable. Check again or explicitly choose another codec.";
+            if (retainUnavailable) codecStatus.Text += " Corrections keep your unavailable saved codec; replay remains paused until you explicitly resume.";
+            else if (choices.Length > 0 && codec.SelectedItem == null) codecStatus.Text += " Your saved " + selected.Replace("_nvenc", "").ToUpperInvariant() + " choice is unavailable. Check again or explicitly choose another codec.";
             engineStatus.Text = "Approved engine " + receipt.PackageVersion + " verified at " + receipt.CheckedUtc + ". " + codecStatus.Text;
         }
         catch (Exception ex) { codec.ItemsSource = Array.Empty<EncoderOption>(); codec.SelectedItem = null; codecStatus.Text = engineStatus.Text = ex.Message; }
