@@ -152,8 +152,20 @@ internal sealed class WorkerRecorder : IWindowsRecorder
     {
         if (Applying) throw new InvalidOperationException("Wait for the current settings change.");
         request.OperationId = Guid.NewGuid().ToString("N"); pendingApply = request.OperationId; applyInstance = status.Instance; modeKnown = false;
+        string instance = status.Instance; long revision = status.Revision;
         applying = true; Changed?.Invoke();
-        try { await Command(request); }
+        try
+        {
+            var reply = await (send == null ? WorkerProtocol.CallAsync(DataDirectory, request, lifetime.Token) : send(request));
+            // A completion from before this operation cannot release its privacy
+            // hold. Newer polls and replacement-worker status keep normal ordering.
+            if (reply.Status != null && (reply.Status.Instance != instance || reply.Status.Revision > revision)) Update(reply.Status);
+            if (reply.Error != null) throw new InvalidOperationException(reply.Error);
+            if (reply.Status == null || reply.Status.Instance != instance || reply.Status.Revision <= revision ||
+                reply.Status.CompletedApply != request.OperationId || reply.Status.Applying ||
+                status.Instance != instance || status.CompletedApply != request.OperationId || status.Applying)
+                throw new IOException("The recorder did not confirm this settings change. Your edits are retained; reconnect and check the applied settings before retrying.");
+        }
         finally { applying = false; Changed?.Invoke(); }
     }
     public async Task StopAsync()
