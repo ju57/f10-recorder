@@ -79,6 +79,9 @@ may continue within its own scope.
 
 ## Advance without conflating states
 
+For implementation handoffs, PR preparation and authorized merge closeout, follow
+[the issue closeout workflow](issue-tracker.md#pr-and-issue-closeout).
+
 The orchestrator reports implementation, independent validation, standards/spec
 review, CI, user acceptance and release gates separately. Ready for integration
 does not clear a release gate or authorize merging. Keep unresolved engineering

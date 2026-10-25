@@ -52,7 +52,7 @@ Before delegating implementation tickets or running parallel delivery work, read
 
 ### Issue tracker
 
-Track issues and specs in GitHub Issues. Before ticket operations, read `docs/agents/issue-tracker.md`.
+Before issue operations, PR preparation, merge-readiness review or authorized merge closeout, read [the issue and PR workflow](docs/agents/issue-tracker.md). Follow its acceptance mapping and post-merge issue-state verification through completion.
 
 ### Triage labels
 
