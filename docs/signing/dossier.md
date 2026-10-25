@@ -1,6 +1,6 @@
 # SignPath Foundation submission dossier — issue #48
 
-Prepared **25 October 2026**. Status: **draft for maintainer and independent review; not an application or approval**. Source baseline: `4cb898e71ca61a0870942fbb3f82c94038d5ef93`, including reviewed but unmerged PR #59. Scope: [T38 / #48](https://github.com/ju57/f10-recorder/issues/48), under [beta spec #10](https://github.com/ju57/f10-recorder/issues/10). Repository facts below were inspected at that baseline; public GitHub facts were read on the preparation date. Refresh both before submission.
+Prepared **25 October 2026**. Status: **draft for maintainer and independent review; not an application or approval**. Historical source baseline: `4cb898e71ca61a0870942fbb3f82c94038d5ef93`, which included reviewed PR #59 while it was still unmerged. Scope: [T38 / #48](https://github.com/ju57/f10-recorder/issues/48), under [beta spec #10](https://github.com/ju57/f10-recorder/issues/10). Repository facts below were inspected at that baseline; public GitHub facts were read on the preparation date. Refresh both before submission.
 
 The preferred free route is plausible enough to prepare, but **application readiness and eligibility are unestablished**. The largest immediate gaps are no demonstrated release in the intended installer form, no demonstrated reputation, incomplete component eligibility/source arrangements, no configured signing provenance, and unconfirmed people/MFA. No GitHub Releases were returned; distribution elsewhere was not established or ruled out. None of these gaps is resolved by this document. The provider alone decides acceptance.
 
@@ -13,7 +13,7 @@ The preferred free route is plausible enough to prepare, but **application readi
 
 No application, account, key, provider contact, identity submission, purchase, permission/MFA change, installation or signing is authorized by this dossier. No identity documents, private contact details, credentials or vendor binaries belong in its public attachments.
 
-All **12 mandatory gates** remain open: G-CAP, G-COEX, G-REPLAY, G-AV, G-STORE, G-MIGRATE, G-UX, G-MATRIX, G-SEC, G-PKG, G-SIGN and G-BETA. See the [authoritative gate register](../beta-spec.md#mandatory-release-gate-register). G-CAP's [issue #9](https://github.com/ju57/f10-recorder/issues/9) was verified OPEN; it remains deferred/unresolved. PR #59 remains unmerged. T38 documentation completion is distinct from G-SIGN completion and exact-artifact release approval.
+All **12 mandatory gates** remain open: G-CAP, G-COEX, G-REPLAY, G-AV, G-STORE, G-MIGRATE, G-UX, G-MATRIX, G-SEC, G-PKG, G-SIGN and G-BETA. See the [authoritative gate register](../beta-spec.md#mandatory-release-gate-register). G-CAP's [issue #9](https://github.com/ju57/f10-recorder/issues/9) was verified OPEN; it remains deferred/unresolved. After the original preparation, PR #59 was squash-merged into main as `cce63cf6dee2eab94fc52523fb18b562cad1ed52`; this changes its integration status, not the historical research baseline or any release-gate acceptance. T38 documentation completion is distinct from G-SIGN completion and exact-artifact release approval.
 
 ## Public identity and certificate identity
 
