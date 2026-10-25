@@ -118,11 +118,11 @@ namespace F10Recorder
                 output = stdout.Result + stderr.Result; return process.ExitCode == 0;
             }
         }
-        internal static int Install(string root, bool allowDownload)
+        internal static int Install(string root, bool allowDownload, Action<Uri, string> acquire = null)
         {
             try
             {
-                var installation = Ensure(allowDownload, Download);
+                var installation = Ensure(allowDownload, acquire ?? Download);
                 CaptureSession.TryDeleteFile(Path.Combine(root, "media-install-error.txt"));
                 Log.Write("Media engine ready (" + installation.Source + "): " + installation.Executable); return 0;
             }

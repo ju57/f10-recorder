@@ -56,3 +56,8 @@ and delayed queue delivery. It creates no windows, shortcuts, recorder or encode
 it captures no pixels/audio, uses no GPU, changes no startup setting and installs
 nothing. Its only runtime output is a local verification report. See
 [capture status checks](capture-status.md) for coverage and limits.
+
+`./tests/engine-trust.ps1 -Plan` previews the isolated trust/repair worker and
+offscreen Settings checks. See [engine trust checks](engine-trust.md) for exact
+generated-input, hidden-shortcut and retained-evidence effects. This route creates
+no visible or capture-excluded UI and never acquires desktop/device audio.

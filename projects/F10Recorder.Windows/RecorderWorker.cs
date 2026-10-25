@@ -7,7 +7,7 @@ namespace F10Recorder;
 
 internal static class RecorderWorker
 {
-    internal static int Run(string data, bool paused, string uiExecutable = null, bool synthetic = false, Action<bool> setStartup = null, Func<int, string, string> screenshotSource = null)
+    internal static int Run(string data, bool paused, string uiExecutable = null, bool synthetic = false, Action<bool> setStartup = null, Func<int, string, string> screenshotSource = null, Func<int> repairEngine = null)
     {
         data = WorkerIdentity.DataPath(data); RecorderHost.Initialize(data);
         Log.FileName = "worker.log";
@@ -26,7 +26,7 @@ internal static class RecorderWorker
             try { paused |= JsonSerializer.Deserialize<WorkerPersistentState>(File.ReadAllText(pauseFile), WorkerProtocol.Json)?.Paused == true; }
             catch (Exception ex) when (ex is IOException or JsonException) { Log.Write("Worker pause state unavailable: " + ex.Message); }
         }
-        using var host = new RecorderHost(data, loop.Post, paused, WorkerIdentity.ControlTitle(data), synthetic, setStartup, screenshotSource);
+        using var host = new RecorderHost(data, loop.Post, paused, WorkerIdentity.ControlTitle(data), synthetic, setStartup, screenshotSource, repairEngine);
         using var lifetime = new CancellationTokenSource();
         var events = new Queue<WorkerEvent>();
         long sequence = 0;
@@ -101,7 +101,7 @@ internal static class RecorderWorker
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             }
-            return new WorkerStatus { Instance = instance, CompletedApply = completedApply, Revision = ++revision, Config = host.Config, Paused = host.Paused, Ready = host.Ready && metrics.CaptureProcessId != 0, Phase = host.Phase, CanSave = host.CanSave, Applying = host.Applying, Saving = host.Saving, ScreenshotInProgress = host.ScreenshotInProgress,
+            return new WorkerStatus { Instance = instance, CompletedApply = completedApply, EngineCapabilityContext = host.EngineCapabilityContext, Revision = ++revision, Config = host.Config, Paused = host.Paused, Ready = host.Ready && metrics.CaptureProcessId != 0, Phase = host.Phase, CanSave = host.CanSave, Applying = host.Applying, Saving = host.Saving, ScreenshotInProgress = host.ScreenshotInProgress,
                 SaveRegistered = host.SaveRegistered, OverlayRegistered = host.OverlayRegistered, ScreenshotRegistered = host.ScreenshotRegistered,
                 State = host.State, LastScreenshot = host.LastScreenshot, ApplicationName = host.ApplicationName, WorkerProcessId = Environment.ProcessId,
                 Sequence = sequence, Metrics = metrics, Stopping = stopping, Events = after < 0 ? [] : events.Where(e => e.Sequence > after).Take(16).ToArray() };
@@ -128,6 +128,7 @@ internal static class RecorderWorker
         async Task<WorkerReply> Handle(WorkerRequest request, int clientPid)
         {
             string error = null;
+            RecordingEngineCapabilities capabilities = null;
             try
             {
                 if (request.Version != WorkerProtocol.Version) throw new InvalidDataException("Unsupported recorder protocol version.");
@@ -141,7 +142,7 @@ internal static class RecorderWorker
                     }
                 }
                 if (stopping && request.Command != "status") throw new InvalidOperationException("Recorder is stopping.");
-                if (host.Applying && request.Command is "save" or "pause" or "restart" or "apply" or "repairMedia" or "screenshot" or "quit") throw new InvalidOperationException("Wait for the current settings change.");
+                if (host.Applying && request.Command is "save" or "pause" or "restart" or "apply" or "repairMedia" or "probeMedia" or "screenshot" or "quit") throw new InvalidOperationException("Wait for the current settings change.");
                 switch (request.Command)
                 {
                     case "status": break;
@@ -150,6 +151,7 @@ internal static class RecorderWorker
                     case "restart": host.Restart(); break;
                     case "apply": await host.ApplyAsync(request.Settings ?? throw new ArgumentException("Capture settings are required."), request.Value); break;
                     case "repairMedia": await host.RepairMediaAsync(); break;
+                    case "probeMedia": capabilities = await host.ProbeMediaAsync(); break;
                     case "screenshot": host.TakeScreenshot(); break;
                     case "screenshotPrepared": screenshotPrepared?.TrySetResult(); break;
                     case "quit": await host.StopAsync(); stopping = true; PersistPause(true); break;
@@ -158,7 +160,7 @@ internal static class RecorderWorker
             }
             catch (Exception ex) { error = ex.Message; Log.Write(ex.ToString()); }
             if (request.Command is "apply" or "repairMedia") completedApply = request.OperationId;
-            return new WorkerReply { Error = error, Status = Snapshot(request.AfterEvent) };
+            return new WorkerReply { Error = error, Status = Snapshot(request.AfterEvent), Capabilities = capabilities };
         }
         loop.Tick = () =>
         {
@@ -182,7 +184,7 @@ internal static class RecorderWorker
                 try
                 {
                     var request = await WorkerProtocol.ReadAsync<WorkerRequest>(pipe, deadline.Token).ConfigureAwait(false);
-                    if (request.Command is "apply" or "quit") deadline.CancelAfter(TimeSpan.FromSeconds(40));
+                    if (request.Command is "apply" or "quit" or "probeMedia") deadline.CancelAfter(TimeSpan.FromSeconds(40));
                     if (request.Command == "repairMedia") deadline.CancelAfter(TimeSpan.FromSeconds(180));
                     if (!GetNamedPipeClientProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out uint pid)) throw new IOException("Recorder client identity unavailable.");
                     var reply = await loop.InvokeAsync(() => Handle(request, checked((int)pid))).WaitAsync(deadline.Token).ConfigureAwait(false);

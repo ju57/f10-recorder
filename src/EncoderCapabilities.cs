@@ -7,6 +7,14 @@ using System.Threading.Tasks;
 
 namespace F10Recorder
 {
+    internal sealed class RecordingEngineCapabilities
+    {
+        public string CheckedUtc;
+        public string EngineSha256;
+        public string PackageSha256;
+        public string PackageVersion;
+        public EncoderOption[] Encoders;
+    }
     public sealed class EncoderOption
     {
         public string Codec;
@@ -15,6 +23,19 @@ namespace F10Recorder
     }
     internal static class EncoderCapabilities
     {
+        internal static RecordingEngineCapabilities ProbeManaged()
+        {
+            string executable = MediaDependency.ResolveExecutable();
+            using (MediaDependency.OpenVerifiedExecutable(executable))
+            {
+                var encoders = Probe(executable);
+                // A receipt describes this authenticated, bounded initialization check,
+                // not qualification of every resolution, rate or capture source.
+                return new RecordingEngineCapabilities { CheckedUtc = DateTime.UtcNow.ToString("o"),
+                    EngineSha256 = MediaDependency.ExecutableSha256, PackageSha256 = MediaDependency.PackageSha256,
+                    PackageVersion = MediaDependency.PackageVersion, Encoders = encoders.ToArray() };
+            }
+        }
         internal static readonly EncoderOption[] Choices = {
             new EncoderOption { Codec = "h264_nvenc", Name = "H.264 — broad playback compatibility" },
             new EncoderOption { Codec = "hevc_nvenc", Name = "HEVC / H.265 — smaller files" },

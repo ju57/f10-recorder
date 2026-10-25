@@ -34,7 +34,7 @@ The local control channel is a versioned named pipe restricted to the current Wi
 
 Application-window screenshots verify window lifetime before capture and saving, including when Windows reuses a handle. If Windows denies the required lifetime marker, the screenshot fails with a reason; this can affect elevated applications. Ordinary recording keeps its existing policy, and a rejected window screenshot does not fall back to the desktop.
 
-The security remediation uses protocol version 3. Quit older recorder processes before opening this build; mixed versions are rejected so a new UI cannot silently delegate to a worker without the security fixes and settings acknowledgement contract.
+The recorder uses protocol version 4, including authenticated engine capability responses. Quit older recorder processes before opening this build; mixed versions are rejected so a new UI cannot silently delegate to a worker without the security fixes, settings acknowledgement and capability contracts.
 
 A session-independent file lock in account-protected storage permits only one worker to open a given user's recording profile, so a second Windows session cannot clear an active replay cache. Profile identity includes its filesystem identity, so path aliases share ownership. Concurrent sessions must use separate `--data-dir` profiles. Focused checks exercise rejection before cache cleanup and reuse after ownership is released; genuine cross-account execution remains a separate acceptance check.
 

@@ -20,6 +20,7 @@ internal interface IWindowsRecorder : IDisposable
     string ApplicationName { get; }
     int CaptureProcessId { get; }
     RecorderMetrics Metrics { get; }
+    string EngineCapabilityContext { get; }
     event Action Changed, OpenSettingsRequested, OverlayRequested, QuitRequested, PreparingScreenshot;
     event Action<string, string, NotificationKind, int> Notification;
     event Action<string, bool> Saved;
@@ -29,6 +30,7 @@ internal interface IWindowsRecorder : IDisposable
     void Restart();
     Task ApplyAsync(Settings next, bool startup);
     Task RepairMediaAsync();
+    Task<RecordingEngineCapabilities> ProbeMediaAsync();
     void TakeScreenshot();
     Task StopAsync();
 }

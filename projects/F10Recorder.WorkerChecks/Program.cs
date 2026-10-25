@@ -28,6 +28,18 @@ internal static class WorkerChecks
         if (engineRootIndex >= 0) MediaDependency.RootDirectory = Path.GetFullPath(args[engineRootIndex + 1]);
         int ownershipRootIndex = Array.IndexOf(args, "--ownership-root");
         if (ownershipRootIndex >= 0) ProfileOwnership.RootDirectory = Path.GetFullPath(args[ownershipRootIndex + 1]);
+        if (args[0] == "--engine-trust-worker")
+        {
+            string profile = Path.GetFullPath(args[1]), package = Path.GetFullPath(args[2]);
+            return RecorderWorker.Run(profile, true, synthetic: true,
+                setStartup: _ => File.WriteAllText(Path.Combine(profile, "unexpected-startup-write.txt"), "startup writer called"),
+                repairEngine: () => MediaDependency.Install(profile, true, (_, destination) =>
+                {
+                    File.AppendAllText(Path.Combine(profile, "repair-acquisitions.txt"), "explicit repair\n");
+                    if (File.Exists(Path.Combine(profile, "reject-repair.txt"))) File.WriteAllText(destination, "Rejected package fixture");
+                    else File.Copy(package, destination);
+                }));
+        }
         if (args[0] == "--dependency-marker") { File.WriteAllText(args[1], "Unapproved engine executed"); return 0; }
         if (args[0] == "--dependency-test")
         {
