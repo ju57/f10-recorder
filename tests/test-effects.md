@@ -30,6 +30,16 @@ negative cases without launching UI, GPU work or capture. Windows CI runs it.
 This protects known dispatch behavior; it cannot infer every indirect effect
 inside arbitrary native code. Review the mapping when changing a test entry point.
 
+`./tests/profile-migration.ps1 -Plan` previews isolated paused/blocked migration
+workers and hidden Ctrl+Alt+Shift+F4–F6 shortcuts. It sends task-owned hidden-window
+Save/Screenshot messages without physical input and checks ownership/reconnect,
+exact input/media-sentinel preservation and owned-process cleanup. `-DesktopOnly
+-SnapshotsPath <worker-output>/worker-snapshots.json` uses offscreen Settings
+controls and a controlled capability response. Neither route opens visible or
+capture-excluded UI, launches an engine, uses a GPU, captures pixels/audio, writes
+startup settings or touches the installed recorder. See
+[profile migration checks](profile-migration.md) for format, commands and limits.
+
 `./tests/settings-validation.ps1` exercises a paused direct recorder host with
 missing and untrusted engines in isolated storage. It creates hidden shortcut
 windows and temporarily registers Ctrl+Alt+Shift+F1–F6; an occupied shortcut fails

@@ -3,6 +3,7 @@ namespace F10Recorder;
 internal interface IWindowsRecorder : IDisposable
 {
     Settings Config { get; }
+    ProfileStatus ProfileStatus { get; }
     string DataDirectory { get; }
     bool Paused { get; }
     bool Ready { get; }

@@ -29,6 +29,7 @@ internal sealed class WorkerRecorder : IWindowsRecorder
         status = initial; send = transport; post = action => action();
     }
     public Settings Config => status.Config;
+    public ProfileStatus ProfileStatus => status.ProfileStatus;
     public string DataDirectory { get; }
     public bool Paused => status.Paused;
     public bool Ready => status.Ready;

@@ -3,13 +3,24 @@ using System.Text.Json;
 
 string data = args.Length > 0 ? Path.GetFullPath(args[0]) : Path.Combine(Path.GetTempPath(), "F10Recorder-CoreChecks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(data); Log.DirectoryPath = data;
+try
+{
+    ProfileMigrationChecks.Run(Path.Combine(data, "profile-migration"), args.Contains("--profile-sensitivity"));
+    File.WriteAllText(Path.Combine(data, "profile-verification.json"), JsonSerializer.Serialize(new { result = "passed", sensitivityControl = false }));
+}
+catch (Exception ex)
+{
+    File.WriteAllText(Path.Combine(data, "profile-verification.json"), JsonSerializer.Serialize(new { result = "failed", sensitivityControl = args.Contains("--profile-sensitivity"), error = ex.ToString() }));
+    Console.Error.WriteLine(ex); Environment.ExitCode = 1; return;
+}
+if (args.Contains("--profile-only")) return;
 void Require(bool condition, string message) { if (!condition) throw new Exception(message); }
 var preferences = new Settings { OutputDirectory = Path.Combine(data, "clips", "..", "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots") };
 preferences.Validate();
 Require(preferences.OutputDirectory == Path.GetFullPath(Path.Combine(data, "clips")), "Preference validation must normalize paths without an engine or platform initialization.");
 foreach (var invalid in new[] {
     new Settings { FramesPerSecond = 999 },
-    new Settings { SaveKey = 120, SaveModifiers = 6 },
+    new Settings { SaveKey = 120, SaveModifiers = 6, OverlayKey = 120, OverlayModifiers = 6 },
     new Settings { CaptureMode = "unsupported" },
     new Settings { CaptureMode = "window", WindowExecutable = "relative.exe" },
     new Settings { ScreenshotDirectory = "" }
@@ -39,7 +50,7 @@ string invalidLegacy = legacy.Replace("\"FramesPerSecond\":60", "\"FramesPerSeco
 File.WriteAllText(settingsFile, invalidLegacy);
 settings = Settings.Load(settingsFile);
 var newInvalidFiles = Directory.GetFiles(data, "settings.json.invalid-*").Where(p => !previousInvalidFiles.Contains(p)).ToArray();
-Require(settings.FramesPerSecond == 60 && newInvalidFiles.Length == 1 && File.ReadAllText(newInvalidFiles[0]) == invalidLegacy, "Invalid settings must be preserved before falling back to defaults.");
+Require(settings.FramesPerSecond == 60 && settings.VideoCodec == "hevc_nvenc" && !settings.SystemAudio && newInvalidFiles.Length == 0 && File.ReadAllText(settingsFile) == invalidLegacy, "Invalid settings must retain valid siblings and preserve the unchanged original.");
 // A late audio client starts at a nonzero position on the session timeline.
 // GetBuffer's QPC is in100ns units even when Stopwatch has another frequency.
 var mediaClock = new MediaClock(50_000, 1_000, 1_800_000_000_000_000, 0);

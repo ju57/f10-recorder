@@ -20,12 +20,6 @@ internal static class RecorderWorker
         }
         using var profileLifetime = profileOwnership;
         var loop = new WorkerLoop();
-        string pauseFile = Path.Combine(data, "worker-state.json");
-        if (File.Exists(pauseFile))
-        {
-            try { paused |= JsonSerializer.Deserialize<WorkerPersistentState>(File.ReadAllText(pauseFile), WorkerProtocol.Json)?.Paused == true; }
-            catch (Exception ex) when (ex is IOException or JsonException) { Log.Write("Worker pause state unavailable: " + ex.Message); }
-        }
         using var host = new RecorderHost(data, loop.Post, paused, WorkerIdentity.ControlTitle(data), synthetic, setStartup, screenshotSource, repairEngine);
         using var lifetime = new CancellationTokenSource();
         var events = new Queue<WorkerEvent>();
@@ -60,9 +54,7 @@ internal static class RecorderWorker
         {
             try
             {
-                string temp = pauseFile + ".tmp";
-                File.WriteAllText(temp, JsonSerializer.Serialize(new WorkerPersistentState { Paused = host.Paused, UserStopped = userStopped }, WorkerProtocol.Json));
-                File.Move(temp, pauseFile, true);
+                host.PersistState(userStopped);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -101,7 +93,7 @@ internal static class RecorderWorker
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             }
-            return new WorkerStatus { Instance = instance, CompletedApply = completedApply, EngineCapabilityContext = host.EngineCapabilityContext, Revision = ++revision, Config = host.Config, Paused = host.Paused, Ready = host.Ready && metrics.CaptureProcessId != 0, Phase = host.Phase, CanSave = host.CanSave, Applying = host.Applying, Saving = host.Saving, ScreenshotInProgress = host.ScreenshotInProgress,
+            return new WorkerStatus { Instance = instance, CompletedApply = completedApply, EngineCapabilityContext = host.EngineCapabilityContext, Revision = ++revision, Config = host.Config, ProfileStatus = host.ProfileStatus, Paused = host.Paused, Ready = host.Ready && metrics.CaptureProcessId != 0, Phase = host.Phase, CanSave = host.CanSave, Applying = host.Applying, Saving = host.Saving, ScreenshotInProgress = host.ScreenshotInProgress,
                 SaveRegistered = host.SaveRegistered, OverlayRegistered = host.OverlayRegistered, ScreenshotRegistered = host.ScreenshotRegistered,
                 State = host.State, LastScreenshot = host.LastScreenshot, ApplicationName = host.ApplicationName, WorkerProcessId = Environment.ProcessId,
                 Sequence = sequence, Metrics = metrics, Stopping = stopping, Events = after < 0 ? [] : events.Where(e => e.Sequence > after).Take(16).ToArray() };
@@ -215,7 +207,6 @@ internal static class RecorderWorker
             catch (Exception ex) { Log.Write(ex.ToString()); loop.Stop(); }
             finally { await Task.WhenAll(pending).ConfigureAwait(false); }
         }
-        PersistPause();
         var server = Accept();
         try { loop.Run(); return 0; }
         finally { lifetime.Cancel(); attachedUi?.Dispose(); try { server.Wait(TimeSpan.FromSeconds(5)); } catch (AggregateException ex) { Log.Write(ex.ToString()); } }

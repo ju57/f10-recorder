@@ -56,6 +56,7 @@ internal sealed class WorkerStatus
     public string EngineCapabilityContext;
     public long Revision;
     public Settings Config;
+    public ProfileStatus ProfileStatus = new();
     public bool Paused, Ready, Applying, Saving, ScreenshotInProgress, SaveRegistered, OverlayRegistered, ScreenshotRegistered, Stopping;
     public CapturePhase Phase;
     public bool CanSave;
@@ -65,7 +66,6 @@ internal sealed class WorkerStatus
     public RecorderMetrics Metrics;
     public WorkerEvent[] Events = [];
 }
-internal sealed class WorkerPersistentState { public bool Paused, UserStopped; }
 internal sealed class WorkerReply
 {
     public int Version = WorkerProtocol.Version;
@@ -77,10 +77,10 @@ internal sealed class WorkerProtocolMismatchException(string message) : IOExcept
 
 internal static class WorkerProtocol
 {
-    internal const int Version = 4;
+    internal const int Version = 5;
     internal static bool WasStopped(string data)
     {
-        try { return JsonSerializer.Deserialize<WorkerPersistentState>(File.ReadAllText(Path.Combine(data, "worker-state.json")), Json)?.UserStopped == true; }
+        try { var profile = RecordingProfile.Load(data); return profile.State.UserStopped || !profile.Status.CanWrite; }
         catch (Exception ex) when (ex is IOException or JsonException) { return false; }
     }
     internal const int MaxBytes = 1024 * 1024;

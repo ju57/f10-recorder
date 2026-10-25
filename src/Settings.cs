@@ -2,11 +2,17 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Web.Script.Serialization;
+using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Collections.Generic;
 
 namespace F10Recorder
 {
     public sealed class Settings
     {
+        public int SchemaVersion = 1;
+        [JsonExtensionData] public Dictionary<string, JsonElement> AdditionalPreferences = new Dictionary<string, JsonElement>();
         public int ReplayMinutes = 5;
         public int FramesPerSecond = 60;
         public int BitrateMbps = 20;
@@ -18,52 +24,55 @@ namespace F10Recorder
         public string WindowExecutable = "", WindowClass = "";
         public string OutputDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "F10 Recorder");
         public int SaveKey = 121; // VK_F10
-        public int SaveModifiers = 6; // Ctrl + Shift
-        public int OverlayKey = 120; // VK_F9
-        public int OverlayModifiers = 6; // Ctrl + Shift
-        public int ScreenshotKey = 119; // VK_F8
-        public int ScreenshotModifiers = 6; // Ctrl + Shift
+        public int SaveModifiers = 0;
+        public int OverlayKey = 90; // Z
+        public int OverlayModifiers = 1; // Alt
+        public int ScreenshotKey = 112; // VK_F1
+        public int ScreenshotModifiers = 1; // Alt
         public string ScreenshotDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "F10 Recorder");
 
         public void Validate()
         {
-            if (ReplayMinutes < 1 || ReplayMinutes > 30) throw new ArgumentException("Replay length must be 1–30 minutes.");
-            if (!SupportedFrameRates.Contains(FramesPerSecond)) throw new ArgumentException("Choose 24, 30, 60, or 120 FPS.");
-            if (BitrateMbps < 5 || BitrateMbps > 100) throw new ArgumentException("Bitrate must be 5–100 Mbps.");
-            if (VideoCodec != "h264_nvenc" && VideoCodec != "hevc_nvenc" && VideoCodec != "av1_nvenc") throw new ArgumentException("Choose H.264, HEVC, or AV1.");
-            if (DisplayIndex < -1 || DisplayIndex > 31) throw new ArgumentException("Invalid display index.");
-            if (CaptureMode != "monitor" && CaptureMode != "window") throw new ArgumentException("Choose monitor or window capture.");
-            if (WindowExecutable == null || WindowClass == null || WindowExecutable.Length > 32768 || WindowClass.Length > 256) throw new ArgumentException("Invalid window selection.");
-            if (WindowExecutable.Length > 0 && (!Path.IsPathRooted(WindowExecutable) || Path.GetFullPath(WindowExecutable) != WindowExecutable)) throw new ArgumentException("Choose an application window with an absolute executable path.");
-            if (SaveKey < 112 || SaveKey > 123 || SaveModifiers < 0 || SaveModifiers > 7) throw new ArgumentException("Choose an F1–F12 hotkey with optional modifiers.");
-            if ((OverlayKey < 65 || OverlayKey > 90) && (OverlayKey < 112 || OverlayKey > 123) || OverlayModifiers < 1 || OverlayModifiers > 7) throw new ArgumentException("Choose an overlay shortcut with a letter or F1–F12 and at least one modifier.");
+            foreach (var field in StoredFields) { string issue = FieldIssue(field.Name); if (issue != null) throw new ArgumentException(issue); }
             if (SaveKey == OverlayKey && SaveModifiers == OverlayModifiers) throw new ArgumentException("Use different shortcuts for saving and opening the overlay.");
-            if ((ScreenshotKey < 65 || ScreenshotKey > 90) && (ScreenshotKey < 112 || ScreenshotKey > 123) || ScreenshotModifiers < 1 || ScreenshotModifiers > 7) throw new ArgumentException("Choose a screenshot shortcut with a letter or F1–F12 and at least one modifier.");
             if (ScreenshotKey == SaveKey && ScreenshotModifiers == SaveModifiers || ScreenshotKey == OverlayKey && ScreenshotModifiers == OverlayModifiers) throw new ArgumentException("Use different shortcuts for screenshots, replays, and the overlay.");
             OutputDirectory = Path.GetFullPath(OutputDirectory);
-            if (string.IsNullOrWhiteSpace(ScreenshotDirectory)) throw new ArgumentException("Choose a folder for screenshots.");
             ScreenshotDirectory = Path.GetFullPath(ScreenshotDirectory);
         }
-        public static Settings Load(string path)
+        internal static readonly FieldInfo[] StoredFields = typeof(Settings).GetFields(BindingFlags.Instance | BindingFlags.Public).Where(f => f.Name != nameof(AdditionalPreferences)).ToArray();
+        internal string FieldIssue(string field)
         {
-            if (!File.Exists(path)) return new Settings();
-            Settings result = null;
-            string contents = File.ReadAllText(path);
-            try { result = new JavaScriptSerializer().Deserialize<Settings>(contents); if (result == null) throw new FormatException("Empty settings."); result.Validate(); return result; }
-            catch (Exception ex)
+            switch (field)
             {
-                File.Copy(path, path + ".invalid-" + DateTime.UtcNow.Ticks); Log.Write("Settings could not be loaded; original preserved. " + ex.Message);
-                // An invalid window/unknown mode must never expand capture to the desktop.
-                bool waitForSelection = result != null ? result.CaptureMode != "monitor" : contents.Contains("\"CaptureMode\"");
-                return new Settings { CaptureMode = waitForSelection ? "window" : "monitor" };
+                case nameof(SchemaVersion): return SchemaVersion == 1 ? null : "Unsupported settings schema version.";
+                case nameof(ReplayMinutes): return ReplayMinutes >= 1 && ReplayMinutes <= 30 ? null : "Replay length must be 1–30 minutes.";
+                case nameof(FramesPerSecond): return SupportedFrameRates.Contains(FramesPerSecond) ? null : "Choose 24, 30, 60, or 120 FPS.";
+                case nameof(BitrateMbps): return BitrateMbps >= 5 && BitrateMbps <= 100 ? null : "Bitrate must be 5–100 Mbps.";
+                case nameof(VideoCodec): return VideoCodec == "h264_nvenc" || VideoCodec == "hevc_nvenc" || VideoCodec == "av1_nvenc" ? null : "Choose H.264, HEVC, or AV1.";
+                case nameof(DisplayIndex): return DisplayIndex >= -1 && DisplayIndex <= 31 ? null : "Invalid display index.";
+                case nameof(CaptureMode): return CaptureMode == "monitor" || CaptureMode == "window" ? null : "Choose monitor or window capture.";
+                case nameof(WindowExecutable):
+                    try { return WindowExecutable != null && WindowExecutable.Length <= 32768 && (WindowExecutable.Length == 0 || Path.IsPathRooted(WindowExecutable) && Path.GetFullPath(WindowExecutable) == WindowExecutable) ? null : "Choose an application window with an absolute executable path."; }
+                    catch (ArgumentException) { return "Invalid window executable path."; }
+                case nameof(WindowClass): return WindowClass != null && WindowClass.Length <= 256 ? null : "Invalid window class.";
+                case nameof(SaveKey): return SaveKey >= 112 && SaveKey <= 123 ? null : "Choose an F1–F12 replay shortcut.";
+                case nameof(OverlayKey): case nameof(ScreenshotKey):
+                    int key = field == nameof(OverlayKey) ? OverlayKey : ScreenshotKey;
+                    return key >= 65 && key <= 90 || key >= 112 && key <= 123 ? null : "Choose a letter or F1–F12 shortcut.";
+                case nameof(SaveModifiers): return SaveModifiers >= 0 && SaveModifiers <= 7 ? null : "Invalid replay shortcut modifiers.";
+                case nameof(OverlayModifiers): case nameof(ScreenshotModifiers):
+                    int modifiers = field == nameof(OverlayModifiers) ? OverlayModifiers : ScreenshotModifiers;
+                    return modifiers >= 1 && modifiers <= 7 ? null : "Choose at least one shortcut modifier.";
+                case nameof(OutputDirectory): case nameof(ScreenshotDirectory):
+                    string path = field == nameof(OutputDirectory) ? OutputDirectory : ScreenshotDirectory;
+                    try { if (!string.IsNullOrWhiteSpace(path)) { Path.GetFullPath(path); return null; } }
+                    catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException) { }
+                    return "Choose a valid save folder.";
+                default: return null;
             }
         }
-        public void Save(string path)
-        {
-            string temp = path + ".tmp";
-            File.WriteAllText(temp, new JavaScriptSerializer().Serialize(this));
-            if (File.Exists(path)) File.Replace(temp, path, null); else File.Move(temp, path);
-        }
+        public static Settings Load(string path) => ProfileDocuments.ReadSettings(path).Value;
+        public void Save(string path) { Validate(); ProfileDocuments.WriteSettings(path, this); }
         public string HotkeyText
         {
             get { return ((SaveModifiers & 2) != 0 ? "Ctrl+" : "") + ((SaveModifiers & 1) != 0 ? "Alt+" : "") + ((SaveModifiers & 4) != 0 ? "Shift+" : "") + "F" + (SaveKey - 111); }

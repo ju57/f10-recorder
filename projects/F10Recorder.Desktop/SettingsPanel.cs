@@ -23,6 +23,7 @@ internal sealed class SettingsPanel : UserControl
     readonly ShortcutEditor saveShortcut = new("Save", false), overlayShortcut = new("Overlay", true), screenshotShortcut = new("Screenshot", true);
     readonly ToggleSwitch recording = new() { Name = "RecordingEnabled", OnContent = "On", OffContent = "Off" };
     readonly TextBlock state = Ui.Label("Paused", 15, Ui.Warning, FontWeight.SemiBold), stateDetail = Ui.Label("", 12, Ui.Muted), estimate = Ui.Label("", 12, Ui.Muted), error = Ui.Label("", 13, Ui.Warning), codecStatus = Ui.Label("Checking your GPU…", 12, Ui.Muted);
+    readonly TextBlock profileStatus = Ui.Label("", 13, Ui.Warning);
     readonly TextBlock audioFormat = Ui.Label("", 13, Ui.Muted), playbackDevice = Ui.Label("Windows default · automatic", 13, Ui.Muted);
     readonly Button apply;
     readonly Button repairEngine = Ui.Button("Repair recording engine"), recheckEngine = Ui.Button("Check engine again");
@@ -61,6 +62,7 @@ internal sealed class SettingsPanel : UserControl
         var statusText = new StackPanel { Spacing = 5 }; statusText.Children.Add(state); statusText.Children.Add(stateDetail); statusGrid.Children.Add(statusText);
         recording.VerticalAlignment = VerticalAlignment.Center; AutomationProperties.SetName(recording, "Replay recording"); Grid.SetColumn(recording, 1); statusGrid.Children.Add(recording);
         header.Children.Add(new Border { Background = Ui.Surface, BorderBrush = Ui.Border, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(18, 16), Child = statusGrid });
+        profileStatus.Name = "ProfileCompatibility"; AutomationProperties.SetName(profileStatus, "Recording profile compatibility"); header.Children.Add(profileStatus);
         var tabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(0, 0, 0, 8) };
         foreach (string name in new[] { "Capture", "Audio", "Controls", "Storage" })
         {
@@ -185,8 +187,9 @@ internal sealed class SettingsPanel : UserControl
             UpdateState();
             if (probeInvalidated || checkingContext != recorder.EngineCapabilityContext) throw new IOException("Recording engine state changed during the check. Check again.");
             capabilityContext = recorder.EngineCapabilityContext;
-            codec.ItemsSource = choices; codec.SelectedItem = choices.FirstOrDefault(c => c.Codec == selected) ?? choices.FirstOrDefault();
+            codec.ItemsSource = choices; codec.SelectedItem = choices.FirstOrDefault(c => c.Codec == selected);
             codecStatus.Text = choices.Length > 0 ? "Initialized: " + string.Join(" / ", choices.Select(c => c.Codec.Replace("_nvenc", "").ToUpperInvariant())) + ". Generated 256×256 frame at 30 FPS; other capture settings require their own checks." : "No GPU encoder initialized. Check the NVIDIA driver, then check again.";
+            if (choices.Length > 0 && codec.SelectedItem == null) codecStatus.Text += " Your saved " + selected.Replace("_nvenc", "").ToUpperInvariant() + " choice is unavailable. Check again or explicitly choose another codec.";
             engineStatus.Text = "Approved engine " + receipt.PackageVersion + " verified at " + receipt.CheckedUtc + ". " + codecStatus.Text;
         }
         catch (Exception ex) { codec.ItemsSource = Array.Empty<EncoderOption>(); codec.SelectedItem = null; codecStatus.Text = engineStatus.Text = ex.Message; }
@@ -210,14 +213,16 @@ internal sealed class SettingsPanel : UserControl
             codecStatus.Text = engineStatus.Text = "Recording engine state changed. Check again before choosing a codec.";
         }
         updating = true; recording.IsChecked = !recorder.Paused; updating = false;
+        var profile = recorder.ProfileStatus;
+        profileStatus.Text = profile.Message; profileStatus.IsVisible = profile.ActivationRequired || profile.RequiresCorrection;
         var status = ReplayPresentation.Describe(recorder.Phase, recorder.State, recorder.Paused, recorder.Ready, recorder.CanSave, recorder.Applying, recorder.Saving, recorder.SaveRegistered, recorder.Metrics?.BufferedSeconds ?? 0);
         state.Text = status.Heading; state.Foreground = status.Healthy && recorder.SaveRegistered ? Ui.Accent : Ui.Warning; stateDetail.Text = status.Detail;
-        quickSave.IsEnabled = status.CanSave; quickScreenshot.IsEnabled = !recorder.Applying && !recorder.ScreenshotInProgress;
-        apply.IsEnabled = !probing && codec.SelectedItem != null && !recorder.Applying;
+        quickSave.IsEnabled = status.CanSave; quickScreenshot.IsEnabled = !recorder.Applying && !recorder.ScreenshotInProgress && !profile.ActivationRequired;
+        apply.IsEnabled = !probing && codec.SelectedItem != null && !recorder.Applying && profile.CanWrite;
         codec.IsEnabled = !probing && !recorder.Applying;
         recheckEngine.IsEnabled = repairEngine.IsEnabled = !probing && !recorder.Applying;
         repairEngine.Content = recorder.Applying ? "Working…" : "Repair recording engine";
-        apply.Content = recorder.Applying ? "Applying…" : "Apply changes"; recording.IsEnabled = !recorder.Applying && recorder.Phase != CapturePhase.Reconnecting && recorder.Phase != CapturePhase.Unknown;
+        apply.Content = recorder.Applying ? "Applying…" : "Apply changes"; recording.IsEnabled = !recorder.Applying && recorder.Phase != CapturePhase.Reconnecting && recorder.Phase != CapturePhase.Unknown && profile.CanWrite && !profile.RequiresCorrection;
     }
     void RefreshWindows()
     {
