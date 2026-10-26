@@ -120,6 +120,17 @@ launches no recording engine, uses no GPU, captures no pixels/audio, changes no
 startup setting and installs nothing. Fixture output is not playable media and
 does not establish live capture, A/V alignment or performance acceptance.
 
+The same replay route checks known input-copy/concat capacity through controlled
+volume/allocation/free-byte observations and tiny ordinary file/export fixtures.
+Its production observer smoke reads actual local volume identity, allocation
+unit and caller-available bytes for a task-owned directory, a lexical `.` alias
+and absent child paths; observation does not create those children. It also
+rejects a task-owned regular-file ancestor. No mount, reparse or ACL mutation,
+physical second-volume test, real disk exhaustion, recorder/engine process or
+startup action is added. Capacity is a point-in-time necessary input condition;
+it is not output/finalization/tail sufficiency or protection against later
+capture/external growth. See [known-input capacity checks](replay-ownership.md).
+
 `./tests/capture-status.ps1 -Plan` previews deterministic capture-status checks.
 The dedicated `--capture-status` route exits before recorder initialization and
 uses the production status/owner-dispatch modules with controlled process liveness

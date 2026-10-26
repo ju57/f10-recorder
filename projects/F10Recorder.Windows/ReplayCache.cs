@@ -33,6 +33,7 @@ internal sealed record ReplaySessionStatus(double BufferedSeconds, long CacheByt
 internal class ReplayFiles
 {
     internal virtual ReplayFileExtent Observe(string path) => ReplayStorage.Observe(path);
+    internal virtual ReplayVolumeCapacity ObserveCapacity(string directory) => ReplayStorage.ObserveCapacity(directory);
     internal virtual bool TryHardLink(string copy, string original) => Native.CreateHardLink(copy, original, IntPtr.Zero);
     internal virtual void Copy(string original, string copy) => System.IO.File.Copy(original, copy);
     internal virtual void Publish(string partial, string final) => System.IO.File.Move(partial, final);
@@ -67,6 +68,7 @@ internal sealed class ReplayCache : IDisposable
     readonly string cacheDirectory;
     readonly long cacheBudgetBytes;
     Dictionary<string, long> pendingAllocations = new(StringComparer.OrdinalIgnoreCase);
+    ReplayVolumeCapacity pendingTarget;
     bool closing, saving;
     ReplaySaveResult lastSave;
     Task close;
@@ -134,18 +136,48 @@ internal sealed class ReplayCache : IDisposable
     string ConcatText(IReadOnlyList<Segment> selection, string extension) => string.Concat(selection.Select((s, i) =>
         "file '" + i.ToString("D6") + extension + "'" + Environment.NewLine + "duration " + (s.End - s.Start).ToString("0.000000", CultureInfo.InvariantCulture) + Environment.NewLine));
 
-    Dictionary<string, long> PlanSnapshot(IReadOnlyList<Segment> selection, string extension, string snapshot)
+    static long AllocationBytes(long length, long unit) => checked((length / unit + (length % unit == 0 ? 0 : 1)) * unit);
+
+    static void RequireTarget(ReplayVolumeCapacity expected, ReplayVolumeCapacity actual)
     {
+        if (!string.Equals(expected.Volume, actual.Volume, StringComparison.OrdinalIgnoreCase) || expected.AllocationUnit != actual.AllocationUnit)
+            throw new IOException("Known-input capacity target volume or allocation unit changed.");
+    }
+
+    void RequireKnownInputCapacity(IReadOnlyDictionary<string, long> proposed, string snapshot, ReplayVolumeCapacity target)
+    {
+        // Inventory precedes free-space sampling: a newer materialized prefix
+        // must not be credited against older, pre-write available capacity.
+        var inventory = Inventory();
+        _ = ReplayStorage.Bytes(inventory); // Reject inconsistent shared-allocation observations, without subtracting them from free space.
+        var capacity = ReplayStorage.ValidateCapacity(files.ObserveCapacity(snapshot));
+        RequireTarget(target, capacity);
+        long remaining = 0;
+        foreach (var claim in proposed)
+        {
+            long allocated = 0;
+            if (inventory.TryGetValue(claim.Key, out var extent))
+            {
+                RequireTarget(target, new(extent.Volume, extent.AllocationUnit, 0));
+                allocated = extent.AllocatedBytes;
+            }
+            remaining = checked(remaining + Math.Max(0, claim.Value - allocated));
+        }
+        if (remaining > capacity.AvailableBytes)
+            throw new IOException("Known-input capacity cannot hold remaining replay snapshot copies and concat data on their target volume.");
+    }
+
+    Dictionary<string, long> PlanSnapshot(IReadOnlyList<Segment> selection, string extension, string snapshot, out ReplayVolumeCapacity target)
+    {
+        target = ReplayStorage.ValidateCapacity(files.ObserveCapacity(snapshot));
         var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-        long unit = 1;
         for (int i = 0; i < selection.Count; i++)
         {
             var extent = ReplayStorage.Validate(files.Observe(selection[i].Path));
-            unit = Math.Max(unit, extent.AllocationUnit);
-            result.Add(Path.Combine(snapshot, i.ToString("D6") + extension), extent.CopyBytes);
+            result.Add(Path.Combine(snapshot, i.ToString("D6") + extension), AllocationBytes(extent.Length, target.AllocationUnit));
         }
         long length = Encoding.UTF8.GetByteCount(ConcatText(selection, extension));
-        result.Add(Path.Combine(snapshot, "concat.txt"), checked((length / unit + (length % unit == 0 ? 0 : 1)) * unit));
+        result.Add(Path.Combine(snapshot, "concat.txt"), AllocationBytes(length, target.AllocationUnit));
         return result;
     }
 
@@ -232,9 +264,11 @@ internal sealed class ReplayCache : IDisposable
             string snapshot = Path.Combine(session.Info.Directory, "save-" + Guid.NewGuid().ToString("N"));
             try
             {
-                var plan = PlanSnapshot(ReplaySelection.Select(available, end, session.Info.ReplaySeconds), session.Info.Extension, snapshot);
+                var plan = PlanSnapshot(ReplaySelection.Select(available, end, session.Info.ReplaySeconds), session.Info.Extension, snapshot, out var target);
                 RequireBudget(plan);
+                RequireKnownInputCapacity(plan, snapshot, target);
                 pendingAllocations = plan;
+                pendingTarget = target;
             }
             catch (Exception ex) when (StorageFailure(ex)) { return new("Replay storage admission failed: " + ex.Message, null); }
             session.PendingEnd = end;
@@ -259,6 +293,7 @@ internal sealed class ReplayCache : IDisposable
                     session.Reserved.Clear();
                     session.Pins.Clear();
                     pendingAllocations.Clear();
+                    pendingTarget = null;
                     saving = false;
                     completion.SetResult(result);
                 }
@@ -353,8 +388,10 @@ internal sealed class ReplayCache : IDisposable
             if (selection == null) throw new IOException("Capture did not finish the current segment in time. " + session.Source.Diagnostics);
             lock (gate)
             {
-                var plan = PlanSnapshot(selection, info.Extension, snapshot);
+                var plan = PlanSnapshot(selection, info.Extension, snapshot, out var target);
+                RequireTarget(pendingTarget, target);
                 RequireBudget(plan);
+                RequireKnownInputCapacity(plan, snapshot, target);
                 pendingAllocations = plan;
             }
             var originals = selection.Select(s => s.Path).ToArray();
@@ -364,16 +401,24 @@ internal sealed class ReplayCache : IDisposable
                 for (int i = 0; i < selection.Count; i++)
                 {
                     string copy = Path.Combine(snapshot, i.ToString("D6") + info.Extension);
+                    lock (gate) RequireKnownInputCapacity(pendingAllocations, snapshot, pendingTarget);
                     if (!files.TryHardLink(copy, originals[i]))
                     {
                         lock (gate)
                         {
-                            pendingAllocations[copy] = ReplayStorage.Validate(files.Observe(originals[i])).CopyBytes;
-                            RequireBudget(pendingAllocations);
+                            var plan = new Dictionary<string, long>(pendingAllocations, StringComparer.OrdinalIgnoreCase);
+                            plan[copy] = AllocationBytes(ReplayStorage.Validate(files.Observe(originals[i])).Length, pendingTarget.AllocationUnit);
+                            RequireBudget(plan);
+                            RequireKnownInputCapacity(plan, snapshot, pendingTarget);
+                            pendingAllocations = plan;
                         }
                         files.Copy(originals[i], copy);
                     }
-                    lock (gate) pendingAllocations.Remove(copy);
+                    lock (gate)
+                    {
+                        RequireKnownInputCapacity(pendingAllocations, snapshot, pendingTarget);
+                        pendingAllocations.Remove(copy);
+                    }
                     selection[i].Path = copy;
                 }
             }
@@ -382,7 +427,11 @@ internal sealed class ReplayCache : IDisposable
             string final = Path.Combine(root, "Replay-" + DateTime.Now.ToString("yyyy-MM-dd-HH-mm-ss-fff") + "-" + Guid.NewGuid().ToString("N")[..6] + ".mp4");
             string partial = final + ".partial.mp4";
             string concat = Path.Combine(snapshot, "concat.txt");
-            lock (gate) RequireBudget(pendingAllocations);
+            lock (gate)
+            {
+                RequireBudget(pendingAllocations);
+                RequireKnownInputCapacity(pendingAllocations, snapshot, pendingTarget);
+            }
             File.WriteAllText(concat, ConcatText(selection, info.Extension), new UTF8Encoding(false));
             lock (gate) pendingAllocations.Remove(concat);
             var arguments = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-f", "concat", "-safe", "1", "-i", concat, "-t", (end - selection[0].Start).ToString("0.000000", CultureInfo.InvariantCulture), "-c", "copy", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", "-map", "0:v:0" };

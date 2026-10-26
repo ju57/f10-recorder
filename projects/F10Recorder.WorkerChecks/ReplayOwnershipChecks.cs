@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 
 namespace F10Recorder;
@@ -89,7 +90,9 @@ internal static class ReplayOwnershipChecks
         internal int Copies, LinkAttempts, LinkError;
         internal readonly ConcurrentQueue<string> Cleaned = new();
         internal Func<string, ReplayFileExtent> Observation;
+        internal Func<string, ReplayVolumeCapacity> CapacityObservation;
         internal override ReplayFileExtent Observe(string path) => Observation?.Invoke(path) ?? base.Observe(path);
+        internal override ReplayVolumeCapacity ObserveCapacity(string path) => CapacityObservation == null ? base.ObserveCapacity(path) : CapacityObservation(path);
         internal override bool TryHardLink(string copy, string original)
         {
             BeforeLink?.Invoke();
@@ -169,9 +172,243 @@ internal static class ReplayOwnershipChecks
             catch (Exception ex) { failed++; results.Add(new { name, result = "failed", error = ex.ToString() }); }
         }
 
+        await Check("known-input-capacity-equality-and-rejection", async path =>
+        {
+            using var f = new Fixture(path);
+            f.Source.Segments(0, 1);
+            long available = 8191;
+            f.Files.CapacityObservation = _ => new("target-volume", 4096, available);
+            f.Files.Observation = p => Path.GetFileName(p).StartsWith("chunk-")
+                ? new("source-volume", p, 1024, 1000, 1024)
+                : new("target-volume", p, p.EndsWith(".ts") || p.EndsWith("concat.txt") ? 4096 : 0, new FileInfo(p).Length, 4096);
+            var rejected = f.Save(1);
+            if (rejected.Accepted) await Finish(rejected);
+            Require(!rejected.Accepted && rejected.Rejection.Contains("capacity", StringComparison.OrdinalIgnoreCase)
+                && f.Files.Copies == 0 && f.Source.ExportCount == 0 && !Directory.GetDirectories(f.Source.ReplayInfo.Directory, "save-*").Any(),
+                "One 1000-byte input and concat need 8192 target bytes; 8191 must reject before responsibility or writes.");
+            available = 8192;
+            Require((await Finish(f.Save(1))).Succeeded && f.Files.Copies == 1 && f.Source.ExportCount == 1,
+                "Literal known-input equality must admit an ordinary export; source allocation is already reflected in free space.");
+        });
+
+        await Check("known-input-target-unit-and-shared-pool", async path =>
+        {
+            using var f = new Fixture(path);
+            f.Source.Segments(0, 2);
+            File.WriteAllText(f.Source.Chunk(1), File.ReadAllText(f.Source.Chunk(0)));
+            long unit = 4096, available = 12287;
+            f.Files.CapacityObservation = _ => new("target-volume", unit, available);
+            f.Files.Observation = p => new(Path.GetFileName(p).StartsWith("chunk-") ? "other-source-volume" : "target-volume", p,
+                p.EndsWith(".ts") || p.EndsWith("concat.txt") ? unit : 0, 1000, unit);
+            Require(!f.Save(2).Accepted, "Two copy names on one target need12288 total, not separate8192 allowances.");
+            available = 12288;
+            Require((await Finish(f.Save(2))).Succeeded, "Shared target finite equality failed.");
+            f.Source.Segments(0, 1);
+            unit = 65536; available = 131071;
+            f.Files.Observation = p => Path.GetFileName(p).StartsWith("chunk-") ? new("source-volume", p, 4096, 1000, 4096)
+                : new("target-volume", p, p.EndsWith(".ts") || p.EndsWith("concat.txt") ? 65536 : 0, 1000, 65536);
+            Require(!f.Save(1).Accepted, "A source4096 unit cannot fund target65536 copy+concat demand131072.");
+            available = 131072;
+            Require((await Finish(f.Save(1))).Succeeded, "Target-unit equality failed.");
+        });
+
+        await Check("known-input-materialized-remainder-and-sampling", async path =>
+        {
+            foreach (bool enough in new[] { true, false })
+            {
+                using var f = new Fixture(Path.Combine(path, enough ? "equal637" : "short636"));
+                f.Source.Segments(0, 1);
+                long available = 1037;
+                bool copying = false;
+                f.Files.CapacityObservation = _ => new("volume-V", 1, available);
+                f.Files.BeforeCopy = (_, _) => copying = true;
+                f.Files.Observation = p =>
+                {
+                    if (Path.GetFileName(p) == "000000.ts")
+                    {
+                        Require(copying, "Snapshot was observed before copy setup.");
+                        available = enough ? 637 : 636; // Post-materialization free, set by inventory BEFORE capacity.
+                        return new("volume-V", p, 400, 1000, 1);
+                    }
+                    return new("volume-V", p, 0, Path.GetFileName(p).StartsWith("chunk-") ? 1000 : new FileInfo(p).Length, 1);
+                };
+                var result = await Finish(f.Save(1));
+                Require(result.Succeeded == enough && f.Files.Copies == 1 && f.Source.ExportCount == (enough ? 1 : 0),
+                    "Remaining600 + exact concat37 must fit637, reject636, without crediting materialization against pre-write free.");
+                if (enough) Require(Encoding.UTF8.GetByteCount(string.Join(Environment.NewLine, f.Source.Concat) + Environment.NewLine) == 37,
+                    "The prospectively specified Windows one-input concat fixture must be37 bytes.");
+            }
+        });
+
+        await Check("known-input-link-discharge-and-fallback", async path =>
+        {
+            foreach (bool linked in new[] { true, false })
+            {
+                using var f = new Fixture(Path.Combine(path, linked ? "linked" : "fallback"));
+                f.Source.Segments(0, 1);
+                long available = 8192;
+                f.Files.RealHardLinks = linked;
+                f.Files.CapacityObservation = _ => new("volume-V", 4096, available);
+                f.Files.Observation = p => new("volume-V", linked && Path.GetFileName(p) == "000000.ts" ? f.Source.Chunk(0) : p,
+                    p.EndsWith(".ts") ? 4096 : 0, p.EndsWith(".ts") ? 1000 : 0, 4096);
+                f.Files.BeforeLink = () => available = linked ? 4096 : 4095;
+                var result = await Finish(f.Save(1));
+                Require(result.Succeeded == linked && f.Files.Copies == 0 && f.Source.ExportCount == (linked ? 1 : 0),
+                    "Successful hard link must discharge copy demand while reserving concat; failed fallback must recheck capacity before copying. Native link error=" + f.Files.LinkError);
+            }
+        });
+
+        await Check("known-input-target-retargeting-cannot-credit-old-claim", async path =>
+        {
+            foreach (string changed in new[] { "capacity-volume", "capacity-unit", "extent-volume", "extent-unit" })
+            {
+                using var f = new Fixture(Path.Combine(path, changed));
+                f.Source.Segments(0, 1);
+                bool retargeted = false;
+                f.Files.CapacityObservation = _ => new(retargeted && changed == "capacity-volume" ? "volume-W" : "volume-V",
+                    retargeted && changed == "capacity-unit" ? 8192 : 4096, 8192);
+                f.Files.Observation = p => new(retargeted && changed == "extent-volume" && Path.GetFileName(p) == "000000.ts" ? "volume-W" : "volume-V", p,
+                    p.EndsWith(".ts") ? 4096 : 0, p.EndsWith(".ts") ? 1000 : 0,
+                    retargeted && changed == "extent-unit" && Path.GetFileName(p) == "000000.ts" ? 8192 : 4096);
+                f.Files.BeforeLink = () => retargeted = true;
+                var failed = await Finish(f.Save(1));
+                Require(!failed.Succeeded && failed.Error.Contains("target", StringComparison.OrdinalIgnoreCase)
+                    && f.Source.ExportCount == 0 && !f.Cache.IsSaving && f.Files.Copies == (changed.StartsWith("extent-") ? 1 : 0),
+                    "A changed target observation cannot discharge or migrate an accepted volume-V claim: " + changed);
+                retargeted = false; f.Files.BeforeLink = null;
+                Require((await Finish(f.Save(1))).Succeeded, "Retarget failure leaked a claim or poisoned the next valid request.");
+            }
+        });
+
+        await Check("known-input-invalid-capacity-and-coherent-sampling", async path =>
+        {
+            using var f = new Fixture(path);
+            f.Source.Segments(0, 1);
+            f.Files.Observation = p => new("volume-V", p, p.EndsWith(".ts") ? 4096 : 0, p.EndsWith(".ts") ? 1000 : 0, 4096);
+            foreach (var observe in new Func<string, ReplayVolumeCapacity>[] {
+                _ => throw new UnauthorizedAccessException("controlled capacity denial"),
+                _ => throw new System.ComponentModel.Win32Exception(5),
+                _ => null,
+                _ => new("", 4096, 8192), _ => new("volume-V", 0, 8192),
+                _ => new("volume-V", 4096, -1), _ => new("volume-V", 4096, 0),
+                _ => new("volume-V", long.MaxValue, long.MaxValue) })
+            {
+                f.Files.CapacityObservation = observe;
+                var failed = f.Save(1);
+                Require(!failed.Accepted && !string.IsNullOrEmpty(failed.Rejection) && !f.Cache.IsSaving
+                    && f.Files.Copies == 0 && f.Source.ExportCount == 0 && !Directory.GetDirectories(f.Source.ReplayInfo.Directory, "save-*").Any(),
+                    "Unknown/denied/invalid/overflow capacity must reject before responsibility, rather than use unlimited or zero-demand fallback.");
+            }
+            int observations = 0;
+            f.Files.CapacityObservation = _ => new("volume-V", 4096, Interlocked.Increment(ref observations) == 1 ? 8192 : 8191);
+            Require(!f.Save(1).Accepted, "Later lower same-volume availability cannot be maximized with an earlier sample.");
+            f.Files.CapacityObservation = _ => new("volume-V", 4096, 8192);
+            Require((await Finish(f.Save(1))).Succeeded, "Capacity failure poisoned a later valid ordinary export.");
+        });
+
+        await Check("known-input-late-selection-extension", async path =>
+        {
+            Fixture fixture = null;
+            var time = new ManualTime();
+            using var f = fixture = new Fixture(path, time: time, wait: () =>
+            {
+                fixture.Source.Segments(0, 2); time.Advance(); return Task.CompletedTask;
+            });
+            f.Source.Segments(0, 1);
+            long available = 8192;
+            f.Files.CapacityObservation = _ => new("volume-V", 4096, available);
+            f.Files.Observation = p => new("volume-V", p, p.EndsWith(".ts") ? 4096 : 0, p.EndsWith(".ts") ? 1000 : 0, 4096);
+            var accepted = f.Save(2);
+            Require(accepted.Accepted, "Initially known single input should fit; no invented unfinished-tail bound.");
+            var failed = await Finish(accepted);
+            Require(!failed.Succeeded && failed.Error.Contains("capacity", StringComparison.OrdinalIgnoreCase)
+                && f.Files.Copies == 0 && f.Source.ExportCount == 0 && !f.Cache.IsSaving,
+                "Later two-input plan needs12288 and must fail explicitly before copies when only8192 is available.");
+            available = 12288;
+            Require((await Finish(f.Save(2))).Succeeded, "Failed late-plan extension leaked the accepted request's claim.");
+        });
+
+        await Check("known-input-preserves-budget-and-maintenance-seams", async path =>
+        {
+            using var f = new Fixture(path);
+            f.Source.Segments(0, 1);
+            bool denied = false, checkedBudget = false;
+            int observations = 0;
+            f.Files.CapacityObservation = _ => { observations++; return denied ? throw new UnauthorizedAccessException("controlled later capacity denial") : new("volume-V", 4096, 8192); };
+            f.Files.Observation = p => new("volume-V", p, p.EndsWith(".ts") ? 4096 : 0, p.EndsWith(".ts") ? 1000 : 0, 4096);
+            f.Files.BeforeCopy = (_, _) =>
+            {
+                denied = true;
+                int before = observations;
+                f.Cache.ValidateBudget(1_000_000);
+                f.Cache.Maintain(f.Id);
+                Require(observations == before && f.Cache.IsSaving, "Unrelated P05/maintenance consulted capacity or discarded the accepted claim.");
+                checkedBudget = true;
+            };
+            var failed = await Finish(f.Save(1));
+            Require(checkedBudget && !failed.Succeeded && failed.Error.Contains("capacity denial") && !f.Cache.IsSaving,
+                "Only subsequent known-input growth should observe the capacity denial and fail the accepted request.");
+            denied = false; f.Files.BeforeCopy = null;
+            Require((await Finish(f.Save(1))).Succeeded, "Capacity denial poisoned an explicit later safe request.");
+        });
+
+        await Check("known-input-concurrent-rejection-and-retirement", async path =>
+        {
+            using var f = new Fixture(path);
+            f.Source.Segments(0, 1);
+            long available = 8192;
+            var entered = Signal(); var release = Signal();
+            f.Files.CapacityObservation = _ => new("volume-V", 4096, available);
+            f.Files.Observation = p => new("volume-V", p, p.EndsWith(".ts") ? 4096 : 0, p.EndsWith(".ts") ? 1000 : 0, 4096);
+            f.Files.BeforeCopy = (_, _) => { entered.TrySetResult(); release.Task.WaitAsync(Deadline).GetAwaiter().GetResult(); };
+            var accepted = f.Save(1);
+            Task retirement = null;
+            try
+            {
+                await entered.Task.WaitAsync(Deadline);
+                string otherDestination = Path.Combine(path, "different-destination");
+                var replacement = new Source(Path.Combine(path, "buffer", "session-replacement")); replacement.Segments(0, 3);
+                var id = f.Cache.RegisterSession(replacement);
+                Require(!f.Cache.TrySave(id, replacement.Trigger(3), otherDestination).Accepted && f.Cache.IsSaving,
+                    "A concurrent submission replaced or cleared an accepted request's claims.");
+                retirement = f.Cache.RetireSessionAsync(f.Id);
+                Require(!retirement.IsCompleted && !f.Source.Disposed, "Retirement reclaimed accepted input-copy resources.");
+            }
+            finally { release.TrySetResult(); }
+            var saved = await Finish(accepted);
+            if (retirement != null) await retirement.WaitAsync(Deadline);
+            Require(saved.Succeeded && Path.GetDirectoryName(saved.File) == f.Destination && f.Source.Disposed
+                && f.Source.Concat[1] == "duration 1.000000" && !f.Cache.IsSaving,
+                "Concurrent/retired save lost its original destination, cutoff or completion lifetime.");
+        });
+
+        await Check("known-input-production-capacity-observer", path =>
+        {
+            Directory.CreateDirectory(path);
+            string sentinel = Path.Combine(path, "ordinary-file");
+            File.WriteAllText(sentinel, "task-owned capacity sentinel");
+            var files = new ReplayFiles();
+            var direct = files.ObserveCapacity(path);
+            var alias = files.ObserveCapacity(Path.Combine(path, "."));
+            string absent = Path.Combine(path, "not-created", "child");
+            var future = files.ObserveCapacity(absent);
+            var extent = files.Observe(sentinel);
+            Require(!string.IsNullOrWhiteSpace(direct.Volume) && direct.AllocationUnit > 0 && direct.AvailableBytes >= 0
+                && direct.Volume == alias.Volume && direct.Volume == future.Volume && direct.Volume == extent.Volume
+                && direct.AllocationUnit == alias.AllocationUnit && direct.AllocationUnit == future.AllocationUnit
+                && direct.AllocationUnit == extent.AllocationUnit && !Directory.Exists(Path.Combine(path, "not-created"))
+                && File.ReadAllText(sentinel) == "task-owned capacity sentinel", "Native observer lost actual-volume identity or created/changed its inspected paths.");
+            bool rejected = false;
+            try { files.ObserveCapacity(Path.Combine(sentinel, "child")); } catch (IOException) { rejected = true; }
+            Require(rejected, "A regular-file ancestor was mistaken for safely absent directory storage.");
+            File.WriteAllText(Path.Combine(path, "capacity-smoke.json"), JsonSerializer.Serialize(new { direct, alias, future, extent }, WorkerProtocol.Json));
+            return Task.CompletedTask;
+        });
+
         await Check("budget-reduction-validates-without-changing-current-budget", async path =>
         {
             using var f = new Fixture(path, budget: 100_000_000);
+            f.Files.CapacityObservation = _ => new("volume-C", 1, long.MaxValue);
             string retained = Path.Combine(path, "buffer", "session-retained", "retained.ts");
             Directory.CreateDirectory(Path.GetDirectoryName(retained)); File.WriteAllText(retained, "protected");
             f.Files.Observation = p => new("volume-C", p, p == f.Source.Chunk(0) ? 30_000_000 : p == retained ? 25_000_000 : 0,
@@ -210,6 +447,7 @@ internal static class ReplayOwnershipChecks
         await Check("budget-reduction-keeps-pending-copy-obligations", async path =>
         {
             using var f = new Fixture(path, budget: 100_000_000);
+            f.Files.CapacityObservation = _ => new("volume-C", 1, long.MaxValue);
             var entered = Signal(); var release = Signal();
             f.Files.Observation = p => new("volume-C", p, p == f.Source.Chunk(0) ? 30_000_000 : 0, p == f.Source.Chunk(0) ? 30_000_000 : 0, 1);
             f.Files.BeforeCopy = (_, _) => { entered.TrySetResult(); release.Task.WaitAsync(Deadline).GetAwaiter().GetResult(); };
@@ -236,6 +474,7 @@ internal static class ReplayOwnershipChecks
         await Check("storage-retained-input-copy-admission", async path =>
         {
             using var f = new Fixture(path, budget: 6500);
+            f.Files.CapacityObservation = _ => new("volume-C", 1, long.MaxValue);
             f.Files.Observation = p => new("volume-C", p, Path.GetFileName(p).StartsWith("chunk-") ? 1000 : new FileInfo(p).Length,
                 Path.GetFileName(p).StartsWith("chunk-") ? 1000 : new FileInfo(p).Length, 1);
             string retained = Path.Combine(path, "buffer", "session-retained", "chunk-old.ts");
@@ -252,6 +491,7 @@ internal static class ReplayOwnershipChecks
         await Check("storage-fallback-rechecks-external-growth", async path =>
         {
             using var f = new Fixture(path, budget: 6500);
+            f.Files.CapacityObservation = _ => new("volume-C", 1, long.MaxValue);
             f.Files.Observation = p => new("volume-C", p, p.EndsWith(".ts") ? 1000 : new FileInfo(p).Length,
                 p.EndsWith(".ts") ? 1000 : new FileInfo(p).Length, 1);
             string retained = Path.Combine(path, "buffer", "external-retained.ts");
@@ -265,6 +505,7 @@ internal static class ReplayOwnershipChecks
         await Check("storage-copies-retiring-session-and-cleanup", async path =>
         {
             using var f = new Fixture(path, budget: 6500);
+            f.Files.CapacityObservation = _ => new("volume-C", 1, long.MaxValue);
             f.Files.Observation = p => new("volume-C", p, p.EndsWith(".ts") ? 1000 : 0, p.EndsWith(".ts") ? 1000 : 0, 1);
             f.Source.ExportRelease = Signal();
             var accepted = f.Save(); Require(accepted.Accepted, accepted.Rejection);
@@ -328,6 +569,7 @@ internal static class ReplayOwnershipChecks
         await Check("storage-materializing-copy-not-double-counted", async path =>
         {
             using var f = new Fixture(path, budget: 6500);
+            f.Files.CapacityObservation = _ => new("volume-C", 1, long.MaxValue);
             f.Files.Observation = p => new("volume-C", p, p.EndsWith(".ts") ? 1000 : 0, p.EndsWith(".ts") ? 1000 : 0, 1);
             f.Files.BeforeCopy = (_, copy) =>
             {
