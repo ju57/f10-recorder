@@ -144,6 +144,51 @@ No genuine cross-account/session/reparse-alias trial, live acquisition, saved-vi
 decode, installer rollback, new setup or final Overview acceptance is claimed.
 All release gates, including the unresolved #9 investigation, remain open.
 
+## Real paused-worker corrections
+
+`-RealWorkerCorrection` exercises production WorkerRecorder.ApplyAsync over the
+current-user named pipe to an actual worker, then reads the real persisted
+settings/state pair and original backups. Supply an existing approved engine
+and a separate task-only shared private engine root explicitly:
+
+```powershell
+./tests/profile-migration.ps1 -RealWorkerCorrection -EngineSource <retained-approved-ffmpeg.exe> -EngineRoot <isolated-shared-engine-root> -DataDirectory <isolated-output> -Plan
+```
+
+Review the plan, then omit `-Plan` for an authorized native run. `-NoBuild`,
+`-BuildDirectory` and `-Dotnet` retain their existing meanings. The route copies
+at most one pinned engine into the private task root using TrustedStorage rules;
+subsequent runs verify/reuse that copy. Source/copy hashes are recorded. Only
+hash/lease verification occurs: it does not execute/probe the engine, download,
+repair or install anything. Never point the task root at installed engine storage.
+
+Seven serial scenarios cover independent stored pause/stopped intent, one FPS
+correction with valid HEVC/false/zero/folder/shortcut/opaque siblings, actual
+correlated completion, paired persistence, exact original backups, same-worker
+reconnect and normal Quit/reopen. Controls cover a held settings-file read lease,
+future settings, an interrupted journal, a mismatched original-state backup and
+failure of the supplied startup callback after a completed commit. The latter
+must still roll back prior valid settings. A failure before the commit completes
+must not rewrite raw originals using salvaged/defaulted values as a rollback.
+Interrupted journal/temp files and rejected attempts remain retained for review.
+
+Every child starts with `paused:true`, an activation-held profile, a nonexistent
+selected application and explicit isolated ownership/engine roots. The parent
+allows only status, Apply and Quit; reconnect uses a deliberately invalid fallback
+executable so unexpected fixture death cannot start a generic worker. The real
+Windows startup value and kind are read/compared, while the worker's existing
+startup callback writes only fixture intent. No Resume, restart, save, screenshot,
+probe, repair, capture, GPU encoding or visible/capture-excluded UI is exercised.
+Hidden task-owned Ctrl+Alt+Shift+F4-F6 shortcuts can conflict; a conflict fails
+without stopping or reconfiguring its owner. Cleanup requires normal owned-worker
+Quit; fallback termination is recorded as failed cleanup.
+
+This supplies paused real-worker correction/persistence evidence. Media files
+are preservation sentinels, not playable results. Full setup/Overview, named
+device behavior, native accessibility/focus/DPI, live capture/A/V, cross-account
+qualification and shipping upgrade/power-loss durability remain pending. Issue
+#12 and all mandatory release gates remain open.
+
 ## Correction acknowledgements
 
 The Desktop reports Apply or engine repair as successful only when the reply
