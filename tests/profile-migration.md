@@ -197,6 +197,8 @@ requires exit 0, result passed, boolean sensitivityControl false and exactly 27
 passing checks; sensitivity requires exit 1, result failed, boolean true and
 exactly 27 checks with only `existing-context-fixture-sensitivity` failed.
 Missing/malformed reports, other failures and unexpected exits fail the job.
+The JSON root and each check must be objects; singleton arrays are rejected
+without relying on PowerShell's collection/member enumeration.
 
 For bounded local verification, the same locked/audited Release build may use an
 isolated `--artifacts-path`, `CopyLocalLockFileAssemblies=false` and
