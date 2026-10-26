@@ -143,3 +143,33 @@ File sentinels establish byte preservation, not playable-media/A/V acceptance.
 No genuine cross-account/session/reparse-alias trial, live acquisition, saved-video
 decode, installer rollback, new setup or final Overview acceptance is claimed.
 All release gates, including the unresolved #9 investigation, remain open.
+
+## Correction acknowledgements
+
+The Desktop reports Apply or engine repair as successful only when the reply
+contains a fresh completion for that exact operation from the original worker,
+and the client's accepted current state confirms the same completed operation.
+An error-bearing completion remains an error. Missing, unrelated, still-applying,
+stale or retired-worker replies do not report success or close Settings. A newer
+matching poll may confirm the same operation before its reply arrives. Engine
+capability context may legitimately change during Apply or repair.
+
+The existing offscreen Desktop route also checks missing/unrelated completions
+and a reported write failure: the editor retains its FPS/folder draft and does
+not set Submitted or request closure. After an explicit fresh capability check,
+a matching retry closes once and retains the pause/activation hold. Controlled
+capability/completion replies establish client integration, not successful
+settings persistence or engine/media application by an actual worker.
+An offscreen rerun can use hash-verified retained actual worker snapshots as
+inputs when worker behavior is unchanged; record their original revision and
+the source/copy hashes separately. Such a run tests the newly built client and
+controls against those inputs, not a fresh worker or live-engine execution.
+
+The `F10Recorder.WorkerChecks` entry point `--apply-acknowledgements <output>`
+is dispatched before native recorder initialization. Thirteen headless client
+checks cover positive correction/repair, errors, identity/revision correlation
+and delayed polling. `--sensitivity-control` changes only the unrelated-operation
+reply fixture into a legitimate matching completion: exactly that rejection
+assertion must fail. Windows CI runs and validates both routes. These checks
+create only local reports; no native windows, shortcuts, pipes, recorder, engine,
+GPU, capture or startup writes occur.

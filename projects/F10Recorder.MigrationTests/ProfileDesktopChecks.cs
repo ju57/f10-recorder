@@ -92,6 +92,46 @@ internal static class ProfileDesktopChecks
                     Require(panel.GetLogicalDescendants().OfType<Button>().Single(b => b.Name == "ApplySettings").IsEnabled && await panel.ApplyAsync() && submitted.VideoCodec == "hevc_nvenc" && submitted.FramesPerSecond == 30 && client.Paused && client.ProfileStatus.ActivationRequired,
                         "Correcting FPS must retain a valid unavailable saved codec and the activation hold, after an explicit authenticated capability check.");
                 }
+                var acknowledgements = new List<object>();
+                foreach (string failure in new[] { "missing-status", "wrong-operation", "write-error" })
+                {
+                    var initial = new WorkerStatus {
+                        Instance = "desktop-correction-worker", Revision = 8, Config = new Settings { SystemAudio = false, DisplayIndex = 0 },
+                        Paused = true, Phase = CapturePhase.Paused,
+                        ProfileStatus = new ProfileStatus { ExistingProfile = true, RequiresCorrection = true, ActivationRequired = true, Issues = ["FramesPerSecond: Choose 24, 30, 60, or 120 FPS."] }
+                    };
+                    bool retry = false; int closes = 0; long revision = 8;
+                    using var client = new WorkerRecorder(initial, request =>
+                    {
+                        if (request.Command == "probeMedia") return System.Threading.Tasks.Task.FromResult(new WorkerReply { Status = initial, Capabilities = new RecordingEngineCapabilities { Encoders = [new EncoderOption { Codec = "h264_nvenc", Name = "Controlled H.264 response" }] } });
+                        Require(request.Command == "apply", "Unexpected correction command.");
+                        var corrected = new WorkerStatus {
+                            Instance = initial.Instance, Revision = ++revision,
+                            CompletedApply = !retry && failure == "wrong-operation" ? "different-operation" : request.OperationId,
+                            Config = retry ? request.Settings : initial.Config, Paused = true, Phase = CapturePhase.Paused,
+                            ProfileStatus = new ProfileStatus { ExistingProfile = true, ActivationRequired = true }
+                        };
+                        return System.Threading.Tasks.Task.FromResult(new WorkerReply {
+                            Status = !retry && failure == "missing-status" ? null : corrected,
+                            Error = !retry && failure == "write-error" ? "Controlled profile correction write failed" : null
+                        });
+                    });
+                    var panel = new SettingsPanel(client); client.Changed += panel.UpdateState; panel.CloseRequested = () => closes++;
+                    await panel.ProbeAsync();
+                    var fps = panel.GetLogicalDescendants().OfType<ComboBox>().Single(c => c.Name == "FramesPerSecond"); fps.SelectedItem = 30;
+                    panel.SelectPage(3);
+                    var folder = panel.GetLogicalDescendants().OfType<TextBox>().Single(c => c.Name == "OutputDirectory");
+                    string draftFolder = Path.Combine(data, "preserved-draft-clips"); folder.Text = draftFolder; panel.SelectPage(0);
+                    Require(!await panel.ApplyAsync() && panel.Submitted == null && closes == 0 && !string.IsNullOrWhiteSpace(panel.Error), "Rejected/unconfirmed correction closed the editor or reported submission.");
+                    Require(fps.SelectedItem.Equals(30) && folder.Text == draftFolder && client.Config.FramesPerSecond == 60 && !client.Config.SystemAudio && client.Config.DisplayIndex == 0 && client.Paused && client.ProfileStatus.ActivationRequired,
+                        "Rejected/unconfirmed correction discarded valid drafts or changed deliberate recording intent.");
+                    // Capability admission is deliberately rechecked after the failed change.
+                    retry = true; await panel.ProbeAsync();
+                    Require(await panel.ApplyAsync() && closes == 1 && panel.Submitted.FramesPerSecond == 30 && panel.Submitted.OutputDirectory == draftFolder && client.Paused && client.ProfileStatus.ActivationRequired,
+                        "A fresh acknowledged retry failed, lost the draft, or activated capture.");
+                    acknowledgements.Add(new { failure, result = "passed", editorClosedOnlyAfterAcknowledgedRetry = true });
+                }
+                report["correctionAcknowledgements"] = acknowledgements;
                 report["result"] = "passed";
             }
             catch (Exception ex) { report["result"] = "failed"; report["error"] = ex.ToString(); }

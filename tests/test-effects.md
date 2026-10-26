@@ -44,6 +44,12 @@ with bounded status/correction replies and original-byte preservation.
 `-StatusTransportOnly -Plan` previews the separate CI projection/protocol/headless
 client checks. That route opens no native recorder/windows/shortcuts/pipes and
 uses no GPU/capture/startup behavior; only local fixture/report files are created.
+The early `--apply-acknowledgements <output>` WorkerChecks route likewise uses
+only the production headless client and controlled replies, with local reports.
+Its optional `--sensitivity-control` changes one response fixture, not production.
+The existing offscreen Desktop profile route additionally exercises failed or
+unconfirmed correction, retained drafts and an acknowledged retry, using no
+platform Window, capture affinity, real engine or startup writer.
 
 `./tests/settings-validation.ps1` exercises a paused direct recorder host with
 missing and untrusted engines in isolated storage. It creates hidden shortcut
