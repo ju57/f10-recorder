@@ -284,7 +284,7 @@ namespace F10Recorder
         readonly Func<WindowTargetSnapshot> windowTarget;
         readonly CaptureLifecycle capture;
         CaptureSession session;
-        readonly ReplayCache replays = new ReplayCache();
+        readonly ReplayCache replays;
         readonly ReplaySaveNotifications saveNotifications = new ReplaySaveNotifications();
         ReplaySessionId? sessionId;
         int recoveries;
@@ -297,19 +297,21 @@ namespace F10Recorder
                 {
                     var result = session == null ? new RecorderMetrics() : session.Metrics;
                     result.SampledUtc = DateTime.UtcNow.ToString("o");
-                    var save = replays.Status.LastSave;
+                    var storage = replays.Status;
+                    var save = storage.LastSave;
                     result.Recoveries = recoveries; result.LastSaveMilliseconds = save == null ? 0 : save.Milliseconds;
                     result.LastSaveBytes = save == null ? 0 : save.Bytes; result.LastSaveSucceeded = save != null && save.Succeeded;
                     if (sessionId.HasValue)
                     {
                         var buffer = replays.GetStatus(sessionId.Value);
-                        result.BufferedSeconds = buffer.BufferedSeconds; result.CacheBytes = buffer.CacheBytes;
+                        result.BufferedSeconds = buffer.BufferedSeconds;
                     }
+                    result.CacheBytes = storage.CacheBytes ?? -1; // Unknown inventory is not an empty cache.
                     return result;
                 }
             }
         }
-        internal bool IsSaving { get { return replays.Status.Saving; } }
+        internal bool IsSaving { get { return replays.IsSaving; } }
         internal event Action CaptureStatusChanged
         {
             add { capture.CaptureStatusChanged += value; }
@@ -325,8 +327,9 @@ namespace F10Recorder
             windowTarget = targetProvider;
             settings = config; capture = new CaptureLifecycle(startPaused); synthetic = syntheticSource; cache = Path.Combine(dataDirectory, "buffer");
             Directory.CreateDirectory(cache);
-            // Only this application's disposable cache. Saved clips live elsewhere.
-            foreach (string old in Directory.GetDirectories(cache, "session-*")) CaptureSession.TryDeleteDirectory(old);
+            // Old-session and failed-cleanup material still consumes this profile's
+            // budget. Startup must not erase it merely to admit new capture.
+            replays = new ReplayCache(cacheDirectory: cache, cacheBudgetBytes: config.ReplayCacheBudgetBytes);
             worker = new Thread(Run) { IsBackground = true, Name = "Capture supervisor" }; worker.Start();
         }
         public void Restart() => capture.Restart();

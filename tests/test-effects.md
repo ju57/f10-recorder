@@ -30,6 +30,15 @@ negative cases without launching UI, GPU work or capture. Windows CI runs it.
 This protects known dispatch behavior; it cannot infer every indirect effect
 inside arbitrary native code. Review the mapping when changing a test entry point.
 
+CoreChecks `<output> --storage-budget-only` runs only the portable budget/profile
+cases and writes tiny local settings/original-backup fixtures. It starts no
+recorder, native window, engine, GPU, capture or startup action. Full CoreChecks
+also runs it, alongside the existing larger clock fixtures; budget their retained
+output separately. Replay ownership storage cases control allocation/identity
+metadata through the existing filesystem seam while retaining tiny real file,
+snapshot, cleanup and publication operations. Ordinary Windows file-information
+and hard-link APIs are used; no native UI or recording initialization is reached.
+
 `./tests/profile-migration.ps1 -Plan` previews isolated paused/blocked migration
 workers and hidden Ctrl+Alt+Shift+F4–F6 shortcuts. It sends task-owned hidden-window
 Save/Screenshot messages without physical input and checks ownership/reconnect,

@@ -13,6 +13,7 @@ namespace F10Recorder
         public int SchemaVersion = 1;
         [JsonExtensionData] public Dictionary<string, JsonElement> AdditionalPreferences = new Dictionary<string, JsonElement>();
         public int ReplayMinutes = 5;
+        public long ReplayCacheBudgetBytes = 10_000_000_000;
         public int FramesPerSecond = 60;
         public int BitrateMbps = 20;
         public string VideoCodec = "h264_nvenc";
@@ -33,6 +34,9 @@ namespace F10Recorder
         public void Validate()
         {
             foreach (var field in StoredFields) { string issue = FieldIssue(field.Name); if (issue != null) throw new ArgumentException(issue); }
+            // A necessary video-only lower bound, not calibrated admission headroom.
+            long videoBytes = ReplayMinutes * 60L * BitrateMbps * 1_000_000 / 8;
+            if (videoBytes > ReplayCacheBudgetBytes) throw new ArgumentException("Replay-cache budget cannot hold even the nominal video history. Increase the budget or explicitly change replay length/bitrate. Audio, container and burst margins remain uncalibrated.");
             if (SaveKey == OverlayKey && SaveModifiers == OverlayModifiers) throw new ArgumentException("Use different shortcuts for saving and opening the overlay.");
             if (ScreenshotKey == SaveKey && ScreenshotModifiers == SaveModifiers || ScreenshotKey == OverlayKey && ScreenshotModifiers == OverlayModifiers) throw new ArgumentException("Use different shortcuts for screenshots, replays, and the overlay.");
             OutputDirectory = Path.GetFullPath(OutputDirectory);
@@ -45,6 +49,7 @@ namespace F10Recorder
             {
                 case nameof(SchemaVersion): return SchemaVersion == 1 ? null : "Unsupported settings schema version.";
                 case nameof(ReplayMinutes): return ReplayMinutes >= 1 && ReplayMinutes <= 30 ? null : "Replay length must be 1–30 minutes.";
+                case nameof(ReplayCacheBudgetBytes): return ReplayCacheBudgetBytes > 0 ? null : "Replay-cache budget must be a positive number of decimal bytes.";
                 case nameof(FramesPerSecond): return SupportedFrameRates.Contains(FramesPerSecond) ? null : "Choose 24, 30, 60, or 120 FPS.";
                 case nameof(BitrateMbps): return BitrateMbps >= 5 && BitrateMbps <= 100 ? null : "Bitrate must be 5–100 Mbps.";
                 case nameof(VideoCodec): return VideoCodec == "h264_nvenc" || VideoCodec == "hevc_nvenc" || VideoCodec == "av1_nvenc" ? null : "Choose H.264, HEVC, or AV1.";
