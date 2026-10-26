@@ -7,8 +7,16 @@ internal sealed record ProfileEntry(ProfileEntryKind Kind, string Heading, strin
 {
     internal static bool HasUsableConfig(Settings config)
     {
-        if (config == null || Settings.StoredFields.Any(field => config.FieldIssue(field.Name) != null)) return false;
-        return new[] { (config.SaveKey, config.SaveModifiers), (config.OverlayKey, config.OverlayModifiers), (config.ScreenshotKey, config.ScreenshotModifiers) }.Distinct().Count() == 3;
+        return config != null && Settings.StoredFields.All(field => config.FieldIssue(field.Name) == null);
+    }
+    static bool FullyValid(Settings config)
+    {
+        // Validate normalizes folder paths. Validate only a throwaway copy so
+        // admission cannot change the worker's settings or the editor's draft.
+        var copy = new Settings();
+        foreach (var field in Settings.StoredFields) field.SetValue(copy, field.GetValue(config));
+        try { copy.Validate(); return true; }
+        catch (ArgumentException) { return false; }
     }
     internal static ProfileEntry Describe(IWindowsRecorder recorder)
     {
@@ -19,7 +27,7 @@ internal sealed record ProfileEntry(ProfileEntryKind Kind, string Heading, strin
             ? "Recorder unavailable. Your recording preferences and edits are kept."
             : "Recording preferences could not be verified. " + (profile?.Issues?.Length > 0 ? string.Join(" ", profile.Issues) : "Your edits are kept."), false, true, false);
         if (unavailable || profile?.Issues == null || !HasUsableConfig(recorder.Config) || profile.ActivationRequired && !recorder.Paused) return Blocked();
-        bool ordinary = profile.CanWrite && !profile.RequiresCorrection && profile.Issues.Length == 0;
+        bool ordinary = profile.CanWrite && !profile.RequiresCorrection && profile.Issues.Length == 0 && FullyValid(recorder.Config);
         switch (profile.Outcome)
         {
             case "current" when ordinary && profile.ExistingProfile:

@@ -150,6 +150,39 @@ internal static class ProfileEntryChecks
                         "The literal existing-profile presentation assertion disagreed with the fixture.");
                     return Task.CompletedTask;
                 });
+                await Check("real-loader-shortcut-correction-keeps-colliding-fields-editable", async () =>
+                {
+                    string profilePath = Path.Combine(data, "shortcut-collision-profile"); Directory.CreateDirectory(profilePath);
+                    var saved = new Settings { SaveKey = 115, SaveModifiers = 7, OverlayKey = 115, OverlayModifiers = 7, ScreenshotKey = 117, ScreenshotModifiers = 7, SystemAudio = false, DisplayIndex = 0 };
+                    string settingsPath = Path.Combine(profilePath, "settings.json"); File.WriteAllText(settingsPath, JsonSerializer.Serialize(saved, WorkerProtocol.Json));
+                    File.WriteAllText(Path.Combine(profilePath, "worker-state.json"), "{\"SchemaVersion\":1,\"Paused\":true,\"UserStopped\":false,\"ActivationRequired\":true}");
+                    byte[] original = File.ReadAllBytes(settingsPath); var profile = RecordingProfile.Load(profilePath);
+                    Require(profile.Status.Outcome == "correction-required" && profile.Status.CanWrite, "The fixture must be a real correctable loader outcome.");
+                    var snapshot = Fixture("correction"); snapshot.Config = profile.Settings; snapshot.ProfileStatus = profile.Status; int commands = 0;
+                    using var recorder = new WorkerRecorder(snapshot, _ => { commands++; throw new InvalidOperationException("Review must not send commands."); });
+                    var panel = new SettingsPanel(recorder); await panel.EnterAsync();
+                    Require(Find<ContentControl>(panel, "ProfileEditor").IsVisible, "A real correctable shortcut collision hid the only editor that could repair it.");
+                    panel.SelectPage(2);
+                    Require((string)Find<ComboBox>(panel, "SaveKey").SelectedItem == "F4" && (string)Find<ComboBox>(panel, "OverlayKey").SelectedItem == "F4", "Colliding valid individual choices were silently replaced.");
+                    Find<ComboBox>(panel, "OverlayKey").SelectedItem = "F5";
+                    Require(commands == 0 && File.ReadAllBytes(settingsPath).SequenceEqual(original) && recorder.Config.OverlayKey == 115 && recorder.Paused,
+                        "Reviewing a collision changed saved intent or issued commands.");
+                    var contradictory = Fixture("existing"); contradictory.Config = profile.Settings;
+                    using var untrusted = new WorkerRecorder(contradictory, _ => throw new InvalidOperationException("An inconsistent ordinary profile must not probe."));
+                    var blocked = new SettingsPanel(untrusted); await blocked.EnterAsync();
+                    Require(!Find<ContentControl>(blocked, "ProfileEditor").IsVisible, "A purported ordinary profile with invalid combined settings was trusted.");
+                });
+                await Check("untrusted-profile-never-shows-raw-active-or-save-success-header", () =>
+                {
+                    var snapshot = Fixture("unknown"); snapshot.Paused = false; snapshot.Ready = snapshot.CanSave = true; snapshot.Phase = CapturePhase.Buffering; snapshot.SaveRegistered = false;
+                    using var recorder = new WorkerRecorder(snapshot, _ => throw new InvalidOperationException("Untrusted presentation must not send commands."));
+                    var panel = new SettingsPanel(recorder);
+                    var text = panel.GetLogicalDescendants().OfType<TextBlock>().Select(block => block.Text ?? "").ToArray();
+                    Require(!text.Any(value => value.Contains("Replay recording active") || value.Contains("use Save replay here") || value.Contains("seconds of completed footage available")),
+                        "A blocked profile still presented raw active/readiness/save-success claims.");
+                    Require(!recorder.Paused && recorder.Ready && recorder.CanSave && recorder.Config.VideoCodec == "hevc_nvenc", "Presentation rewrote raw worker intent/status instead of displaying uncertainty.");
+                    return Task.CompletedTask;
+                });
             }
             finally
             {

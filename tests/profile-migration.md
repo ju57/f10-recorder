@@ -153,6 +153,12 @@ Overview. The generic Review preferences action selects Capture only on explicit
 action; it does not infer field navigation from diagnostic text. Supplied
 correction/compatibility reasons remain visible. Unknown, null or inconsistent
 status fails closed without treating missing information as a new profile.
+Individually valid colliding shortcut choices remain editable on a real
+correction-required profile; ordinary-valid claims still require central
+Settings validation on a throwaway copy, without normalizing the source config.
+A blocked profile's main recording header reports unavailable status instead of
+repeating untrusted active/readiness/save hints; underlying worker intent and
+telemetry are left unchanged.
 
 One persistent panel retains draft values, selected tab and last-known attention
 context across polls/reconnect/replacement. Entry/status updates do not apply,

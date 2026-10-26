@@ -255,7 +255,9 @@ internal sealed class SettingsPanel : UserControl
         page.IsVisible = entry.CanEdit;
         foreach (var button in navigation) button.IsEnabled = entry.CanEdit;
         var status = ReplayPresentation.Describe(recorder.Phase, recorder.State, recorder.Paused, recorder.Ready, recorder.CanSave, recorder.Applying, recorder.Saving, recorder.SaveRegistered, recorder.Metrics?.BufferedSeconds ?? 0);
-        state.Text = status.Heading; state.Foreground = status.Healthy && recorder.SaveRegistered ? Ui.Accent : Ui.Warning; stateDetail.Text = status.Detail;
+        state.Text = entry.CanEdit ? status.Heading : "Recording status unavailable";
+        state.Foreground = entry.CanEdit && status.Healthy && recorder.SaveRegistered ? Ui.Accent : Ui.Warning;
+        stateDetail.Text = entry.CanEdit ? status.Detail : "Recording readiness cannot be confirmed while this profile needs attention.";
         quickSave.IsEnabled = status.CanSave && CanUseCaptureActions(); quickScreenshot.IsEnabled = CanUseCaptureActions() && !recorder.ScreenshotInProgress;
         apply.IsEnabled = entry.CanEdit && !probing && codec.SelectedItem != null && !recorder.Applying;
         codec.IsEnabled = entry.CanEdit && !probing && !recorder.Applying;
