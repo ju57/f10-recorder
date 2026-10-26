@@ -186,7 +186,7 @@ internal static partial class ProfileCorrectionChecks
         string package = Path.Combine(root, "ffmpeg-" + MediaDependency.PackageVersion), bin = Path.Combine(package, "bin");
         if (!reuseOnly) { TrustedStorage.CreatePrivateDirectory(root); TrustedStorage.CreatePrivateDirectory(package); TrustedStorage.CreatePrivateDirectory(bin); }
         if (reuseOnly) Require(File.Exists(MediaDependency.ExecutablePath), "Read-only retained engine is unavailable; provisioning is forbidden.");
-        if (!File.Exists(MediaDependency.ExecutablePath))
+        if (!reuseOnly && !File.Exists(MediaDependency.ExecutablePath))
         {
             using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read);
             using var output = new FileStream(MediaDependency.ExecutablePath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
