@@ -30,6 +30,7 @@ internal static class ReplayOwnershipChecks
         internal Action ExportAction;
         internal readonly TaskCompletionSource ExportEntered = Signal();
         internal readonly TaskCompletionSource StopEntered = Signal();
+        internal readonly TaskCompletionSource DisposeEntered = Signal();
         internal TaskCompletionSource ExportRelease;
         internal string[] Arguments, Concat;
         internal string Contents;
@@ -74,13 +75,16 @@ internal static class ReplayOwnershipChecks
             ExportAction?.Invoke();
             if (!MissingOutput) File.WriteAllBytes(arguments[^1], new byte[OutputBytes]);
         }
-        public void Dispose() { Require(Stopped, "Resources released before acquisition stopped."); Disposed = true; }
+        public void Dispose() { Require(Stopped, "Resources released before acquisition stopped."); Disposed = true; DisposeEntered.TrySetResult(); }
     }
 
     sealed class Files : ReplayFiles
     {
         internal Action<string, string> BeforeCopy;
         internal Action BeforeLink;
+        internal Action Published;
+        internal Action<string> DeletedFile;
+        internal Action<string> DeletedDirectory;
         internal bool RealHardLinks, FailPublish, FailCleanup;
         internal int Copies, LinkAttempts, LinkError;
         internal readonly ConcurrentQueue<string> Cleaned = new();
@@ -100,18 +104,21 @@ internal static class ReplayOwnershipChecks
         {
             if (FailPublish) throw new IOException("controlled publication failure");
             base.Publish(partial, final);
+            Published?.Invoke();
         }
         internal override void DeleteFile(string path)
         {
             Cleaned.Enqueue(path);
             if (FailCleanup) throw new IOException("controlled cleanup failure");
             base.DeleteFile(path);
+            DeletedFile?.Invoke(path);
         }
         internal override void DeleteDirectory(string path)
         {
             Cleaned.Enqueue(path);
             if (FailCleanup) throw new UnauthorizedAccessException("controlled directory cleanup failure");
             base.DeleteDirectory(path);
+            DeletedDirectory?.Invoke(path);
         }
     }
 
@@ -276,6 +283,102 @@ internal static class ReplayOwnershipChecks
             };
             Require((await Finish(f.Save())).Succeeded,
                 "V06 cache analogue: materialized copy allocation must replace its future claim, not be charged alongside the full claim.");
+        });
+        await Check("storage-snapshot-cleanup-versus-maintenance", async path =>
+        {
+            using var f = new Fixture(path);
+            using var observed = new ManualResetEventSlim();
+            using var resume = new ManualResetEventSlim();
+            using var deleted = new ManualResetEventSlim();
+            var published = Signal();
+            var cleanupRequested = Signal();
+            int armed = 0, entered = 0, observing = 0, deletedDuringObservation = 0;
+            f.Source.ExportRelease = Signal();
+            f.Files.Published = () => published.TrySetResult();
+            f.Files.DeletedFile = p => { if (p.EndsWith(".partial.mp4")) cleanupRequested.TrySetResult(); };
+            f.Files.DeletedDirectory = p =>
+            {
+                if (!Path.GetFileName(p).StartsWith("save-")) return;
+                if (Volatile.Read(ref observing) != 0) Volatile.Write(ref deletedDuringObservation, 1);
+                deleted.Set();
+            };
+            f.Files.Observation = p =>
+            {
+                if (Volatile.Read(ref armed) == 0 || Path.GetFileName(p) != "000000.ts" || !Path.GetFileName(Path.GetDirectoryName(p)).StartsWith("save-") || Interlocked.Exchange(ref entered, 1) != 0) return null;
+                long bytes = new FileInfo(p).Length;
+                Volatile.Write(ref observing, 1);
+                observed.Set();
+                try { Require(resume.Wait(Deadline), "Inventory observation was not released."); }
+                finally { Volatile.Write(ref observing, 0); }
+                return new("controlled-volume", p, bytes, bytes, 1);
+            };
+            var save = f.Save();
+            await f.Source.ExportEntered.Task.WaitAsync(Deadline);
+            Volatile.Write(ref armed, 1);
+            Exception maintenanceError = null;
+            var maintenance = Task.Run(() => { try { f.Cache.Maintain(f.Id); } catch (Exception ex) { maintenanceError = ex; } });
+            try
+            {
+                Require(observed.Wait(Deadline), "Inventory did not reach the protected snapshot.");
+                f.Source.ExportRelease.SetResult();
+                await published.Task.WaitAsync(Deadline);
+                await cleanupRequested.Task.WaitAsync(Deadline);
+                // Allow the old ungated deletion to finish, or the corrected
+                // deletion to defer. Never require cleanup while inventory owns it.
+                deleted.Wait(TimeSpan.FromSeconds(1));
+            }
+            finally { resume.Set(); }
+            await maintenance.WaitAsync(Deadline);
+            var result = await Finish(save);
+            Require(result.Succeeded && maintenanceError == null && deletedDuringObservation == 0 && deleted.IsSet && f.Cache.Status.StorageError == null,
+                "R01: snapshot deletion overlapped its held observation or broke continuing maintenance: " + maintenanceError);
+        });
+        await Check("storage-retirement-cleanup-versus-maintenance", async path =>
+        {
+            using var f = new Fixture(path);
+            var next = new Source(Path.Combine(path, "buffer", "session-next")); next.Segments(0, 3);
+            var nextId = f.Cache.RegisterSession(next);
+            using var observed = new ManualResetEventSlim();
+            using var resume = new ManualResetEventSlim();
+            using var deleted = new ManualResetEventSlim();
+            int entered = 0, observing = 0, deletedDuringObservation = 0;
+            Task retirement = null;
+            f.Files.DeletedDirectory = p =>
+            {
+                if (p != f.Source.ReplayInfo.Directory) return;
+                if (Volatile.Read(ref observing) != 0) Volatile.Write(ref deletedDuringObservation, 1);
+                deleted.Set();
+            };
+            f.Files.Observation = p =>
+            {
+                if (p != f.Source.Chunk(0) || Interlocked.Exchange(ref entered, 1) != 0) return null;
+                long bytes = new FileInfo(p).Length;
+                Volatile.Write(ref observing, 1);
+                // Reentrant public retirement starts the independent cleanup
+                // while this unrelated session owns a stable inventory scan.
+                retirement = f.Cache.RetireSessionAsync(f.Id);
+                observed.Set();
+                try { Require(resume.Wait(Deadline), "Retirement inventory observation was not released."); }
+                finally { Volatile.Write(ref observing, 0); }
+                return new("controlled-volume", p, bytes, bytes, 1);
+            };
+            Exception maintenanceError = null;
+            var maintenance = Task.Run(() => { try { f.Cache.Maintain(nextId); } catch (Exception ex) { maintenanceError = ex; } });
+            try
+            {
+                Require(observed.Wait(Deadline), "Inventory did not reach the retiring session.");
+                // Disposal must remain outside the inventory gate, even though
+                // directory removal must wait until the observation is released.
+                await f.Source.DisposeEntered.Task.WaitAsync(Deadline);
+                deleted.Wait(TimeSpan.FromSeconds(1));
+            }
+            finally { resume.Set(); }
+            await maintenance.WaitAsync(Deadline);
+            Require(retirement != null, "Retirement was not requested.");
+            await retirement.WaitAsync(Deadline);
+            Require(maintenanceError == null && deletedDuringObservation == 0 && deleted.IsSet && f.Source.Disposed
+                && f.Cache.GetStatus(nextId).BufferedSeconds > 0 && f.Cache.Status.StorageError == null,
+                "R02: retirement deletion overlapped its held observation or broke unrelated maintenance: " + maintenanceError);
         });
 
         await Check("pins-prune-retire", async path =>

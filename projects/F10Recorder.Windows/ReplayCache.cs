@@ -290,8 +290,13 @@ internal sealed class ReplayCache : IDisposable
                 finally
                 {
                     session.Source.Dispose();
-                    Cleanup(() => files.DeleteDirectory(session.Info.Directory), session.Info.Directory);
-                    lock (gate) sessions.Remove(id);
+                    lock (gate)
+                    {
+                        // Only namespace removal and registration release share
+                        // the inventory gate; resource waits/disposal stay above.
+                        Cleanup(() => files.DeleteDirectory(session.Info.Directory), session.Info.Directory);
+                        sessions.Remove(id);
+                    }
                 }
             });
         }
@@ -395,7 +400,9 @@ internal sealed class ReplayCache : IDisposable
             }
             finally { Cleanup(() => files.DeleteFile(partial), partial); }
         }
-        finally { Cleanup(() => files.DeleteDirectory(snapshot), snapshot); }
+        // Inventory and removal own the same namespace. Export and copying have
+        // already finished; no task/resource wait occurs while holding the gate.
+        finally { lock (gate) Cleanup(() => files.DeleteDirectory(snapshot), snapshot); }
     }
 
     void Cleanup(Action action, string path)

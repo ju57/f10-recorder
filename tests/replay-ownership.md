@@ -33,6 +33,18 @@ Acquisition maintenance checks aggregate pressure even before completed footage
 is available. Native file observations require identifiable local volumes and
 reject reparse entries, unknown identity/allocation and permission errors.
 
+Owned snapshot and retired-session directory removal now share the inventory
+gate; successful cleanup cannot remove paths from an in-progress maintenance
+scan. Retired-session registration is released in the same critical section.
+Export, slow copies, task waits and source disposal remain outside that gate.
+Two event-controlled regression schedules pause a real inventory observation,
+request successful save cleanup or retirement, then release the observation and
+await maintenance plus cleanup. They check deletion did not complete during the
+held observation, successful publication stayed successful, and unrelated
+footage stayed available. Bounded event timeouts guard the schedule; they are
+not storage/performance measurements. Unknown, permission and inconsistent
+observations still fail admission rather than being treated as reclaimed space.
+
 The storage fixtures use tiny files and literal controlled allocation metadata
 through ReplayFiles. They cover shared versus distinct identities/volumes,
 retained old inputs, blocked retiring exports, copy growth, partial allocation
