@@ -58,8 +58,9 @@ metric uses -1 for unknown, rather than reporting an empty cache.
 This is partial issue #13 work. Per-volume free-space/output/finalization
 commitments, below-5-GB warnings, stop-before-below-2-GB acquisition, persistent
 explicit Resume, manual storage, Recovery UI, folder controls and reference
-margin calibration remain pending. A separate actual Apply budget-reduction
-preflight is not delivered by the module checks. Physical block sharing beyond
+margin calibration remain pending. [The P05 worker route](profile-migration.md#budget-reduction-preflight-p05)
+checks actual Apply reductions; module checks separately cover its read-only
+proposed ceiling, finite equality and pending copy demand. Physical block sharing beyond
 hard links, compressed/sparse/ReFS/dedup/quotas, supported path/race behavior,
 actual stop timing and media integrity need separate qualification. The existing
 automatic capture recovery does not satisfy low-space Resume requirements.

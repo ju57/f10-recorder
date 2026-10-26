@@ -169,6 +169,61 @@ internal static class ReplayOwnershipChecks
             catch (Exception ex) { failed++; results.Add(new { name, result = "failed", error = ex.ToString() }); }
         }
 
+        await Check("budget-reduction-validates-without-changing-current-budget", async path =>
+        {
+            using var f = new Fixture(path, budget: 100_000_000);
+            string retained = Path.Combine(path, "buffer", "session-retained", "retained.ts");
+            Directory.CreateDirectory(Path.GetDirectoryName(retained)); File.WriteAllText(retained, "protected");
+            f.Files.Observation = p => new("volume-C", p, p == f.Source.Chunk(0) ? 30_000_000 : p == retained ? 25_000_000 : 0,
+                p == f.Source.Chunk(0) ? 30_000_000 : 0, 1);
+            bool rejected = false;
+            try { f.Cache.ValidateBudget(50_000_000); } catch (IOException) { rejected = true; }
+            Require(rejected && f.Cache.Status.CacheBytes == 55_000_000 && File.ReadAllText(retained) == "protected",
+                "B01: a 50M reduction must reject 55M retained demand without deleting it.");
+            // The original 100M ceiling still admits 55M actual plus 30M copies.
+            Require((await Finish(f.Save())).Succeeded, "Rejected preflight changed the current cache budget or poisoned save admission.");
+        });
+
+        await Check("budget-reduction-equality-identities-and-unknown", path =>
+        {
+            using var f = new Fixture(path, budget: 100_000_000);
+            f.Files.Observation = p => new("volume-C", p, p == f.Source.Chunk(0) ? 30_000_000 : p == f.Source.Chunk(1) ? 20_000_000 : 0, 0, 1);
+            f.Cache.ValidateBudget(50_000_000); // Literal known equality B02.
+            f.Files.Observation = p => new("volume-C", p.EndsWith(".ts") ? "shared-A" : p, p.EndsWith(".ts") ? 45_000_000 : 0, 0, 1);
+            f.Cache.ValidateBudget(50_000_000); // Several names, one allocation B03.
+            File.WriteAllText(f.Source.Chunk(1), File.ReadAllText(f.Source.Chunk(0)));
+            f.Files.Observation = p => new("volume-C", p, p == f.Source.Chunk(0) || p == f.Source.Chunk(1) ? 30_000_000 : 0, 0, 1);
+            bool copiedRejected = false; try { f.Cache.ValidateBudget(50_000_000); } catch (IOException) { copiedRejected = true; }
+            Require(copiedRejected, "B04: equal-content distinct copied allocations must reject a 50M reduction with60M demand.");
+            foreach (var observation in new Func<string, ReplayFileExtent>[] {
+                _ => throw new UnauthorizedAccessException("controlled denied observation"),
+                p => new("", p, 1, 1, 1), p => new("volume-C", p, -1, 1, 1),
+                p => new("volume-C", p, long.MaxValue, 1, 1),
+                p => new("volume-C", "same-identity", p == f.Source.Chunk(0) ? 100 : 200, 0, 1) })
+            {
+                f.Files.Observation = observation; bool rejected = false;
+                try { f.Cache.ValidateBudget(50_000_000); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OverflowException) { rejected = true; }
+                Require(rejected, "B06: unknown/denied/inconsistent/overflow cannot imply empty demand.");
+            }
+            return Task.CompletedTask;
+        });
+        await Check("budget-reduction-keeps-pending-copy-obligations", async path =>
+        {
+            using var f = new Fixture(path, budget: 100_000_000);
+            var entered = Signal(); var release = Signal();
+            f.Files.Observation = p => new("volume-C", p, p == f.Source.Chunk(0) ? 30_000_000 : 0, p == f.Source.Chunk(0) ? 30_000_000 : 0, 1);
+            f.Files.BeforeCopy = (_, _) => { entered.TrySetResult(); release.Task.WaitAsync(Deadline).GetAwaiter().GetResult(); };
+            var accepted = f.Save();
+            try
+            {
+                await entered.Task.WaitAsync(Deadline);
+                bool rejected = false; try { f.Cache.ValidateBudget(50_000_000); } catch (IOException) { rejected = true; }
+                Require(rejected && f.Cache.Status.Saving, "Pending copy demand was ignored or an accepted save was displaced.");
+            }
+            finally { release.TrySetResult(); }
+            Require((await Finish(accepted)).Succeeded, "A rejected reduction harmed the accepted save.");
+        });
+
         await Check("storage-shared-extent-status", path =>
         {
             using var f = new Fixture(path);

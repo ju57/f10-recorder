@@ -1,8 +1,9 @@
-param([string]$Dotnet, [string]$BuildDirectory, [string]$DataDirectory, [string]$SnapshotsPath, [string]$EngineSource, [string]$EngineRoot, [switch]$DesktopOnly, [switch]$EntryOnly, [switch]$StatusTransportOnly, [switch]$RealWorkerCorrection, [switch]$NoBuild, [switch]$Plan)
+param([string]$Dotnet, [string]$BuildDirectory, [string]$DataDirectory, [string]$SnapshotsPath, [string]$EngineSource, [string]$EngineRoot, [switch]$DesktopOnly, [switch]$EntryOnly, [switch]$StatusTransportOnly, [switch]$RealWorkerCorrection, [switch]$BudgetApplyOnly, [switch]$NoBuild, [switch]$Plan)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if (@($DesktopOnly,$EntryOnly,$StatusTransportOnly,$RealWorkerCorrection | Where-Object { $_ }).Count -gt 1) { throw 'Choose one profile verification route.' }
 if ($RealWorkerCorrection -and (-not $EngineSource -or -not $EngineRoot)) { throw 'Real-worker correction requires explicit retained -EngineSource and isolated shared -EngineRoot.' }
+if ($BudgetApplyOnly -and -not $RealWorkerCorrection) { throw 'BudgetApplyOnly requires the existing RealWorkerCorrection route.' }
 if (-not $BuildDirectory) { $BuildDirectory = Join-Path $root $(if ($DesktopOnly -or $EntryOnly) { 'bin/profile-migration-ui' } else { 'bin/profile-migration' }) }
 if (-not $DataDirectory) { $DataDirectory = Join-Path $root ('artifacts/profile-migration-' + (Get-Date -Format yyyyMMdd-HHmmss) + '-' + [Guid]::NewGuid().ToString('N').Substring(0,8)) }
 $launch = [pscustomobject]@{FilePath=(Join-Path $BuildDirectory 'F10Recorder.WorkerChecks.exe'); ArgumentList=@('--profile-migration',('"' + $DataDirectory + '"'))}
@@ -10,18 +11,23 @@ if ($DesktopOnly) { $launch = [pscustomobject]@{FilePath=(Join-Path $BuildDirect
 if ($EntryOnly) { $launch = [pscustomobject]@{FilePath=(Join-Path $BuildDirectory 'F10Recorder.MigrationTests.exe'); ArgumentList=@(('"' + $DataDirectory + '"'),'--profile-entry-ui')} }
 if ($StatusTransportOnly) { $launch.ArgumentList = @('--profile-status-transport',('"' + $DataDirectory + '"')) }
 if ($RealWorkerCorrection) { $launch.ArgumentList = @('--profile-correction-real',('"' + $DataDirectory + '"'),('"' + $EngineSource + '"'),('"' + $EngineRoot + '"')) }
+if ($BudgetApplyOnly) { $launch.ArgumentList += '--budget-apply-only' }
 $effects = [pscustomobject]@{
     Launch=$launch; BuildAndRestore=(-not $NoBuild); RestoreMayUseNetwork=(-not $NoBuild)
     VisibleWindows=$false; CaptureExcludedSurfaces=$false; DesktopOrDeviceAudio=$false
-    GpuEncoding=$false; EngineLaunch=$false; HiddenShortcuts=$(if ($DesktopOnly -or $EntryOnly -or $StatusTransportOnly) { 'None' } else { 'Isolated Ctrl+Alt+Shift+F4-F6' }); OffscreenControls=([bool]$DesktopOnly -or [bool]$EntryOnly)
+    GpuEncoding=$false; EngineLaunch=$false; HiddenShortcuts=$(if ($DesktopOnly -or $EntryOnly -or $StatusTransportOnly) { 'None' } elseif ($BudgetApplyOnly) { 'Isolated Ctrl+Alt+Shift+F4-F6 and temporary task-owned F7 helper' } else { 'Isolated Ctrl+Alt+Shift+F4-F6' }); OffscreenControls=([bool]$DesktopOnly -or [bool]$EntryOnly)
     NativeWorker=(-not $DesktopOnly -and -not $EntryOnly -and -not $StatusTransportOnly)
     SourceIdentityCheck=$(if ($EntryOnly -or $StatusTransportOnly) { 'None; controlled snapshots/local files/headless client only' } else { 'Unavailable fixture executable/class only; no source window or image acquisition' })
     StartupWrites=$false; InstalledRecorderMutation=$false; VerificationNetwork=$false
-    EngineHashVerification=[bool]$RealWorkerCorrection; TaskOnlyEngineCopy=$(if ($RealWorkerCorrection) { $EngineRoot } else { 'None' })
+    EngineHashVerification=[bool]$RealWorkerCorrection; TaskOnlyEngineCopy=$(if ($BudgetApplyOnly) { 'None; existing task engine reused read-only' } elseif ($RealWorkerCorrection) { $EngineRoot } else { 'None' })
+    EngineReadOnlyReuse=[bool]$BudgetApplyOnly
     RetainedEngineSource=$(if ($RealWorkerCorrection) { $EngineSource } else { 'None' }); FixtureStartupCallback=[bool]$RealWorkerCorrection
     OwnershipStorage=$(if ($RealWorkerCorrection) { Join-Path $DataDirectory 'ownership' } else { 'Existing route declaration' })
     AllowedWorkerCommands=$(if ($RealWorkerCorrection) { 'status, Apply and Quit only; paused:true fixture child on every launch' } else { 'Existing route declaration' })
-    Scenarios=$(if ($RealWorkerCorrection) { '7: held-stopped, held-paused, read-lease-failure, future-settings, interrupted, backup-collision, startup-callback-failure' } else { 'Existing route declaration' })
+    Scenarios=$(if ($BudgetApplyOnly) { 'Focused serial budget reduction/retry; one reused ordinary45,000,000-byte payload, hard-link alias and tiny copied fixture; read-only engine reuse' } elseif ($RealWorkerCorrection) { '7: held-stopped, held-paused, read-lease-failure, future-settings, interrupted, backup-collision, startup-callback-failure' } else { 'Existing route declaration' })
+    BudgetProfile=$(if ($BudgetApplyOnly) { Join-Path $DataDirectory 'profile' } else { 'Existing route declaration' })
+    BudgetEmptyProfile=$(if ($BudgetApplyOnly) { Join-Path $DataDirectory 'empty-profile' } else { 'None' })
+    BudgetHelperTitle=$(if ($BudgetApplyOnly) { 'F10BudgetApply.Helper.<per-case-guid>; verified current process only' } else { 'None' })
     Storage=$DataDirectory
 }
 if ($Plan) { return $effects }
@@ -29,7 +35,7 @@ if ($DesktopOnly -and -not $SnapshotsPath) { throw 'Supply real worker snapshots
 if (-not $Dotnet) { $Dotnet = Join-Path $root '.tools/dotnet/dotnet.exe'; if (-not (Test-Path -LiteralPath $Dotnet)) { $Dotnet = (Get-Command dotnet -ErrorAction Stop).Source } }
 $env:DOTNET_ROOT = Split-Path -Parent $Dotnet
 $env:DOTNET_ROOT_X64 = $env:DOTNET_ROOT
-$env:DOTNET_CLI_HOME = Join-Path $root 'artifacts/profile-migration-sdk-home'
+$env:DOTNET_CLI_HOME = if ($BudgetApplyOnly) { Join-Path $DataDirectory 'sdk-home' } else { Join-Path $root 'artifacts/profile-migration-sdk-home' }
 $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = 'false'

@@ -111,7 +111,13 @@ internal sealed class ReplayCache : IDisposable
     Dictionary<string, ReplayFileExtent> Inventory() => ReplayStorage.Inventory(cacheDirectory == null
         ? sessions.Values.Select(s => s.Info.Directory).Where(Directory.Exists) : [cacheDirectory], files);
 
-    void RequireBudget(IReadOnlyDictionary<string, long> proposed)
+    internal void ValidateBudget(long proposedBudgetBytes)
+    {
+        if (proposedBudgetBytes <= 0) throw new ArgumentOutOfRangeException(nameof(proposedBudgetBytes));
+        lock (gate) RequireBudget(pendingAllocations, proposedBudgetBytes);
+    }
+
+    void RequireBudget(IReadOnlyDictionary<string, long> proposed, long? ceiling = null)
     {
         var inventory = Inventory();
         long committed = ReplayStorage.Bytes(inventory);
@@ -122,7 +128,7 @@ internal sealed class ReplayCache : IDisposable
             long allocated = inventory.TryGetValue(claim.Key, out var extent) ? extent.AllocatedBytes : 0;
             committed = checked(committed + Math.Max(0, claim.Value - allocated));
         }
-        if (committed > cacheBudgetBytes) throw new IOException("Replay-cache budget cannot hold retained footage and temporary input copies. Increase the budget or release retained material explicitly.");
+        if (committed > (ceiling ?? cacheBudgetBytes)) throw new IOException("Replay-cache budget cannot hold retained footage and temporary input copies. Increase the budget or release retained material explicitly.");
     }
 
     string ConcatText(IReadOnlyList<Segment> selection, string extension) => string.Concat(selection.Select((s, i) =>

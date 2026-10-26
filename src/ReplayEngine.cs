@@ -312,6 +312,7 @@ namespace F10Recorder
             }
         }
         internal bool IsSaving { get { return replays.IsSaving; } }
+        internal void ValidateReplayCacheBudget(long proposedBudgetBytes) => replays.ValidateBudget(proposedBudgetBytes);
         internal event Action CaptureStatusChanged
         {
             add { capture.CaptureStatusChanged += value; }
