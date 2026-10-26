@@ -7,6 +7,51 @@ SDK and locked dependencies are used. Evidence is written to a unique ignored
 The hard-link check needs ordinary filesystem access; a restricted sandbox can
 deny links with Win32 error 5 even when the copy fallback works.
 
+The storage slice uses `ReplayCacheBudgetBytes`, a positive decimal-byte
+preference defaulting to 10,000,000,000 bytes. Portable Settings validation
+rejects a budget below the nominal video-only history requirement; that is an
+impossibility check, not a calibrated sufficient audio/container/burst estimate.
+Run CoreChecks with `<output> --storage-budget-only` for the focused preference
+cases. The full CoreChecks route also runs these cases and creates larger clock
+fixtures; include those outputs in the experiment's artifact budget.
+The existing Settings editor preserves the loaded custom budget when submitting
+an unrelated edit. Its offscreen correction/Apply check submits a literal 30 GB
+budget while correcting FPS and verifies the acknowledged value, without adding
+storage controls or activating capture. See the existing Desktop-only route in
+[profile migration checks](profile-migration.md); retained worker snapshots are
+historical inputs, not a new actual-worker persistence trial.
+
+Production ReplayEngine supplies the configured budget and complete profile
+cache root to ReplayCache. Startup retains old session directories. Cache
+inventory includes retained/retiring sessions and snapshots; volume/file
+identities prevent hard-link names or lifetime pins charging the same allocation
+twice. Independent copied files count separately. Pending snapshot copy/concat
+allocations reserve only their unmaterialized remainder. Save admission assumes
+copy fallback, rechecks before fallback growth and preserves the current
+one-save restriction. Failed cleanup does not establish reclaimed capacity.
+Acquisition maintenance checks aggregate pressure even before completed footage
+is available. Native file observations require identifiable local volumes and
+reject reparse entries, unknown identity/allocation and permission errors.
+
+The storage fixtures use tiny files and literal controlled allocation metadata
+through ReplayFiles. They cover shared versus distinct identities/volumes,
+retained old inputs, blocked retiring exports, copy growth, partial allocation
+reconciliation, cleanup failure, invalid observations and overflow. The existing
+retention-limit fixture now represents its large length as metadata rather than
+creating a large file. Existing save/pin/publication regressions continue to use
+ordinary local files and controlled export results. The module reports unknown
+inventory as nullable usage plus a reason; ReplayEngine's existing numeric cache
+metric uses -1 for unknown, rather than reporting an empty cache.
+
+This is partial issue #13 work. Per-volume free-space/output/finalization
+commitments, below-5-GB warnings, stop-before-below-2-GB acquisition, persistent
+explicit Resume, manual storage, Recovery UI, folder controls and reference
+margin calibration remain pending. A separate actual Apply budget-reduction
+preflight is not delivered by the module checks. Physical block sharing beyond
+hard links, compressed/sparse/ReFS/dedup/quotas, supported path/race behavior,
+actual stop timing and media integrity need separate qualification. The existing
+automatic capture recovery does not satisfy low-space Resume requirements.
+
 The dedicated WorkerChecks entry point runs before recorder initialization.
 It constructs the production `ReplayCache` with controlled capture state and
 export outcomes. Manifests, snapshot files, pruning, partial-output cleanup and

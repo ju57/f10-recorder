@@ -3,6 +3,7 @@ using System.Text.Json;
 
 string data = args.Length > 0 ? Path.GetFullPath(args[0]) : Path.Combine(Path.GetTempPath(), "F10Recorder-CoreChecks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(data); Log.DirectoryPath = data;
+if (args.Contains("--storage-budget-only")) { StorageBudgetChecks.Run(Path.Combine(data, "storage-budget")); return; }
 try
 {
     ProfileMigrationChecks.Run(Path.Combine(data, "profile-migration"), args.Contains("--profile-sensitivity"));
@@ -78,6 +79,7 @@ foreach (string format in new[] { "u8", "s16le", "s24le", "s32le", "f32le" })
 }
 Console.WriteLine("Passed: replay boundaries, incomplete manifests, path containment, configuration migration, invalid-file preservation, and common audio/video epoch mapping.");
 AudioPacketChecks.Run(data);
+StorageBudgetChecks.Run(Path.Combine(data, "storage-budget"));
 // Save cutoffs use the existing media epoch, not copyts-relative display progress.
 var saveEpoch = new MediaClock(7_000_000_000, 10_000_000, 1_800_000_000_000_000, 0);
 var saveClock = new ReplaySaveClock(saveEpoch);

@@ -26,12 +26,13 @@ internal sealed record SaveSubmission(string Rejection, Task<ReplaySaveResult> C
 {
     internal bool Accepted => Completion != null;
 }
-internal sealed record ReplayCacheStatus(bool Saving, ReplaySaveResult LastSave);
+internal sealed record ReplayCacheStatus(bool Saving, ReplaySaveResult LastSave, long? CacheBytes, string StorageError);
 internal sealed record ReplaySessionStatus(double BufferedSeconds, long CacheBytes);
 
 // Only operations whose failures must be controlled in ownership checks vary.
 internal class ReplayFiles
 {
+    internal virtual ReplayFileExtent Observe(string path) => ReplayStorage.Observe(path);
     internal virtual bool TryHardLink(string copy, string original) => Native.CreateHardLink(copy, original, IntPtr.Zero);
     internal virtual void Copy(string original, string copy) => System.IO.File.Copy(original, copy);
     internal virtual void Publish(string partial, string final) => System.IO.File.Move(partial, final);
@@ -63,17 +64,23 @@ internal sealed class ReplayCache : IDisposable
     readonly TimeProvider time;
     readonly Func<Task> waitForSegment;
     readonly Action<string> diagnostic;
+    readonly string cacheDirectory;
+    readonly long cacheBudgetBytes;
+    Dictionary<string, long> pendingAllocations = new(StringComparer.OrdinalIgnoreCase);
     bool closing, saving;
     ReplaySaveResult lastSave;
     Task close;
 
     internal ReplayCache(ReplayFiles files = null, TimeProvider time = null,
-        Func<Task> waitForSegment = null, Action<string> diagnostic = null)
+        Func<Task> waitForSegment = null, Action<string> diagnostic = null, string cacheDirectory = null, long cacheBudgetBytes = 10_000_000_000)
     {
         this.files = files ?? new ReplayFiles();
         this.time = time ?? TimeProvider.System;
         this.waitForSegment = waitForSegment ?? (() => Task.Delay(TimeSpan.FromMilliseconds(100), this.time));
         this.diagnostic = diagnostic ?? Log.Write;
+        this.cacheDirectory = cacheDirectory == null ? null : Path.GetFullPath(cacheDirectory);
+        if (cacheBudgetBytes <= 0) throw new ArgumentException("Replay-cache budget must be positive.");
+        this.cacheBudgetBytes = cacheBudgetBytes;
     }
 
     internal ReplaySessionId RegisterSession(IReplaySessionSource source)
@@ -88,7 +95,53 @@ internal sealed class ReplayCache : IDisposable
         }
     }
 
-    internal ReplayCacheStatus Status { get { lock (gate) return new(saving, lastSave); } }
+    internal ReplayCacheStatus Status
+    {
+        get
+        {
+            lock (gate)
+            {
+                try { return new(saving, lastSave, ReplayStorage.Bytes(Inventory()), null); }
+                catch (Exception ex) when (StorageFailure(ex)) { return new(saving, lastSave, null, ex.Message); }
+            }
+        }
+    }
+    internal bool IsSaving { get { lock (gate) return saving; } }
+    static bool StorageFailure(Exception ex) => ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or OverflowException;
+    Dictionary<string, ReplayFileExtent> Inventory() => ReplayStorage.Inventory(cacheDirectory == null
+        ? sessions.Values.Select(s => s.Info.Directory).Where(Directory.Exists) : [cacheDirectory], files);
+
+    void RequireBudget(IReadOnlyDictionary<string, long> proposed)
+    {
+        var inventory = Inventory();
+        long committed = ReplayStorage.Bytes(inventory);
+        foreach (var claim in proposed)
+        {
+            // Observed allocation already affects physical usage. Only its future
+            // remainder is a claim; never charge a materializing copy twice.
+            long allocated = inventory.TryGetValue(claim.Key, out var extent) ? extent.AllocatedBytes : 0;
+            committed = checked(committed + Math.Max(0, claim.Value - allocated));
+        }
+        if (committed > cacheBudgetBytes) throw new IOException("Replay-cache budget cannot hold retained footage and temporary input copies. Increase the budget or release retained material explicitly.");
+    }
+
+    string ConcatText(IReadOnlyList<Segment> selection, string extension) => string.Concat(selection.Select((s, i) =>
+        "file '" + i.ToString("D6") + extension + "'" + Environment.NewLine + "duration " + (s.End - s.Start).ToString("0.000000", CultureInfo.InvariantCulture) + Environment.NewLine));
+
+    Dictionary<string, long> PlanSnapshot(IReadOnlyList<Segment> selection, string extension, string snapshot)
+    {
+        var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        long unit = 1;
+        for (int i = 0; i < selection.Count; i++)
+        {
+            var extent = ReplayStorage.Validate(files.Observe(selection[i].Path));
+            unit = Math.Max(unit, extent.AllocationUnit);
+            result.Add(Path.Combine(snapshot, i.ToString("D6") + extension), extent.CopyBytes);
+        }
+        long length = Encoding.UTF8.GetByteCount(ConcatText(selection, extension));
+        result.Add(Path.Combine(snapshot, "concat.txt"), checked((length / unit + (length % unit == 0 ? 0 : 1)) * unit));
+        return result;
+    }
 
     List<Segment> ReadSegments(Session session)
     {
@@ -141,17 +194,18 @@ internal sealed class ReplayCache : IDisposable
             var segments = ReadSegments(session);
             // Reserve newly closed inputs even if the save task has not resumed.
             ReserveCompleted(session, segments);
-            if (segments.Count == 0) { session.Source.CheckCaptureHealth(0); return; }
+            if (segments.Count == 0) { RequireBudget(pendingAllocations); session.Source.CheckCaptureHealth(0); return; }
             double newest = segments[^1].End;
-            if (newest < session.LastEnd) { session.Source.CheckCaptureHealth(session.LastEnd); return; } // Partial rewrite.
+            if (newest < session.LastEnd) { RequireBudget(pendingAllocations); session.Source.CheckCaptureHealth(session.LastEnd); return; } // Partial rewrite.
             session.LastEnd = newest;
             double threshold = newest - session.Info.ReplaySeconds - 10;
             string oldest = segments.First(s => s.End >= threshold).Path;
             foreach (string path in Directory.GetFiles(session.Info.Directory, "chunk-*" + session.Info.Extension))
                 if (StringComparer.OrdinalIgnoreCase.Compare(path, oldest) < 0 && !session.Pins.Contains(path)) Cleanup(() => files.DeleteFile(path), path);
             long limit = (long)((session.Info.ReplaySeconds + 30) * (session.Info.BitrateMbps * 1000000L + 192000) / 8 * 1.5);
-            if (Directory.GetFiles(session.Info.Directory, "chunk-*" + session.Info.Extension).Sum(p => new FileInfo(p).Length) > limit)
+            if (Directory.GetFiles(session.Info.Directory, "chunk-*" + session.Info.Extension).Sum(p => files.Observe(p).Length) > limit)
                 throw new IOException("Replay cache exceeded its byte limit.");
+            RequireBudget(pendingAllocations);
             session.Source.CheckCaptureHealth(newest);
         }
     }
@@ -169,6 +223,14 @@ internal sealed class ReplayCache : IDisposable
             // Admission, cutoff and the lifetime claim are atomic with retirement.
             string root = Path.GetFullPath(destination);
             var available = ReadSegments(session);
+            string snapshot = Path.Combine(session.Info.Directory, "save-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var plan = PlanSnapshot(ReplaySelection.Select(available, end, session.Info.ReplaySeconds), session.Info.Extension, snapshot);
+                RequireBudget(plan);
+                pendingAllocations = plan;
+            }
+            catch (Exception ex) when (StorageFailure(ex)) { return new("Replay storage admission failed: " + ex.Message, null); }
             session.PendingEnd = end;
             ReserveCompleted(session, available);
             saving = true;
@@ -180,7 +242,7 @@ internal sealed class ReplayCache : IDisposable
                 ReplaySaveResult result;
                 try
                 {
-                    var saved = await SaveAsync(session, end, root).ConfigureAwait(false);
+                    var saved = await SaveAsync(session, end, root, snapshot).ConfigureAwait(false);
                     result = new(true, saved.File, null, saved.Bytes, elapsed.Elapsed.TotalMilliseconds);
                 }
                 catch (Exception ex) { Report(ex.ToString()); result = new(false, null, ex.Message, 0, elapsed.Elapsed.TotalMilliseconds); }
@@ -190,6 +252,7 @@ internal sealed class ReplayCache : IDisposable
                     session.PendingEnd = null;
                     session.Reserved.Clear();
                     session.Pins.Clear();
+                    pendingAllocations.Clear();
                     saving = false;
                     completion.SetResult(result);
                 }
@@ -246,10 +309,9 @@ internal sealed class ReplayCache : IDisposable
 
     public void Dispose() => CloseAsync().GetAwaiter().GetResult();
 
-    async Task<(string File, long Bytes)> SaveAsync(Session session, double end, string root)
+    async Task<(string File, long Bytes)> SaveAsync(Session session, double end, string root, string snapshot)
     {
         var info = session.Info;
-        string snapshot = Path.Combine(info.Directory, "save-" + Guid.NewGuid().ToString("N"));
         try
         {
             Directory.CreateDirectory(snapshot);
@@ -278,6 +340,12 @@ internal sealed class ReplayCache : IDisposable
                 await waitForSegment().ConfigureAwait(false);
             }
             if (selection == null) throw new IOException("Capture did not finish the current segment in time. " + session.Source.Diagnostics);
+            lock (gate)
+            {
+                var plan = PlanSnapshot(selection, info.Extension, snapshot);
+                RequireBudget(plan);
+                pendingAllocations = plan;
+            }
             var originals = selection.Select(s => s.Path).ToArray();
             try
             {
@@ -285,7 +353,16 @@ internal sealed class ReplayCache : IDisposable
                 for (int i = 0; i < selection.Count; i++)
                 {
                     string copy = Path.Combine(snapshot, i.ToString("D6") + info.Extension);
-                    if (!files.TryHardLink(copy, originals[i])) files.Copy(originals[i], copy);
+                    if (!files.TryHardLink(copy, originals[i]))
+                    {
+                        lock (gate)
+                        {
+                            pendingAllocations[copy] = ReplayStorage.Validate(files.Observe(originals[i])).CopyBytes;
+                            RequireBudget(pendingAllocations);
+                        }
+                        files.Copy(originals[i], copy);
+                    }
+                    lock (gate) pendingAllocations.Remove(copy);
                     selection[i].Path = copy;
                 }
             }
@@ -294,7 +371,9 @@ internal sealed class ReplayCache : IDisposable
             string final = Path.Combine(root, "Replay-" + DateTime.Now.ToString("yyyy-MM-dd-HH-mm-ss-fff") + "-" + Guid.NewGuid().ToString("N")[..6] + ".mp4");
             string partial = final + ".partial.mp4";
             string concat = Path.Combine(snapshot, "concat.txt");
-            File.WriteAllLines(concat, selection.SelectMany(s => new[] { "file '" + Path.GetFileName(s.Path) + "'", "duration " + (s.End - s.Start).ToString("0.000000", CultureInfo.InvariantCulture) }), new UTF8Encoding(false));
+            lock (gate) RequireBudget(pendingAllocations);
+            File.WriteAllText(concat, ConcatText(selection, info.Extension), new UTF8Encoding(false));
+            lock (gate) pendingAllocations.Remove(concat);
             var arguments = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-f", "concat", "-safe", "1", "-i", concat, "-t", (end - selection[0].Start).ToString("0.000000", CultureInfo.InvariantCulture), "-c", "copy", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", "-map", "0:v:0" };
             if (info.RecordAudio) arguments.AddRange(["-map", "0:a:0"]);
             if (info.Codec == "hevc_nvenc") arguments.AddRange(["-tag:v", "hvc1"]);

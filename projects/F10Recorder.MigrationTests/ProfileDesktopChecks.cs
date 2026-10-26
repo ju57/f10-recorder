@@ -77,10 +77,13 @@ internal static class ProfileDesktopChecks
                     Require(panel.GetLogicalDescendants().OfType<ComboBox>().Single(c => c.Name == "VideoCodec").SelectedItem == null && client.Config.VideoCodec == "hevc_nvenc", "An unavailable valid codec must remain selected intent, without silently substituting another codec during correction.");
                 }
                 var partialCodec = snapshots.Single(s => s.ProfileStatus.Outcome == "correction-required"); Settings submitted = null;
+                // Controlled preference input: correcting FPS must not reset a custom storage budget.
+                partialCodec.Config.ReplayCacheBudgetBytes = 30_000_000_000;
                 using (var client = new WorkerRecorder(partialCodec, request =>
                 {
                     if (request.Command == "probeMedia") return System.Threading.Tasks.Task.FromResult(new WorkerReply { Status = partialCodec, Capabilities = new RecordingEngineCapabilities { Encoders = new[] { new EncoderOption { Codec = "h264_nvenc", Name = "Controlled H.264 capability response" } } } });
                     Require(request.Command == "apply", "Unexpected correction command."); submitted = request.Settings;
+                    report["unrelatedApplySubmittedCacheBudgetBytes"] = submitted.ReplayCacheBudgetBytes;
                     var corrected = JsonSerializer.Deserialize<WorkerStatus>(JsonSerializer.Serialize(partialCodec, WorkerProtocol.Json), WorkerProtocol.Json);
                     corrected.Config = submitted; corrected.CompletedApply = request.OperationId; corrected.Revision++;
                     corrected.ProfileStatus = new ProfileStatus { ExistingProfile = true, ActivationRequired = true };
@@ -89,8 +92,10 @@ internal static class ProfileDesktopChecks
                 {
                     var panel = new SettingsPanel(client); client.Changed += panel.UpdateState; await panel.ProbeAsync();
                     panel.GetLogicalDescendants().OfType<ComboBox>().Single(c => c.Name == "FramesPerSecond").SelectedItem = 30;
-                    Require(panel.GetLogicalDescendants().OfType<Button>().Single(b => b.Name == "ApplySettings").IsEnabled && await panel.ApplyAsync() && submitted.VideoCodec == "hevc_nvenc" && submitted.FramesPerSecond == 30 && client.Paused && client.ProfileStatus.ActivationRequired,
-                        "Correcting FPS must retain a valid unavailable saved codec and the activation hold, after an explicit authenticated capability check.");
+                    Require(panel.GetLogicalDescendants().OfType<Button>().Single(b => b.Name == "ApplySettings").IsEnabled && await panel.ApplyAsync() && submitted.VideoCodec == "hevc_nvenc" && submitted.FramesPerSecond == 30 && client.Paused && client.ProfileStatus.ActivationRequired
+                        && submitted.ReplayCacheBudgetBytes == 30_000_000_000 && client.Config.ReplayCacheBudgetBytes == 30_000_000_000,
+                        "Correcting FPS must preserve the explicit 30 GB budget, valid unavailable saved codec and activation hold after an authenticated capability check.");
+                    report["unrelatedApplyPreservedCacheBudget"] = true;
                 }
                 var acknowledgements = new List<object>();
                 foreach (string failure in new[] { "missing-status", "wrong-operation", "write-error" })
