@@ -50,6 +50,14 @@ Its optional `--sensitivity-control` changes one response fixture, not productio
 The existing offscreen Desktop profile route additionally exercises failed or
 unconfirmed correction, retained drafts and an acknowledged retry, using no
 platform Window, capture affinity, real engine or startup writer.
+`./tests/profile-migration.ps1 -EntryOnly -Plan` previews the separate controlled
+profile-entry route. It constructs persistent Settings controls and the headless
+production client only, invokes the same one-time entry method consumed by the
+attachment handler, and observes fake transport commands. Held/unsafe entries
+send none; a separate trusted ordinary non-held entry exercises the retained
+legacy one-time probe through a controlled reply. No native Window/App, worker,
+pipe, real engine/probe/GPU, capture, startup write or vendor action occurs.
+Snapshots, reports and bounded attention text renders are local artifacts.
 
 `./tests/profile-migration.ps1 -RealWorkerCorrection -EngineSource <retained-approved-engine> -EngineRoot <task-private-shared-root> -Plan`
 previews the separate seven-case actual-worker correction route. It stages at

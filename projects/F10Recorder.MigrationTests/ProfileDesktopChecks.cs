@@ -98,7 +98,7 @@ internal static class ProfileDesktopChecks
                     var initial = new WorkerStatus {
                         Instance = "desktop-correction-worker", Revision = 8, Config = new Settings { SystemAudio = false, DisplayIndex = 0 },
                         Paused = true, Phase = CapturePhase.Paused,
-                        ProfileStatus = new ProfileStatus { ExistingProfile = true, RequiresCorrection = true, ActivationRequired = true, Issues = ["FramesPerSecond: Choose 24, 30, 60, or 120 FPS."] }
+                        ProfileStatus = new ProfileStatus { Outcome = "correction-required", ExistingProfile = true, RequiresCorrection = true, ActivationRequired = true, Issues = ["FramesPerSecond: Choose 24, 30, 60, or 120 FPS."] }
                     };
                     bool retry = false; int closes = 0; long revision = 8;
                     using var client = new WorkerRecorder(initial, request =>

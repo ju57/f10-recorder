@@ -144,6 +144,55 @@ No genuine cross-account/session/reparse-alias trial, live acquisition, saved-vi
 decode, installer rollback, new setup or final Overview acceptance is claimed.
 All release gates, including the unresolved #9 investigation, remain open.
 
+## Profile-aware editor entry
+
+The current Settings editor distinguishes existing/new/correction context from
+incompatible, interrupted or unavailable profile presentation. This is the
+existing editor and a read-only compatibility view, not completed Setup or
+Overview. The generic Review preferences action selects Capture only on explicit
+action; it does not infer field navigation from diagnostic text. Supplied
+correction/compatibility reasons remain visible. Unknown, null or inconsistent
+status fails closed without treating missing information as a new profile.
+
+One persistent panel retains draft values, selected tab and last-known attention
+context across polls/reconnect/replacement. Entry/status updates do not apply,
+resume, probe, write preferences or open a new window. Unsafe visible actions
+and their invoked handlers are blocked. A genuinely missing initial config is
+hidden/read-only until the first credible profile can initialize the editor;
+existing drafts are never reloaded from subsequent snapshots. Codec draft intent
+is separate from the latest engine capability admission: disconnect clears stale
+choices/Apply readiness, explicit recheck restores an available draft choice, and
+an unavailable draft is not silently replaced or labelled initialized.
+
+The existing attachment handler calls the one-time EnterAsync path. New,
+migrating, correction, activation-held, incompatible/interrupted and unavailable
+entry suppress its automatic engine probe. Returning trusted status does not
+launch that suppressed probe later. The legacy ordinary current compatible
+non-held editor retains its single automatic attachment check; tests observe it
+through controlled replies, not actual GPU/engine execution. Explicit checks
+remain user actions subject to profile admission.
+
+Preview the maintained offscreen route with
+`./tests/profile-migration.ps1 -EntryOnly -Plan`. It runs the production controls
+and worker client against controlled snapshots, with no native Window/App,
+worker, pipe, engine, GPU, capture, startup write or vendor changes. The direct
+MigrationTests `--profile-entry-ui --sensitivity-control` route changes only the
+positive existing-profile fixture into a consistent new profile while retaining
+the literal existing presentation assertion; exactly that check must fail.
+The method used by the attachment handler is exercised directly offscreen;
+actual native attachment/focus/visual-root behavior remains separate acceptance.
+
+Attention text/border examples are rendered offscreen. The non-rooted fixture
+does not qualify the real Fluent button appearance/geometry; content,
+accessible name and explicit click behavior are checked separately. Current
+native palette/type and full branded shell migration remain distinct work.
+The historical eleven-worker-input Desktop route remains a separate regression;
+one manual correction fixture now explicitly uses the actual correction-required
+outcome rather than an inconsistent current outcome with correction flags.
+
+Full Setup/Overview, named devices/audio, native usability/accessibility/DPI and
+installed upgrade acceptance remain pending. Issue #12 and all gates stay open.
+
 ## Real paused-worker corrections
 
 `-RealWorkerCorrection` exercises production WorkerRecorder.ApplyAsync over the
