@@ -58,6 +58,14 @@ send none; a separate trusted ordinary non-held entry exercises the retained
 legacy one-time probe through a controlled reply. No native Window/App, worker,
 pipe, real engine/probe/GPU, capture, startup write or vendor action occurs.
 Snapshots, reports and bounded attention text renders are local artifacts.
+The Windows CI entry step builds MigrationTests but invokes only this early
+route, twice: normal and fixture sensitivity. Fresh per-invocation GUID output
+roots retain distinct reports. `verify-profile-entry-report.ps1` only reads the
+specified JSON and validates its exit/result/boolean flag and exact 27-check
+contract; it does not launch anything or modify the report. The sensitivity
+fixture must fail its sole named existing-context assertion. Hosted/offscreen
+checks do not establish native attachment, button geometry, media or release
+acceptance.
 
 `./tests/profile-migration.ps1 -RealWorkerCorrection -EngineSource <retained-approved-engine> -EngineRoot <task-private-shared-root> -Plan`
 previews the separate seven-case actual-worker correction route. It stages at

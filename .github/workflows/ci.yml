@@ -47,6 +47,23 @@ jobs:
         run: dotnet restore projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj --locked-mode
       - name: Build worker checks
         run: dotnet build projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
+      - name: Restore locked offscreen entry checks
+        run: dotnet restore projects/F10Recorder.MigrationTests/F10Recorder.MigrationTests.csproj --locked-mode -p:NuGetAudit=true -p:NuGetAuditMode=all
+      - name: Build offscreen entry checks
+        run: dotnet build projects/F10Recorder.MigrationTests/F10Recorder.MigrationTests.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
+      - name: Verify profile entry without native windows or capture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $output = Join-Path 'artifacts' ('profile-entry-ci-' + [guid]::NewGuid().ToString('N'))
+          dotnet run --project projects/F10Recorder.MigrationTests/F10Recorder.MigrationTests.csproj -c Release --no-build -- "$output/normal" --profile-entry-ui
+          $normalExit = $LASTEXITCODE
+          ./tests/verify-profile-entry-report.ps1 -ReportPath "$output/normal/verification.json" -RunExitCode $normalExit -Mode Normal
+          dotnet run --project projects/F10Recorder.MigrationTests/F10Recorder.MigrationTests.csproj -c Release --no-build -- "$output/sensitivity" --profile-entry-ui --sensitivity-control
+          $controlExit = $LASTEXITCODE
+          ./tests/verify-profile-entry-report.ps1 -ReportPath "$output/sensitivity/verification.json" -RunExitCode $controlExit -Mode Sensitivity
+          exit 0
       - name: Verify replay ownership without capture or GPU
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-ownership artifacts/replay-ownership-ci
       - name: Verify capture status without capture or GPU

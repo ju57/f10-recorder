@@ -188,6 +188,25 @@ the literal existing presentation assertion; exactly that check must fail.
 The method used by the attachment handler is exercised directly offscreen;
 actual native attachment/focus/visual-root behavior remains separate acceptance.
 
+Windows CI restores the locked, audited MigrationTests dependency graph, builds
+Release with ContinuousIntegrationBuild, then runs only the early
+`--profile-entry-ui` route and its `--sensitivity-control` variant. Each CI
+invocation uses a fresh GUID output root with separate normal/sensitivity reports.
+`tests/verify-profile-entry-report.ps1` checks both process exit and JSON: normal
+requires exit 0, result passed, boolean sensitivityControl false and exactly 27
+passing checks; sensitivity requires exit 1, result failed, boolean true and
+exactly 27 checks with only `existing-context-fixture-sensitivity` failed.
+Missing/malformed reports, other failures and unexpected exits fail the job.
+
+For bounded local verification, the same locked/audited Release build may use an
+isolated `--artifacts-path`, `CopyLocalLockFileAssemblies=false` and
+`CopyDebugSymbolFilesFromPackages=false`, then stage hash-verified managed and
+win-x64 native assets from the unchanged locked package cache. Invoke the built
+MigrationTests DLL with the pinned dotnet host and the same early-route arguments
+and report validator. This avoids copying every runtime's native assets locally;
+it reproduces the suite/report contract, not the hosted default copy/build path.
+Hosted execution and its platform/runtime availability still need CI on the PR.
+
 Attention text/border examples are rendered offscreen. The non-rooted fixture
 does not qualify the real Fluent button appearance/geometry; content,
 accessible name and explicit click behavior are checked separately. Current
