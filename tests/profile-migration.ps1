@@ -1,12 +1,14 @@
-param([string]$Dotnet, [string]$BuildDirectory, [string]$DataDirectory, [string]$SnapshotsPath, [switch]$DesktopOnly, [switch]$StatusTransportOnly, [switch]$NoBuild, [switch]$Plan)
+param([string]$Dotnet, [string]$BuildDirectory, [string]$DataDirectory, [string]$SnapshotsPath, [string]$EngineSource, [string]$EngineRoot, [switch]$DesktopOnly, [switch]$StatusTransportOnly, [switch]$RealWorkerCorrection, [switch]$NoBuild, [switch]$Plan)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-if ($DesktopOnly -and $StatusTransportOnly) { throw 'Choose one profile verification route.' }
+if (@($DesktopOnly,$StatusTransportOnly,$RealWorkerCorrection | Where-Object { $_ }).Count -gt 1) { throw 'Choose one profile verification route.' }
+if ($RealWorkerCorrection -and (-not $EngineSource -or -not $EngineRoot)) { throw 'Real-worker correction requires explicit retained -EngineSource and isolated shared -EngineRoot.' }
 if (-not $BuildDirectory) { $BuildDirectory = Join-Path $root $(if ($DesktopOnly) { 'bin/profile-migration-ui' } else { 'bin/profile-migration' }) }
 if (-not $DataDirectory) { $DataDirectory = Join-Path $root ('artifacts/profile-migration-' + (Get-Date -Format yyyyMMdd-HHmmss) + '-' + [Guid]::NewGuid().ToString('N').Substring(0,8)) }
 $launch = [pscustomobject]@{FilePath=(Join-Path $BuildDirectory 'F10Recorder.WorkerChecks.exe'); ArgumentList=@('--profile-migration',('"' + $DataDirectory + '"'))}
 if ($DesktopOnly) { $launch = [pscustomobject]@{FilePath=(Join-Path $BuildDirectory 'F10Recorder.MigrationTests.exe'); ArgumentList=@(('"' + $DataDirectory + '"'),'--profile-migration-ui',('"' + $SnapshotsPath + '"'))} }
 if ($StatusTransportOnly) { $launch.ArgumentList = @('--profile-status-transport',('"' + $DataDirectory + '"')) }
+if ($RealWorkerCorrection) { $launch.ArgumentList = @('--profile-correction-real',('"' + $DataDirectory + '"'),('"' + $EngineSource + '"'),('"' + $EngineRoot + '"')) }
 $effects = [pscustomobject]@{
     Launch=$launch; BuildAndRestore=(-not $NoBuild); RestoreMayUseNetwork=(-not $NoBuild)
     VisibleWindows=$false; CaptureExcludedSurfaces=$false; DesktopOrDeviceAudio=$false
@@ -14,6 +16,11 @@ $effects = [pscustomobject]@{
     NativeWorker=(-not $DesktopOnly -and -not $StatusTransportOnly)
     SourceIdentityCheck=$(if ($StatusTransportOnly) { 'None; local file/protocol/headless client only' } else { 'Unavailable fixture executable/class only; no source window or image acquisition' })
     StartupWrites=$false; InstalledRecorderMutation=$false; VerificationNetwork=$false
+    EngineHashVerification=[bool]$RealWorkerCorrection; TaskOnlyEngineCopy=$(if ($RealWorkerCorrection) { $EngineRoot } else { 'None' })
+    RetainedEngineSource=$(if ($RealWorkerCorrection) { $EngineSource } else { 'None' }); FixtureStartupCallback=[bool]$RealWorkerCorrection
+    OwnershipStorage=$(if ($RealWorkerCorrection) { Join-Path $DataDirectory 'ownership' } else { 'Existing route declaration' })
+    AllowedWorkerCommands=$(if ($RealWorkerCorrection) { 'status, Apply and Quit only; paused:true fixture child on every launch' } else { 'Existing route declaration' })
+    Scenarios=$(if ($RealWorkerCorrection) { '7: held-stopped, held-paused, read-lease-failure, future-settings, interrupted, backup-collision, startup-callback-failure' } else { 'Existing route declaration' })
     Storage=$DataDirectory
 }
 if ($Plan) { return $effects }

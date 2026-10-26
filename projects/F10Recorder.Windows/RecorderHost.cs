@@ -150,6 +150,7 @@ internal sealed class RecorderHost : IWindowsRecorder
             bool previousStartup = WindowsStartup.Enabled;
             // Stop the old capture before replacing it, preserving the pause state.
             if (engine != null) await Task.Run(engine.Dispose);
+            bool settingsCommitted = false;
             try
             {
                 // Current UI editors know represented fields only. Preserve opaque future
@@ -157,6 +158,7 @@ internal sealed class RecorderHost : IWindowsRecorder
                 next.AdditionalPreferences = new(profile.Settings.AdditionalPreferences);
                 if (ProfileStatus.ActivationRequired) profile.Commit(next, paused: profile.State.Paused, userStopped: profile.State.UserStopped, activationRequired: true);
                 else next.Save(settingsPath);
+                settingsCommitted = true;
                 if (customStartupWriter || startup != previousStartup) startupWriter(startup);
                 Config = next; profile = RecordingProfile.Load(DataDirectory);
             }
@@ -164,7 +166,9 @@ internal sealed class RecorderHost : IWindowsRecorder
             {
                 // A startup-write failure must not leave disk and live configuration different.
                 profile = RecordingProfile.Load(DataDirectory);
-                if (ProfileStatus.CanWrite) Config.Save(settingsPath);
+                // A failed pre-commit check must not rewrite the original profile
+                // using salvaged/defaulted in-memory values as a "rollback".
+                if (settingsCommitted && ProfileStatus.CanWrite) Config.Save(settingsPath);
                 if (WindowsStartup.Enabled != previousStartup) startupWriter(previousStartup);
                 throw;
             }

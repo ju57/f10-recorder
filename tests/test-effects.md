@@ -51,6 +51,18 @@ The existing offscreen Desktop profile route additionally exercises failed or
 unconfirmed correction, retained drafts and an acknowledged retry, using no
 platform Window, capture affinity, real engine or startup writer.
 
+`./tests/profile-migration.ps1 -RealWorkerCorrection -EngineSource <retained-approved-engine> -EngineRoot <task-private-shared-root> -Plan`
+previews the separate seven-case actual-worker correction route. It stages at
+most one hash-pinned task copy, verifies its private ACL/hash without executing
+it, and uses paused/activation-held workers, current-user named pipes and hidden
+Ctrl+Alt+Shift+F4-F6 shortcuts. Ownership, engine and fixture profiles are isolated.
+Only status/Apply/Quit are sent. An existing startup callback records/optionally
+rejects fixture intent; the user's actual startup value/kind is read and compared
+without writing. No engine probe/launch, capture, GPU, visible/excluded UI,
+download, repair, installation or vendor changes occur. Controlled file-write,
+backup and callback failures retain originals and incomplete paths. Review the
+explicit source/root/output plan and serialize native ownership before running.
+
 `./tests/settings-validation.ps1` exercises a paused direct recorder host with
 missing and untrusted engines in isolated storage. It creates hidden shortcut
 windows and temporarily registers Ctrl+Alt+Shift+F1–F6; an occupied shortcut fails

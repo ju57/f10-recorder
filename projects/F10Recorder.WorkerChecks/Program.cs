@@ -25,6 +25,7 @@ internal static class WorkerChecks
         if (args.Length == 2 && args[0] == "--replay-ownership") return ReplayOwnershipChecks.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--capture-status") return CaptureStatusChecks.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--profile-migration") return ProfileWorkerChecks.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 4 && args[0] == "--profile-correction-real") return ProfileCorrectionChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]));
         if (args.Length == 2 && args[0] == "--profile-status-transport") return ProfileStatusTransportChecks.Run(Path.GetFullPath(args[1]));
         if (args.Length >= 2 && args[0] == "--apply-acknowledgements") return ApplyAcknowledgementChecks.Run(Path.GetFullPath(args[1]), args.Contains("--sensitivity-control"));
         if (args.Length >= 2 && args[0] == "--engine-capabilities") return EngineCapabilityChecks.Run(Path.GetFullPath(args[1]), args.Contains("--sensitivity-control"));
@@ -33,6 +34,13 @@ internal static class WorkerChecks
         int ownershipRootIndex = Array.IndexOf(args, "--ownership-root");
         if (ownershipRootIndex >= 0) ProfileOwnership.RootDirectory = Path.GetFullPath(args[ownershipRootIndex + 1]);
         if (args[0] == "--profile-migration-worker") return RecorderWorker.Run(Path.GetFullPath(args[1]), false, setStartup: _ => throw new Exception("Migration must not write startup."));
+        if (args[0] == "--profile-correction-worker") return RecorderWorker.Run(Path.GetFullPath(args[1]), true,
+            setStartup: enabled =>
+            {
+                string profile = Path.GetFullPath(args[1]);
+                File.AppendAllLines(Path.Combine(profile, "fixture-startup-intent.txt"), new[] { enabled ? "true" : "false" });
+                if (File.Exists(Path.Combine(profile, "fixture-reject-startup.txt"))) throw new IOException("Controlled fixture startup failure after profile commit.");
+            });
         if (args[0] == "--engine-trust-worker")
         {
             string profile = Path.GetFullPath(args[1]), package = Path.GetFullPath(args[2]);
