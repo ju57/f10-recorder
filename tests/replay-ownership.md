@@ -55,7 +55,37 @@ ordinary local files and controlled export results. The module reports unknown
 inventory as nullable usage plus a reason; ReplayEngine's existing numeric cache
 metric uses -1 for unknown, rather than reporting an empty cache.
 
-This is partial issue #13 work. Per-volume free-space/output/finalization
+Known-input capacity admission additionally checks the snapshot's actual local
+volume using caller-available bytes from `GetDiskFreeSpaceEx`. Copy lengths and
+the exact UTF-8 concat text round up using the target allocation unit. All
+snapshot targets share one volume/capacity pool; source-volume free space cannot
+fund a different target. This is an in-memory commitment for the current profile,
+not an operating-system allocation, quota or cross-process disk lease.
+
+Admission installs the finite plan under the replay gate only after budget and
+capacity checks. A later completed segment may enlarge it; the replacement plan
+must fit before copying, or the accepted request reports failure. The initial
+request does not have a proven unfinished-tail bound. Copy fallback and concat
+growth recheck capacity. Inventory precedes the fresh capacity sample; only
+`max(0, planned bytes - observed target allocation)` remains to be charged.
+Already allocated cache/snapshot bytes reduce measured free space and are not
+subtracted again. Hard-link success discharges its copy claim. Volume and
+allocation unit must still match the accepted target before a materialized
+extent can reduce that claim; changed/unknown/denied/invalid/overflow observations
+fail. The single-save guard prevents another submission replacing those claims.
+P05 budget preflight and acquisition maintenance retain their separate budget
+checks without adding this save-capacity observation as a new stop condition.
+
+Ten additional file/export cases cover target-unit rounding, literal equality
+and one-byte shortages, same-volume aggregate demand, materialized remainders,
+sampling order, hard-link/fallback, target volume/unit changes, observation
+errors, late plan extension and concurrent retirement. They retain the original
+41 replay regressions. A read-only production observer check compares an ordinary
+task directory, its `.` alias and absent descendants without creating those
+descendants, and rejects a regular-file ancestor. Other volume/capacity values
+are controlled metadata, not physical second-volume or quota qualification.
+
+This is partial issue #13 work. Output/finalization and unfinished-tail
 commitments, below-5-GB warnings, stop-before-below-2-GB acquisition, persistent
 explicit Resume, manual storage, Recovery UI, folder controls and reference
 margin calibration remain pending. [The P05 worker route](profile-migration.md#budget-reduction-preflight-p05)
