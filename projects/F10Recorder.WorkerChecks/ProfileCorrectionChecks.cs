@@ -6,7 +6,7 @@ using Microsoft.Win32;
 namespace F10Recorder;
 
 // Real worker/persistence acceptance while capture stays explicitly paused.
-internal static class ProfileCorrectionChecks
+internal static partial class ProfileCorrectionChecks
 {
     internal static int Run(string data, string engineSource, string engineRoot)
     {
@@ -179,13 +179,14 @@ internal static class ProfileCorrectionChecks
             && persisted.State.AdditionalState["OpaqueState"].GetProperty("Checkpoint").GetInt32() == 0 && !persisted.State.AdditionalState["OpaqueState"].GetProperty("AutoResume").GetBoolean(),
             "Opaque device/false/zero or state values were lost.");
     }
-    static void StageEngine(string source, string root, string data)
+    static void StageEngine(string source, string root, string data, bool reuseOnly = false)
     {
         Require(MediaDependency.Hash(source).Equals(MediaDependency.ExecutableSha256, StringComparison.OrdinalIgnoreCase), "The supplied retained engine does not match the pinned trust root.");
-        TrustedStorage.CreatePrivateDirectory(root); MediaDependency.RootDirectory = root;
+        MediaDependency.RootDirectory = root;
         string package = Path.Combine(root, "ffmpeg-" + MediaDependency.PackageVersion), bin = Path.Combine(package, "bin");
-        TrustedStorage.CreatePrivateDirectory(package); TrustedStorage.CreatePrivateDirectory(bin);
-        if (!File.Exists(MediaDependency.ExecutablePath))
+        if (!reuseOnly) { TrustedStorage.CreatePrivateDirectory(root); TrustedStorage.CreatePrivateDirectory(package); TrustedStorage.CreatePrivateDirectory(bin); }
+        if (reuseOnly) Require(File.Exists(MediaDependency.ExecutablePath), "Read-only retained engine is unavailable; provisioning is forbidden.");
+        if (!reuseOnly && !File.Exists(MediaDependency.ExecutablePath))
         {
             using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read);
             using var output = new FileStream(MediaDependency.ExecutablePath, FileMode.CreateNew, FileAccess.Write, FileShare.None);

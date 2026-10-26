@@ -25,6 +25,7 @@ internal static class WorkerChecks
         if (args.Length == 2 && args[0] == "--replay-ownership") return ReplayOwnershipChecks.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--capture-status") return CaptureStatusChecks.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--profile-migration") return ProfileWorkerChecks.Run(Path.GetFullPath(args[1]));
+        if (args.Length == 5 && args[0] == "--profile-correction-real" && args[4] == "--budget-apply-only") return ProfileCorrectionChecks.RunBudget(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]));
         if (args.Length == 4 && args[0] == "--profile-correction-real") return ProfileCorrectionChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]));
         if (args.Length == 2 && args[0] == "--profile-status-transport") return ProfileStatusTransportChecks.Run(Path.GetFullPath(args[1]));
         if (args.Length >= 2 && args[0] == "--apply-acknowledgements") return ApplyAcknowledgementChecks.Run(Path.GetFullPath(args[1]), args.Contains("--sensitivity-control"));

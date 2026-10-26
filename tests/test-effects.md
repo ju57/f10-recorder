@@ -88,6 +88,19 @@ download, repair, installation or vendor changes occur. Controlled file-write,
 backup and callback failures retain originals and incomplete paths. Review the
 explicit source/root/output plan and serialize native ownership before running.
 
+`-RealWorkerCorrection -BudgetApplyOnly` is the focused P05 extension of that
+existing worker route. Save its explicit `-Plan`: it lists the fixed retained
+profile, serial empty-cache profile, ownership/build/engine paths and a temporary
+task-owned F7 helper in addition to F4-F6. It verifies/reuses an existing task
+engine read-only, never provisioning it. One ordinary45,000,000-byte fixture is
+reused with hashes and allocation identity; a hard-link alias adds no second
+payload, and one tiny copy is explicitly removed as fixture setup. Every run
+keeps unique small input/result snapshots, checks real startup hashes and normal
+worker/helper cleanup, and refuses reset after failed cleanup. It remains
+paused/held: no engine/probe/GPU/capture, visible/excluded UI, physical input,
+real startup or installed-recorder changes. See the P05 section of
+[profile migration checks](profile-migration.md#budget-reduction-preflight-p05).
+
 `./tests/settings-validation.ps1` exercises a paused direct recorder host with
 missing and untrusted engines in isolated storage. It creates hidden shortcut
 windows and temporarily registers Ctrl+Alt+Shift+F1–F6; an occupied shortcut fails

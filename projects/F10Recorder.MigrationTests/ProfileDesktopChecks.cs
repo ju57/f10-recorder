@@ -98,10 +98,10 @@ internal static class ProfileDesktopChecks
                     report["unrelatedApplyPreservedCacheBudget"] = true;
                 }
                 var acknowledgements = new List<object>();
-                foreach (string failure in new[] { "missing-status", "wrong-operation", "write-error" })
+                foreach (string failure in new[] { "missing-status", "wrong-operation", "write-error", "storage-rejection" })
                 {
                     var initial = new WorkerStatus {
-                        Instance = "desktop-correction-worker", Revision = 8, Config = new Settings { SystemAudio = false, DisplayIndex = 0 },
+                        Instance = "desktop-correction-worker", Revision = 8, Config = new Settings { SystemAudio = false, DisplayIndex = 0, ReplayCacheBudgetBytes = 12_345_678_901 },
                         Paused = true, Phase = CapturePhase.Paused,
                         ProfileStatus = new ProfileStatus { Outcome = "correction-required", ExistingProfile = true, RequiresCorrection = true, ActivationRequired = true, Issues = ["FramesPerSecond: Choose 24, 30, 60, or 120 FPS."] }
                     };
@@ -118,7 +118,8 @@ internal static class ProfileDesktopChecks
                         };
                         return System.Threading.Tasks.Task.FromResult(new WorkerReply {
                             Status = !retry && failure == "missing-status" ? null : corrected,
-                            Error = !retry && failure == "write-error" ? "Controlled profile correction write failed" : null
+                            Error = !retry && failure == "write-error" ? "Controlled profile correction write failed"
+                                : !retry && failure == "storage-rejection" ? "Replay-cache budget reduction could not be validated: retained footage exceeds the budget." : null
                         });
                     });
                     var panel = new SettingsPanel(client); client.Changed += panel.UpdateState; panel.CloseRequested = () => closes++;
@@ -130,9 +131,10 @@ internal static class ProfileDesktopChecks
                     Require(!await panel.ApplyAsync() && panel.Submitted == null && closes == 0 && !string.IsNullOrWhiteSpace(panel.Error), "Rejected/unconfirmed correction closed the editor or reported submission.");
                     Require(fps.SelectedItem.Equals(30) && folder.Text == draftFolder && client.Config.FramesPerSecond == 60 && !client.Config.SystemAudio && client.Config.DisplayIndex == 0 && client.Paused && client.ProfileStatus.ActivationRequired,
                         "Rejected/unconfirmed correction discarded valid drafts or changed deliberate recording intent.");
+                    Require(client.Config.ReplayCacheBudgetBytes == 12_345_678_901 && (failure != "storage-rejection" || panel.Error.Contains("budget")), "Definite storage rejection lost actual custom budget or its reason.");
                     // Capability admission is deliberately rechecked after the failed change.
                     retry = true; await panel.ProbeAsync();
-                    Require(await panel.ApplyAsync() && closes == 1 && panel.Submitted.FramesPerSecond == 30 && panel.Submitted.OutputDirectory == draftFolder && client.Paused && client.ProfileStatus.ActivationRequired,
+                    Require(await panel.ApplyAsync() && closes == 1 && panel.Submitted.FramesPerSecond == 30 && panel.Submitted.OutputDirectory == draftFolder && panel.Submitted.ReplayCacheBudgetBytes == 12_345_678_901 && client.Paused && client.ProfileStatus.ActivationRequired,
                         "A fresh acknowledged retry failed, lost the draft, or activated capture.");
                     acknowledgements.Add(new { failure, result = "passed", editorClosedOnlyAfterAcknowledgedRetry = true });
                 }

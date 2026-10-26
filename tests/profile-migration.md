@@ -267,6 +267,66 @@ qualification and shipping upgrade/power-loss durability remain pending. Issue
 
 ## Correction acknowledgements
 
+### Budget-reduction preflight (P05)
+
+A numerical decrease of `ReplayCacheBudgetBytes` checks complete current cache
+allocations and pending copy obligations before engine verification, shortcut
+registration, transaction notifications, capture disposal, persistence or startup
+callbacks. Active engines use their synchronized replay module. Paused/held
+profiles with no engine use the same read-only accounting; an absent cache is
+accepted only after its readable parent confirms the entry is absent. Unknown,
+denied, inconsistent or overflowing observations reject rather than implying
+zero usage. Preflight neither changes the current budget nor prunes footage.
+Existing profile/validation/busy guards remain; unchanged/increased budgets do
+not acquire this reduction-only blocker. This is finite demand admission, not a
+calibrated acquisition-growth or free-space guarantee.
+
+The existing actual-worker route has a focused selector:
+
+```powershell
+./tests/profile-migration.ps1 -RealWorkerCorrection -BudgetApplyOnly -EngineSource <approved-task-engine> -EngineRoot <existing-private-task-engine-root> -DataDirectory <task-budget-fixture> -BuildDirectory <task-build> -NoBuild -Plan
+```
+
+Save/review that concrete plan before an authorized run. The engine root must
+already contain the approved engine: this selector verifies/reuses it read-only
+and cannot provision it. One deterministic, normally written 45,000,000-byte
+payload is retained and reused across invocations; its actual allocation must
+exceed the prospectively declared 40,000,000-byte proposal. A 1-minute/5-Mbps
+profile keeps that proposal above the 37,500,000-byte nominal video floor.
+Tiny controlled metadata is not reported as real worker allocation evidence.
+
+The fixed held profile checks whole-Apply rejection, matching error completion,
+exact document/backup preservation, startup-callback absence and reconnect.
+A temporary hidden helper owns Ctrl+Alt+Shift+F7 to verify storage rejection
+precedes shortcut conflict; existing worker F4-F6 bindings stay intact. A hard
+link shares the retained allocation; one tiny copied file makes equality unsafe,
+then its explicit fixture removal allows a matching equality retry. Locked
+payload observation rejects a reduction but does not newly block unchanged or
+increased budgets. A second serial held profile verifies positively absent
+cache behavior. Only status/Apply/Quit are sent. Worker/helper identity and
+normal cleanup are checked; real startup value/kind hashes must match.
+
+Every invocation retains small before/after evidence in a unique `runs/` folder.
+Only the known small control/tiny-fixture files are reset; the large payload and
+alias remain unchanged. Reuse is refused after failed normal cleanup or while
+the recorded task worker is still active. A fallback kill is a failed cleanup,
+never a passing result. No visible/excluded UI, physical input, engine/probe,
+GPU/capture, real startup write, download/repair/install or user-media action is
+part of this route. The caller must serialize the hidden shortcut reservation
+and include payload, aliases, reports and build output in its declared cap.
+
+Offscreen correction/retry coverage includes a controlled matching storage
+error and a non-round 12,345,678,901-byte budget. It checks retained FPS/folder
+drafts, old actual configuration, pause/hold and closure only after a fresh
+acknowledgement. These controlled replies establish client/editor behavior,
+not a new budget control or actual storage failure through native UI.
+
+Active acquisition growth between preflight and later mutation, actual live
+engine shutdown, per-volume output/finalization/free space, warning/stop/Resume,
+calibration and broader filesystem/native/media acceptance remain pending.
+
+### Existing acknowledgement rules
+
 The Desktop reports Apply or engine repair as successful only when the reply
 contains a fresh completion for that exact operation from the original worker,
 and the client's accepted current state confirms the same completed operation.
