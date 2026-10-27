@@ -41,6 +41,23 @@ capture. No profile/startup/vendor changes or cleanup of prior evidence occurs.
 See [pilot preparation](pilot-collector.md) for the deferred native/measurement
 adapters and the distinction between supplied cleanup and actual process proof.
 
+`./tests/pilot-storage.ps1 -Plan` (also the default) only describes the storage
+route, without target stat/hash/build/mkdir or process/native observation.
+Explicit `-Checks/-Observe -NoBuild` uses the task-built WorkerChecks DLL's early
+storage-only entry point through the explicit pinned dotnet host. Execution
+requires an explicit assembly path/reviewed SHA256; own-DLL hashing precedes
+launch, missing/mismatched identities reject without a helper/PID. Inert
+`pilot-storage-launch-checks.ps1` invokes rejection/preview cases in-process with
+a harmless mismatched sentinel and impossible SDK path, never loading a DLL.
+Overall effects
+include fresh owned-root/marker/tiny-text initialization and bounded retained
+report/launch-record writes; native metadata observation itself is read-only.
+The wrapper limits its sole owned invocation to60seconds/128KiB, records exact
+identity/exit and retains failures. The helper spawns no nested child and opens
+no worker/UI/shortcut/engine/probe/GPU/capture/startup/vendor route. No prior
+root/file is reused or deleted. See [actual tiny-root storage](pilot-storage.md)
+for the bounded inventory, mixed provenance and deferred media/process domains.
+
 CoreChecks `<output> --storage-budget-only` runs only the portable budget/profile
 cases and writes tiny local settings/original-backup fixtures. It starts no
 recorder, native window, engine, GPU, capture or startup action. Full CoreChecks

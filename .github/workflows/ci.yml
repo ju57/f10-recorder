@@ -110,6 +110,15 @@ jobs:
         run: |
           python -m unittest discover -s tests -p test_pilot_collector.py -v
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify native pilot storage without capture
+        shell: pwsh
+        run: |
+          ./tests/pilot-storage-launch-checks.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $assembly = Join-Path $PWD 'projects/F10Recorder.WorkerChecks/bin/Release/net10.0-windows/F10Recorder.WorkerChecks.dll'
+          $assemblySha256 = (Get-FileHash -LiteralPath $assembly -Algorithm SHA256).Hash
+          ./tests/pilot-storage.ps1 -Checks -NoBuild -Sdk (Get-Command dotnet).Source -AssemblyPath $assembly -ExpectedAssemblySha256 $assemblySha256
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
 # Hardware/UI acceptance is a separate local suite. Hosted runners do not
 # establish NVIDIA capture, fullscreen behavior, or driver performance.
