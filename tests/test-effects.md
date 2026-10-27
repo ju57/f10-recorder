@@ -58,6 +58,25 @@ no worker/UI/shortcut/engine/probe/GPU/capture/startup/vendor route. No prior
 root/file is reused or deleted. See [actual tiny-root storage](pilot-storage.md)
 for the bounded inventory, mixed provenance and deferred media/process domains.
 
+`./tests/pilot-storage.ps1 -Plan -ProcessRun/-ProcessChecks` previews the fixed
+nonmedia process routes without target reads or writes. Explicit execution uses
+the same reviewed-DLL/hash guard and outer controller limits. `-ProcessRun` starts
+at most one tiny source-bound direct fixture child; `-ProcessChecks` starts at
+most eight sequential fixture children, no descendants. Checks write fresh tiny
+input/plan/admission/progress/product/log/receipt files and read task SDK/build
+hashes and native closed-file/process identities. Stages have a 1–2 second
+deadline, at most 3 seconds owned cleanup, combined stdout/stderr64KiB and
+receipt64KiB; suite JSON128KiB, at most twelve files per stage (each<=1MiB), plus
+separately counted controls/build/wrapper evidence. Failures are retained.
+Cancellation waits for partial-ready; flood is finite; the wait recipe self-bounds
+at10seconds. Collision and cleanup-unknown controls first observe the real child
+exited. Outer-controller cleanup never establishes stage-child absence: missing
+stage evidence leaves cleanup unconfirmed. These routes initialize no recorder,
+profile, shortcut, window, engine/probe, GPU, audio/capture, startup or vendor
+integration. Selected `-CheckCase` is a closed process-check selector only.
+See [one guarded process stage](pilot-process.md) for exact outcomes/provenance,
+publication limits and the still-deferred real-calibration/storage requirements.
+
 CoreChecks `<output> --storage-budget-only` runs only the portable budget/profile
 cases and writes tiny local settings/original-backup fixtures. It starts no
 recorder, native window, engine, GPU, capture or startup action. Full CoreChecks

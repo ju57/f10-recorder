@@ -1,13 +1,15 @@
 param(
-    [switch]$Plan, [switch]$Observe, [switch]$Checks, [switch]$NoBuild,
-    [string]$Sdk, [string]$AssemblyPath, [string]$ExpectedAssemblySha256, [string]$DataPath
+    [switch]$Plan, [switch]$Observe, [switch]$Checks, [switch]$ProcessRun, [switch]$ProcessChecks, [switch]$NoBuild,
+    [string]$Sdk, [string]$AssemblyPath, [string]$ExpectedAssemblySha256, [string]$DataPath,
+    [ValidateSet('all','S01','exit7','timeout','cancel','flood','receipt-collision','cleanup-unknown','admission')][string]$CheckCase='all'
 )
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path -Parent $PSScriptRoot
 if (-not $Sdk) { $Sdk = Join-Path $repository '.tools/dotnet/dotnet.exe' }
 if (-not $DataPath) { $DataPath = Join-Path $repository ('artifacts/pilot-storage-' + [Guid]::NewGuid().ToString('N')) }
-if ($Observe -and $Checks) { throw 'Choose one storage entry point.' }
-$entry = if ($Observe) { '--pilot-storage-observe' } else { '--pilot-storage-checks' }
+if (@(@($Observe,$Checks,$ProcessRun,$ProcessChecks)|Where-Object {$_}).Count -gt 1) { throw 'Choose one explicit pilot entry point.' }
+$processMode=$ProcessRun -or $ProcessChecks
+$entry = if ($ProcessRun) { '--pilot-stage-run' } elseif ($ProcessChecks) { '--pilot-stage-checks' } elseif ($Observe) { '--pilot-storage-observe' } else { '--pilot-storage-checks' }
 $missingIdentity=@()
 if (-not $PSBoundParameters.ContainsKey('AssemblyPath') -or [string]::IsNullOrWhiteSpace($AssemblyPath)) { $missingIdentity+='AssemblyPath' }
 if (-not $PSBoundParameters.ContainsKey('ExpectedAssemblySha256') -or $ExpectedAssemblySha256 -notmatch '^[0-9A-Fa-f]{64}$') { $missingIdentity+='ExpectedAssemblySha256' }
@@ -20,10 +22,16 @@ $launch = [ordered]@{
         FreshRootAndMarkerWrites=$true; TinyNonmediaFixtureWrites=$true; StorageMetadataReads=$true
         VerificationAssemblyHashRead=$true
         ReportWrites=$true; Recorder=$false; Ui=$false; Engine=$false; Gpu=$false; Capture=$false
-        Startup=$false; VendorChanges=$false; NestedChild=$false
+        Startup=$false; VendorChanges=$false; NestedChild=$processMode
+        MaximumSequentialStageChildren=$(if($ProcessChecks){8}elseif($ProcessRun){1}else{0})
+        FixtureDescendants=$false; StageChildCleanupRequiresItsOwnReceipt=$processMode
     }
 }
-if ($Plan -or (-not $Observe -and -not $Checks)) { return [pscustomobject]$launch }
+if ($CheckCase -ne 'all') {
+    if (-not $ProcessChecks) { throw 'A selected case requires -ProcessChecks.' }
+    $launch.Arguments+=@('--only',$CheckCase)
+}
+if ($Plan -or (-not $Observe -and -not $Checks -and -not $ProcessRun -and -not $ProcessChecks)) { return [pscustomobject]$launch }
 $actualAssemblySha256=$null
 function RejectIdentity([string]$Message) {
     $expected=if ($ExpectedAssemblySha256 -match '^[0-9A-Fa-f]{64}$') { $ExpectedAssemblySha256 } else { $null }
@@ -99,7 +107,7 @@ finally {
         try { $process.Kill(); $cleanupConfirmed=$process.WaitForExit(5000) } catch { $cleanupConfirmed=$false }
     }
     if ($outputFiles.Count -eq 3) {
-        $receipt=[ordered]@{Arguments=$launch.Arguments;Executable=$Sdk;ExpectedAssemblySha256=$ExpectedAssemblySha256;ActualAssemblySha256=$actualAssemblySha256;OwnedPid=$ownedPid;StartedUtc=$startedUtc;ExitCode=$exitCode;CleanupConfirmed=$cleanupConfirmed;Error=$reason;Stdout=$stdoutPath;Stderr=$stderrPath;Effects=$launch.EffectsOnExecution}
+        $receipt=[ordered]@{Arguments=$launch.Arguments;Executable=$Sdk;ExpectedAssemblySha256=$ExpectedAssemblySha256;ActualAssemblySha256=$actualAssemblySha256;OwnedPid=$ownedPid;StartedUtc=$startedUtc;ExitCode=$exitCode;CleanupConfirmed=$cleanupConfirmed;CleanupScope='outer-controller-only';StageChildCleanupConfirmed=$null;Error=$reason;Stdout=$stdoutPath;Stderr=$stderrPath;Effects=$launch.EffectsOnExecution}
         $bytes=[Text.Encoding]::UTF8.GetBytes(($receipt|ConvertTo-Json -Depth 5))
         $outputFiles[2].Write($bytes,0,$bytes.Length)
     }
