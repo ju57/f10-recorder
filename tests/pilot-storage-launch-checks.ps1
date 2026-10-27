@@ -28,16 +28,29 @@ try {
         Require ($missing.MissingExecutionRequirements -contains 'AssemblyPath' -and $missing.MissingExecutionRequirements -contains 'ExpectedAssemblySha256') 'Preview hid missing explicit build identity.'
         Require (-not (Test-Path -LiteralPath (Split-Path -Parent $absent))) 'Preview created the absent target.'
         Require (($before -join "`n") -ceq ((LaunchFiles) -join "`n")) 'Preview created launch artifacts.'
+        foreach ($mode in 'ProcessRun','ProcessChecks') {
+            $arguments=@{Plan=$true;Sdk=$blockedSdk;AssemblyPath=$absent;ExpectedAssemblySha256=('0'*64)}
+            $arguments[$mode]=$true
+            $processPreview=& $wrapper @arguments
+            Require ($processPreview.Arguments[1] -eq $(if($mode -eq 'ProcessRun'){'--pilot-stage-run'}else{'--pilot-stage-checks'})) 'Preview substituted a different entry.'
+            Require ($processPreview.EffectsOnExecution.StageChildCleanupRequiresItsOwnReceipt -and -not $processPreview.EffectsOnExecution.FixtureDescendants) 'Preview hid stage ownership limits.'
+        }
+        $selected=& $wrapper -Plan -ProcessChecks -CheckCase S01 -Sdk $blockedSdk
+        Require ($selected.Arguments[3] -eq '--only' -and $selected.Arguments[4] -eq 'S01') 'Preview lost the closed selected check.'
+        Require (-not (Test-Path -LiteralPath (Split-Path -Parent $absent))) 'Process preview created its target.'
+        Require (($before -join "`n") -ceq ((LaunchFiles) -join "`n")) 'Process preview created launch artifacts.'
     }
     foreach ($case in 'missing-path','missing-hash','mismatched-hash') {
         Check $case {
             $before=LaunchFiles
-            $arguments=@{Checks=$true;NoBuild=$true;Sdk=$blockedSdk;DataPath=(Join-Path $OutputRoot 'never-created')}
+            foreach ($mode in 'Checks','ProcessRun','ProcessChecks') {
+            $arguments=@{NoBuild=$true;Sdk=$blockedSdk;DataPath=(Join-Path $OutputRoot 'never-created')}
+            $arguments[$mode]=$true
             if ($case -ne 'missing-path') { $arguments.AssemblyPath=$sentinel }
             if ($case -ne 'missing-hash') { $arguments.ExpectedAssemblySha256='0'*64 }
             $text=(& $wrapper @arguments | Out-String)
             $code=$LASTEXITCODE
-            [IO.File]::WriteAllText((Join-Path $OutputRoot ($case+'.json')),$text)
+            [IO.File]::WriteAllText((Join-Path $OutputRoot ($case+'-'+$mode+'.json')),$text)
             $result=$text|ConvertFrom-Json
             Require ($code -eq 2 -and $result.kind -eq 'storage-launch-rejected') 'Missing/mismatched identity did not reject before launch.'
             Require ($result.helper_started -eq $false -and $null -eq $result.owned_pid) 'Identity rejection claimed a helper/PID.'
@@ -45,6 +58,7 @@ try {
             Require ([IO.File]::ReadAllText($sentinel) -ceq "not-an-executable`n") 'Sentinel bytes changed.'
             if ($case -eq 'mismatched-hash') {
                 Require ($result.expected_assembly_sha256 -eq ('0'*64) -and $result.actual_assembly_sha256 -match '^[0-9A-Fa-f]{64}$') 'Mismatch evidence did not retain both identities.'
+            }
             }
         }
     }

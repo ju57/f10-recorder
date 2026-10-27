@@ -20,8 +20,9 @@ internal static class WorkerChecks
     static readonly List<RecorderMetrics> samples = [];
     static readonly List<object> saves = [];
     [STAThread]
-    static int Main(string[] args)
+    internal static int Main(string[] args)
     {
+        if (args.Any(value => value.StartsWith("--pilot-stage", StringComparison.OrdinalIgnoreCase))) return PilotStageRunner.Dispatch(args);
         if (args.Any(value => value.StartsWith("--pilot-storage", StringComparison.OrdinalIgnoreCase))) return PilotStorageObservation.Dispatch(args);
         if (args.Length == 2 && args[0] == "--replay-ownership") return ReplayOwnershipChecks.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--capture-status") return CaptureStatusChecks.Run(Path.GetFullPath(args[1]));

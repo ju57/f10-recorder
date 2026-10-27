@@ -119,6 +119,14 @@ jobs:
           $assemblySha256 = (Get-FileHash -LiteralPath $assembly -Algorithm SHA256).Hash
           ./tests/pilot-storage.ps1 -Checks -NoBuild -Sdk (Get-Command dotnet).Source -AssemblyPath $assembly -ExpectedAssemblySha256 $assemblySha256
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify one guarded process stage with tiny nonmedia fixtures
+        shell: pwsh
+        run: |
+          $assembly = Join-Path $PWD 'projects/F10Recorder.WorkerChecks/bin/Release/net10.0-windows/F10Recorder.WorkerChecks.dll'
+          $assemblySha256 = (Get-FileHash -LiteralPath $assembly -Algorithm SHA256).Hash
+          ./tests/pilot-storage.ps1 -Plan -ProcessChecks -Sdk (Get-Command dotnet).Source -AssemblyPath $assembly -ExpectedAssemblySha256 $assemblySha256
+          ./tests/pilot-storage.ps1 -ProcessChecks -NoBuild -Sdk (Get-Command dotnet).Source -AssemblyPath $assembly -ExpectedAssemblySha256 $assemblySha256
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
 # Hardware/UI acceptance is a separate local suite. Hosted runners do not
 # establish NVIDIA capture, fullscreen behavior, or driver performance.
