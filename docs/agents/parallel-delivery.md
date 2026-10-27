@@ -21,7 +21,43 @@ slots, use orchestrator, implementer, independent validator and reviewer; stage
 the two review axes as slots become available. Additional writers require both
 dependency independence and disjoint file/interface ownership.
 
+## Dispatch fresh handoffs
+
+Use the [handoff template](delivery-handoff-template.md) for each new scope.
+Keep the dispatch brief to about 500 words, with pointers to authoritative spec,
+standards and evidence rather than copied transcripts. Include the decision the
+role must make and its completion condition. This is a context budget, not a
+limit on the referenced acceptance criteria or a reason to omit safety facts.
+
+Start new subagents with `fork_turns: "none"`. Give validators the accepted spec
+and interfaces before the patch; give reviewers the frozen diff and their axis.
+Prepare independent cases while implementation proceeds. Create user-owned chats
+only when the user requests them. An ongoing orchestrator reads the current
+handoff and changed state; it does not need to reload its planning history.
+
+Reuse an agent for a closely related corrective delta. For a new scope, start
+fresh. If inherited context is necessary, record the specific needed material,
+why a bounded pointer is insufficient, the bias risk and its mitigation; retain
+independent case design and both review axes. Preserve required prior decisions
+through the authoritative spec. A shorter prompt in an old chat is not a fresh
+context. A reviewer never approves its own corrective patch.
+
 ## Produce evidence that can disagree with the implementation
+
+At admission, select one early tracer through the actual changed integration
+boundary and its consumer, using an existing agreed seam. State the expected
+observation, a consequential failure/sensitivity case and declared effects. For
+example, profile transport needs a real isolated paused-worker reply consumed
+by the client/editor; a size check on a saved file alone does not exercise it.
+A launcher needs the actual wrapper's executable/argument admission path.
+
+Run that tracer before expanding the implementation or its broad test matrix.
+Use the least-effect route that exercises the boundary. If it needs unavailable
+resources or undeclared live effects, record the missing proof and obtain the
+required authorization; independent work may continue, but dependent integration
+and acceptance remain pending. Mock checks do not replace that proof. For a
+documentation-only slice, use a filled handoff and a consequential tabletop
+counterexample; label these as document checks, not runtime enforcement.
 
 The implementer works in observable behavior slices and runs the relevant checks.
 The independent validator derives cases from the issue before reading the patch,
@@ -47,12 +83,29 @@ hashes, exact commands and arguments, expected outcomes, actual results, effects
 environment, artifact budget/usage, preservation and owned-process cleanup.
 Store machine-specific receipts and media under ignored artifacts; publish a
 portable criterion-to-evidence summary and truthful limits on the issue/PR.
+Inventory relevant untracked sources and inputs as well as tracked files.
+When commits are not authorized, review an immutable patch against a pinned base,
+including untracked additions and a source hash manifest. Bind local evidence to
+that snapshot; integration still requires a clean committed candidate and CI.
+An ordinary dirty checkout or unchanged HEAD alone is not a frozen identity.
 
-Source changes invalidate affected build/test/review evidence. A documentation-only
-followup may reuse unchanged production binaries when source hashes are checked
-and that relationship is explicit; the resulting PR head still receives CI.
-Historical native acceptance stays bound to its original commit. Decide targeted
-retests from the changed behavior and risk; do not relabel old measurements as new.
+For each candidate delta, record an evidence decision in the handoff: reuse,
+targeted refresh or invalidated, with a reason and the affected criteria. Check
+relevant source (including additions/deletions and untracked files), binaries,
+build/package/toolchain, inputs, configuration, commands and environment against
+the original receipt. Missing identity or evidence makes reuse unestablished.
+Changed behavior or any relevant dependency invalidates affected evidence;
+refresh that coverage before advancing, retaining superseded/failed attempts.
+
+A documentation-only followup may reuse unchanged production evidence when the
+source/binary relationship and applicability still match. Review the document
+delta separately. On an unchanged reviewed candidate, merge readiness refreshes
+head/base, integration, required CI, conversations and acceptance disposition;
+cite both axis reports instead of commissioning two full reviews again without
+a concrete new risk. If main changes, assess the combined diff and dependencies
+before choosing affected retests/reviews. Every resulting PR head still receives
+required CI. Historical native acceptance keeps its original revision and scope;
+reuse never upgrades it to new hardware, package, user or release acceptance.
 
 ## Serialize integration and shared hardware
 
