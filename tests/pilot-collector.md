@@ -117,7 +117,11 @@ envelope containing its byte hash, supplied provenance and assessment. No files
 are written by the CLI. The API receipt retains the supplied observation, plan
 digest, resource arithmetic, eligibility/reasons and its own JSON-value digest.
 `facts_verified_natively` stays false. Exit 0 means eligible supplied storage
-snapshot, 1 means ineligible, and 2 means malformed/unreadable input. An
+snapshot, 1 means ineligible, and 2 means malformed/unreadable input or unsupported
+JSON nesting. The entire result is serialized before stdout is written. A
+recursion failure during decoding, assessment or final formatting returns a
+shallow structured rejection with exit 2; it never prints a partial success.
+The Python recursion limit and 1 MiB input budget are unchanged. An
 execution flag is unsupported and rejected before any child could start.
 
 `settle` takes the exact assessment and this supplied `after` shape:
@@ -161,6 +165,14 @@ oversize-input guard uses a controlled in-memory file boundary. CLI tests use th
 entry function without a child; external preview launch is just Python. No
 media, GPU, UI, worker, profile, startup or vendor effects. The existing game
 contract suite remains separate and removes only its own temporary fixtures.
+The nested-JSON regression retains real bounded 5000-level decoder and 2000-level
+extra-field fixtures plus an ordinary eligible control under fresh
+`artifacts/calibration-collector-json-depth-writer/` directories. Deep objects may
+serialize completely or be rejected for unsupported nesting; no nesting support
+level is promised across Python runtimes.
+Windows CI runs this standard-library suite beside experiment admission and
+propagates its exit code. This route adds no engine, native, GPU or capture work;
+hosted success cannot qualify the deferred measurement adapters or release gates.
 
 | Independent matrix criterion | Coverage in this admitted slice |
 | --- | --- |

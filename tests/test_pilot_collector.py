@@ -249,6 +249,36 @@ class PilotPreparationChecks(unittest.TestCase):
         self.assertFalse(result["storage_preparation_eligible"])
         self.assertIn("stale snapshot binding", result["reasons"])
 
+    def test_cli_nested_input_and_output_return_complete_json_or_structured_rejection(self):
+        artifacts = Path(__file__).resolve().parents[1] / "artifacts" / "calibration-collector-json-depth-writer"
+        artifacts.mkdir(parents=True, exist_ok=True)
+        root = Path(tempfile.mkdtemp(prefix="bounded-json-", dir=artifacts))
+        ordinary = json.dumps(self.observation)
+        cases = [("positive", ordinary, (0,)),
+                 ("decoder-depth5000", "[" * 5000 + "0" + "]" * 5000, (2,)),
+                 ("output-depth2000", ordinary[:-1] + ', "extra":' + "[" * 2000 + "0" + "]" * 2000 + "}", (0, 2))]
+        for name, text, allowed_exits in cases:
+            with self.subTest(case=name):
+                source = root / (name + ".json")
+                source.write_text(text, encoding="utf-8")
+                output, errors = io.StringIO(), io.StringIO()
+                try:
+                    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                        code = collector.main(["--assess", str(source)])
+                finally:
+                    (root / (name + "-stdout.json")).write_text(output.getvalue(), encoding="utf-8")
+                    (root / (name + "-stderr.txt")).write_text(errors.getvalue(), encoding="utf-8")
+                self.assertIn(code, allowed_exits)
+                self.assertEqual(errors.getvalue(), "")
+                result = json.loads(output.getvalue())
+                self.assertFalse(result["execution_enabled"])
+                self.assertEqual(result["actual_commands_launched"], [])
+                if code == 2:
+                    self.assertEqual(result["kind"], "r1-preparation-input-rejected")
+                    self.assertTrue(result["error"])
+                else:
+                    self.assertTrue(result["receipt"]["storage_preparation_eligible"])
+
 
 if __name__ == "__main__":
     unittest.main()

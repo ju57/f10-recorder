@@ -216,11 +216,13 @@ def main(argv=None):
                 "input": {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data),
                           "provenance": "caller-supplied-unverified", "filesystem_write": False}}
             code = 0 if receipt["storage_preparation_eligible"] else 1
-    except (ValueError, OSError) as error:
+        serialized = json.dumps(result, indent=2, allow_nan=False)
+    except (ValueError, OSError, RecursionError) as error:
         result = {"kind": "r1-preparation-input-rejected", "error": str(error),
                   "execution_enabled": False, "actual_commands_launched": []}
         code = 2
-    print(json.dumps(result, indent=2, allow_nan=False))
+        serialized = json.dumps(result, indent=2, allow_nan=False)
+    print(serialized)
     return code
 
 
