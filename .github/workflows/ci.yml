@@ -105,6 +105,11 @@ jobs:
           python -m unittest discover -s tests -p test_experiment_contract.py -v
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           ./tests/experiment-runtime-checks.ps1
+      - name: Verify pilot preparation without media
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -p test_pilot_collector.py -v
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
 # Hardware/UI acceptance is a separate local suite. Hosted runners do not
 # establish NVIDIA capture, fullscreen behavior, or driver performance.
