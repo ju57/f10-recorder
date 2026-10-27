@@ -11,6 +11,20 @@ from unittest.mock import patch
 import pilot_collector as collector
 
 
+class BoundedOutput(io.StringIO):
+    """Retain at most 128KiB, including Windows line-ending expansion."""
+    def __init__(self):
+        super().__init__(newline="\r\n")
+        self.bytes_written = 0
+
+    def write(self, text):
+        size = len(text.replace("\n", "\r\n").encode("utf-8"))
+        if self.bytes_written + size > 131_072:
+            raise AssertionError("CLI attempted stdout above 128KiB")
+        self.bytes_written += size
+        return super().write(text)
+
+
 class PilotPreparationChecks(unittest.TestCase):
     def setUp(self):
         self.plan = collector.preview()
@@ -249,6 +263,70 @@ class PilotPreparationChecks(unittest.TestCase):
         self.assertFalse(result["storage_preparation_eligible"])
         self.assertIn("stale snapshot binding", result["reasons"])
 
+    def test_cli_oversized_result_returns_bounded_rejection_without_partial_success(self):
+        artifacts = Path(__file__).resolve().parents[1] / "artifacts" / "calibration-collector-output-writer"
+        artifacts.mkdir(parents=True, exist_ok=True)
+        root = Path(tempfile.mkdtemp(prefix="output-limit-", dir=artifacts))
+        observation = dict(self.observation, extra="x" * 131_072)
+        source = root / "observation.json"
+        source.write_text(json.dumps(observation), encoding="utf-8")
+        output, errors = BoundedOutput(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                code = collector.main(["--assess", str(source)])
+        finally:
+            (root / "stdout.json").write_bytes(output.getvalue().encode("utf-8"))
+            (root / "stderr.txt").write_text(errors.getvalue(), encoding="utf-8")
+        self.assertEqual(code, 2)
+        self.assertEqual(errors.getvalue(), "")
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["kind"], "r1-preparation-input-rejected")
+        self.assertIn("128KiB", result["error"])
+        self.assertFalse(result["execution_enabled"])
+        self.assertEqual(result["actual_commands_launched"], [])
+        self.assertNotIn("receipt", result)
+        self.assertLessEqual(len(output.getvalue().encode("utf-8")), 131_072)
+
+    def test_cli_error_output_accepts_exact_limit_and_rejects_one_byte_more(self):
+        def unreadable(message):
+            output = BoundedOutput()
+            with patch("builtins.open", side_effect=OSError(message)), \
+                    contextlib.redirect_stdout(output):
+                self.assertEqual(collector.main(["--assess", "controlled-unreadable"]), 2)
+            text = output.getvalue()
+            return text, json.loads(text)
+
+        # Measure the public envelope's overhead, then place the error exactly at
+        # the byte boundary. CRLF capture includes every formatting line ending.
+        empty, _ = unreadable("")
+        message = "x" * (131_072 - len(empty.encode("utf-8")))
+        exact, result = unreadable(message)
+        self.assertEqual(len(exact.encode("utf-8")), 131_072)
+        self.assertEqual(result["error"], message)
+        oversized, result = unreadable(message + "x")
+        self.assertLess(len(oversized.encode("utf-8")), 1024)
+        self.assertEqual(result["error"], "Preparation error exceeds 128KiB output limit")
+        self.assertFalse(result["execution_enabled"])
+        self.assertEqual(result["actual_commands_launched"], [])
+
+    def test_cli_bounded_output_preserves_large_admissible_observation_and_digest(self):
+        artifacts = Path(__file__).resolve().parents[1] / "artifacts" / "calibration-collector-output-writer"
+        artifacts.mkdir(parents=True, exist_ok=True)
+        root = Path(tempfile.mkdtemp(prefix="preserved-output-", dir=artifacts))
+        observation = dict(self.observation, extra="x" * 100_000)
+        source = root / "observation.json"
+        source.write_text(json.dumps(observation), encoding="utf-8")
+        output = BoundedOutput()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(collector.main(["--assess", str(source)]), 0)
+        (root / "stdout.json").write_bytes(output.getvalue().encode("utf-8"))
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["receipt"]["observation"], observation)
+        self.assertEqual(result["receipt"], collector.assess(self.plan, observation))
+        self.assertTrue(result["receipt"]["storage_preparation_eligible"])
+        self.assertFalse(result["execution_enabled"])
+        self.assertEqual(result["actual_commands_launched"], [])
+
     def test_cli_nested_input_and_output_return_complete_json_or_structured_rejection(self):
         artifacts = Path(__file__).resolve().parents[1] / "artifacts" / "calibration-collector-json-depth-writer"
         artifacts.mkdir(parents=True, exist_ok=True)
@@ -256,19 +334,21 @@ class PilotPreparationChecks(unittest.TestCase):
         ordinary = json.dumps(self.observation)
         cases = [("positive", ordinary, (0,)),
                  ("decoder-depth5000", "[" * 5000 + "0" + "]" * 5000, (2,)),
-                 ("output-depth2000", ordinary[:-1] + ', "extra":' + "[" * 2000 + "0" + "]" * 2000 + "}", (0, 2))]
+                 ("output-depth250", ordinary[:-1] + ', "extra":' + "[" * 250 + "0" + "]" * 250 + "}", (2,)),
+                 ("output-depth2000", ordinary[:-1] + ', "extra":' + "[" * 2000 + "0" + "]" * 2000 + "}", (2,))]
         for name, text, allowed_exits in cases:
             with self.subTest(case=name):
                 source = root / (name + ".json")
                 source.write_text(text, encoding="utf-8")
-                output, errors = io.StringIO(), io.StringIO()
+                output, errors = BoundedOutput(), io.StringIO()
                 try:
                     with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
                         code = collector.main(["--assess", str(source)])
                 finally:
-                    (root / (name + "-stdout.json")).write_text(output.getvalue(), encoding="utf-8")
+                    (root / (name + "-stdout.json")).write_bytes(output.getvalue().encode("utf-8"))
                     (root / (name + "-stderr.txt")).write_text(errors.getvalue(), encoding="utf-8")
                 self.assertIn(code, allowed_exits)
+                self.assertLessEqual(len(output.getvalue().encode("utf-8")), 131_072)
                 self.assertEqual(errors.getvalue(), "")
                 result = json.loads(output.getvalue())
                 self.assertFalse(result["execution_enabled"])

@@ -123,11 +123,16 @@ envelope containing its byte hash, supplied provenance and assessment. No files
 are written by the CLI. The API receipt retains the supplied observation, plan
 digest, resource arithmetic, eligibility/reasons and its own JSON-value digest.
 `facts_verified_natively` stays false. Exit 0 means eligible supplied storage
-snapshot, 1 means ineligible, and 2 means malformed/unreadable input or unsupported
-JSON nesting. The entire result is serialized before stdout is written. A
-recursion failure during decoding, assessment or final formatting returns a
-shallow structured rejection with exit 2; it never prints a partial success.
-The Python recursion limit and 1 MiB input budget are unchanged. An
+snapshot, 1 means ineligible, and 2 means malformed/unreadable input, unsupported
+JSON nesting or output above 128 KiB. JSON stdout is capped at 131,072 UTF-8 bytes,
+including the final line ending. The serializer counts chunks before retaining
+them and reserves Windows CRLF expansion for every formatting newline. It buffers
+a complete document within that cap before writing stdout; it never emits a
+partial success or silently drops supplied observation fields to fit.
+An output-limit or recursion failure returns a shallow structured rejection with
+exit 2. Oversized error details also fall back to a small explicit output-limit
+error. This is a serialized-output bound, not a whole-interpreter memory quota;
+input parsing and assessment retain their existing 1 MiB and recursion limits. An
 execution flag is unsupported and rejected before any child could start.
 
 `settle` takes the exact assessment and this supplied `after` shape:
@@ -171,11 +176,18 @@ oversize-input guard uses a controlled in-memory file boundary. CLI tests use th
 entry function without a child; external preview launch is just Python. No
 media, GPU, UI, worker, profile, startup or vendor effects. The existing game
 contract suite remains separate and removes only its own temporary fixtures.
-The nested-JSON regression retains real bounded 5000-level decoder and 2000-level
+The nested-JSON regression retains real bounded 5000-level decoder and 250/2000-level
 extra-field fixtures plus an ordinary eligible control under fresh
 `artifacts/calibration-collector-json-depth-writer/` directories. Deep objects may
-serialize completely or be rejected for unsupported nesting; no nesting support
-level is promised across Python runtimes.
+be rejected for output size or unsupported nesting; no nesting support level is
+promised across Python runtimes. A capped CRLF stdout sink stops a regression
+before an oversized write can create another large diagnostic. Separate CLI
+controls preserve a 100,000-character observation and its receipt, reject an
+oversized result without partial success, and exercise an error exactly at the
+131,072-byte boundary and one byte beyond. New input/output attempts use fresh
+`artifacts/calibration-collector-output-writer/` directories. Earlier oversized
+diagnostics and their historical validation-effects qualification remain intact;
+new checks qualify only the corrected source.
 Windows CI runs this standard-library suite beside experiment admission and
 propagates its exit code. This route adds no engine, native, GPU or capture work;
 hosted success cannot qualify the deferred measurement adapters or release gates.

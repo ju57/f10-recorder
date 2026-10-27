@@ -194,6 +194,17 @@ def settle(plan, before, after):
     return receipt
 
 
+def bounded_output_json(value):
+    """Buffer a complete <=128KiB document, counting worst-case CRLF stdout."""
+    chunks, size = [], 2  # Reserve the final print line ending, including Windows.
+    encoder = json.JSONEncoder(indent=2, ensure_ascii=True, allow_nan=False)
+    for chunk in encoder.iterencode(value):
+        size += len(chunk.encode("utf-8")) + chunk.count("\n")
+        require(size <= 131_072, "Preparation JSON exceeds 128KiB output limit")
+        chunks.append(chunk)
+    return "".join(chunks)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     modes = parser.add_mutually_exclusive_group()
@@ -216,12 +227,16 @@ def main(argv=None):
                 "input": {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data),
                           "provenance": "caller-supplied-unverified", "filesystem_write": False}}
             code = 0 if receipt["storage_preparation_eligible"] else 1
-        serialized = json.dumps(result, indent=2, allow_nan=False)
+        serialized = bounded_output_json(result)
     except (ValueError, OSError, RecursionError) as error:
         result = {"kind": "r1-preparation-input-rejected", "error": str(error),
                   "execution_enabled": False, "actual_commands_launched": []}
         code = 2
-        serialized = json.dumps(result, indent=2, allow_nan=False)
+        try:
+            serialized = bounded_output_json(result)
+        except ValueError:
+            result["error"] = "Preparation error exceeds 128KiB output limit"
+            serialized = bounded_output_json(result)
     print(serialized)
     return code
 
