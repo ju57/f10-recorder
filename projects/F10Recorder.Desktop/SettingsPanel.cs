@@ -5,6 +5,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using System.Globalization;
 
 namespace F10Recorder;
 
@@ -20,6 +21,12 @@ internal sealed class SettingsPanel : UserControl
     string selectedExecutable, selectedClass, codecDraft;
     readonly CheckBox audio = new() { Name = "SystemAudio", Content = "Capture system audio" }, startup = new() { Name = "StartWithWindows", Content = "Start buffering at Windows sign-in" };
     readonly TextBox clips = new() { Name = "OutputDirectory" }, screenshots = new() { Name = "ScreenshotDirectory" };
+    readonly TextBox cacheFolder = new() { Name = "ReplayCacheDirectory" }, cacheBudget = new() { Name = "ReplayCacheBudgetGB" };
+    readonly TextBlock budgetError = Ui.Label("", 12, Ui.Warning), cacheUsage = Ui.Label("", 12, Ui.Muted);
+    readonly Dictionary<TextBox, TextBlock> folderErrors = [];
+    readonly Func<string, string, Task<string>> selectFolder;
+    readonly Button reset;
+    bool loadingStorage;
     readonly ShortcutEditor saveShortcut = new("Save", false), overlayShortcut = new("Overlay", true), screenshotShortcut = new("Screenshot", true);
     readonly ToggleSwitch recording = new() { Name = "RecordingEnabled", OnContent = "On", OffContent = "Off" };
     readonly TextBlock state = Ui.Label("Paused", 15, Ui.Warning, FontWeight.SemiBold), stateDetail = Ui.Label("", 12, Ui.Muted), estimate = Ui.Label("", 12, Ui.Muted), error = Ui.Label("", 13, Ui.Warning), codecStatus = Ui.Label("Check the recording engine to load video choices.", 12, Ui.Muted);
@@ -45,10 +52,10 @@ internal sealed class SettingsPanel : UserControl
     internal string EngineStatus => engineStatus.Text;
     internal int SelectedPage { get; private set; }
 
-    public SettingsPanel(IWindowsRecorder session)
+    public SettingsPanel(IWindowsRecorder session, Func<string, string, Task<string>> folderPicker = null)
     {
         Background = Ui.Background;
-        recorder = session; hasProfileDraft = ProfileEntry.Describe(session).CanEdit;
+        recorder = session; selectFolder = folderPicker ?? PickFolderAsync; hasProfileDraft = ProfileEntry.Describe(session).CanEdit;
         LoadDraft(ProfileEntry.HasUsableConfig(session.Config) ? session.Config : new Settings()); startup.IsChecked = WindowsStartup.Enabled;
         estimate.Name = "RollingCacheEstimate"; audioFormat.Name = "AudioFormat"; playbackDevice.Name = "PlaybackDevicePolicy";
         ToolTip.SetTip(estimate, "Estimate from the selected duration and bitrates, including 10 seconds of cache headroom. Actual disk usage varies.");
@@ -88,6 +95,8 @@ internal sealed class SettingsPanel : UserControl
         var info = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center }; info.Children.Add(estimate);
         var logs = Ui.Button("Diagnostic logs", () => { try { RecorderHost.OpenFolder(recorder.DataDirectory); } catch (Exception ex) { error.Text = ex.Message; } }); logs.Padding = new Thickness(0); logs.Background = Brushes.Transparent; logs.Foreground = Ui.Muted; info.Children.Add(logs); footerGrid.Children.Add(info);
         var close = Ui.Button("Close", () => CloseRequested?.Invoke()); Grid.SetColumn(close, 1); footerGrid.Children.Add(close);
+        reset = Ui.Button("Reset edits", ResetEdits); reset.Name = "ResetStorageEdits";
+        reset.HorizontalAlignment = HorizontalAlignment.Left; footer.Children.Insert(0, reset);
         apply = Ui.Button("Apply changes", primary: true); apply.Name = "ApplySettings"; apply.Click += async (_, _) => await ApplyAsync(); Grid.SetColumn(apply, 2); footerGrid.Children.Add(apply);
         repairEngine.Name = "RepairRecordingEngine"; recheckEngine.Name = "RecheckRecordingEngine"; engineStatus.Name = "RecordingEngineStatus";
         repairEngine.Click += async (_, _) => await RepairEngineAsync(); recheckEngine.Click += async (_, _) => await ProbeAsync();
@@ -98,6 +107,7 @@ internal sealed class SettingsPanel : UserControl
         captureMode.SelectionChanged += (_, _) => UpdateSourceSummary();
         codec.SelectionChanged += (_, _) => { if (!probing && ProfileEntry.Describe(recorder).CanEdit && codec.SelectedItem is EncoderOption chosen) codecDraft = chosen.Codec; };
         window.SelectionChanged += (_, _) => { if (window.SelectedItem is WindowCaptureChoice choice) { selectedExecutable = choice.Executable; selectedClass = choice.ClassName; UpdateSourceSummary(); } };
+        foreach (var field in new[] { clips, screenshots, cacheFolder, cacheBudget }) field.TextChanged += (_, _) => { if (!loadingStorage) { ClearStorageErrors(); Estimate(); UpdateState(); } };
         UpdateSourceSummary();
         SelectPage(0); UpdateAudioSummary(); UpdateState(); AttachedToVisualTree += async (_, _) => await EnterAsync();
     }
@@ -107,6 +117,10 @@ internal sealed class SettingsPanel : UserControl
         selectedExecutable = config.WindowExecutable; selectedClass = config.WindowClass; captureMode.SelectedIndex = config.CaptureMode == "window" ? 1 : 0;
         codecDraft = config.VideoCodec;
         audio.IsChecked = config.SystemAudio; clips.Text = config.OutputDirectory; screenshots.Text = config.ScreenshotDirectory;
+        loadingStorage = true;
+        cacheFolder.Text = config.ReplayCacheDirectory.Length == 0 ? ReplayCacheLocations.Default(recorder.DataDirectory) : config.ReplayCacheDirectory;
+        cacheBudget.Text = (config.ReplayCacheBudgetBytes / 1_000_000_000m).ToString("0.#########", CultureInfo.CurrentCulture);
+        loadingStorage = false;
         saveShortcut.Load(config.SaveKey, config.SaveModifiers); overlayShortcut.Load(config.OverlayKey, config.OverlayModifiers); screenshotShortcut.Load(config.ScreenshotKey, config.ScreenshotModifiers);
     }
     internal async Task EnterAsync()
@@ -165,29 +179,70 @@ internal sealed class SettingsPanel : UserControl
     StackPanel StoragePage()
     {
         var body = Page("Storage", "Saved clips and screenshots remain separate from the rolling cache.");
-        body.Children.Add(Ui.Label("Clips", 15, null, FontWeight.SemiBold)); body.Children.Add(Ui.Label("MP4 folders follow the selected application in window mode, or the foreground application in monitor mode.", 12, Ui.Muted)); body.Children.Add(Folder(clips));
-        var label = Ui.Label("Screenshots", 15, null, FontWeight.SemiBold); label.Margin = new Thickness(0, 24, 0, 0); body.Children.Add(label); body.Children.Add(Ui.Label("PNG files use a separately configured location.", 12, Ui.Muted)); body.Children.Add(Folder(screenshots));
+        StorageFolder(body, "Recordings", clips);
+        StorageFolder(body, "Screenshots", screenshots);
+        StorageFolder(body, "Replay cache", cacheFolder);
+        var budgetTitle = Ui.Label("Replay cache budget", 14, null, FontWeight.SemiBold); budgetTitle.Margin = new Thickness(0, 18, 0, 8); body.Children.Add(budgetTitle);
+        AutomationProperties.SetName(cacheBudget, "Replay cache budget in GB"); AutomationProperties.SetHelpText(cacheBudget, "Decimal gigabytes. Existing exact byte values are preserved.");
+        var budgetRow = new Grid { ColumnDefinitions = new ColumnDefinitions("180,Auto"), ColumnSpacing = 10 };
+        cacheBudget.Padding = new Thickness(12, 8); cacheBudget.MinHeight = 40; cacheBudget.CornerRadius = new CornerRadius(8); cacheBudget.Background = new SolidColorBrush(Color.Parse("#262626")); cacheBudget.BorderBrush = new SolidColorBrush(Color.Parse("#686868")); budgetRow.Children.Add(cacheBudget);
+        var unit = Ui.Label("GB", 14, Ui.Muted); unit.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(unit, 1); budgetRow.Children.Add(unit); body.Children.Add(budgetRow);
+        budgetError.Name = "ReplayCacheBudgetError"; body.Children.Add(budgetError); cacheUsage.Name = "ReplayCacheUsage"; cacheUsage.Margin = new Thickness(0, 8, 0, 0); body.Children.Add(cacheUsage);
+        body.Children.Add(Ui.Label("Changing folders affects future work. Existing recordings, screenshots and retained cache files stay where they are.", 12, Ui.Muted));
         var engine = Ui.Label("Recording engine", 15, null, FontWeight.SemiBold); engine.Margin = new Thickness(0, 26, 0, 6); body.Children.Add(engine);
         body.Children.Add(Ui.Label("F10 uses only its approved, verified recording engine. Repair replaces missing or rejected engine files and preserves your preferences and saved media. An internet connection may be needed.", 12, Ui.Muted));
         body.Children.Add(engineStatus);
         var engineActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 12, 0, 0) };
         engineActions.Children.Add(recheckEngine); engineActions.Children.Add(repairEngine); body.Children.Add(engineActions); return body;
     }
-    Control Folder(TextBox text)
+    void StorageFolder(StackPanel body, string title, TextBox text)
     {
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8, Margin = new Thickness(0, 12, 0, 0) }; grid.Children.Add(text);
-        var browse = Ui.Button("Browse…"); Grid.SetColumn(browse, 1); grid.Children.Add(browse);
+        var label = Ui.Label(title + " folder", 14, null, FontWeight.SemiBold); label.Margin = new Thickness(0, 16, 0, 8); body.Children.Add(label);
+        AutomationProperties.SetName(text, title + " folder");
+        text.Padding = new Thickness(12, 8, 48, 8); text.MinHeight = 40; text.BorderThickness = new Thickness(0); text.Background = Brushes.Transparent;
+        var grid = new Grid(); grid.Children.Add(text);
+        var icon = new Avalonia.Controls.Shapes.Path { Data = Geometry.Parse("M245,110.64A16,16,0,0,0,232,104H216V88a16,16,0,0,0-16-16H130.67L102.94,51.2a16.14,16.14,0,0,0-9.6-3.2H40A16,16,0,0,0,24,64V208h0a8,8,0,0,0,8,8H211.1a8,8,0,0,0,7.59-5.47l28.49-85.47A16.05,16.05,0,0,0,245,110.64ZM93.34,64,123.2,86.4A8,8,0,0,0,128,88h72v16H69.77a16,16,0,0,0-15.18,10.94L40,158.7V64Z"), Fill = new SolidColorBrush(Color.Parse("#F2F2F2")), Stretch = Stretch.Uniform, Width = 20, Height = 20 };
+        var browse = new Button { Name = text.Name + "Picker", Content = icon, Width = 36, Height = 36, MinHeight = 36, Padding = new Thickness(8), Margin = new Thickness(0, 2, 2, 2), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(0), Background = Brushes.Transparent };
+        AutomationProperties.SetName(browse, "Choose " + title.ToLowerInvariant() + " folder"); ToolTip.SetTip(browse, "Choose " + title.ToLowerInvariant() + " folder"); grid.Children.Add(browse);
+        var message = Ui.Label("", 12, Ui.Warning); message.Name = text.Name + "Error"; folderErrors[text] = message;
+        body.Children.Add(new Border { Child = grid, Background = new SolidColorBrush(Color.Parse("#262626")), BorderBrush = new SolidColorBrush(Color.Parse("#686868")), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8) }); body.Children.Add(message);
         browse.Click += async (_, _) =>
         {
-            if (!ProfileEntry.Describe(recorder).CanEdit) return;
+            if (!ProfileEntry.Describe(recorder).CanEdit || recorder.Applying) return;
             try
             {
-                var provider = TopLevel.GetTopLevel(this).StorageProvider;
-                var selected = await provider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Choose save folder", AllowMultiple = false, SuggestedStartLocation = await provider.TryGetFolderFromPathAsync(text.Text) });
-                if (selected.Count > 0) text.Text = selected[0].TryGetLocalPath() ?? throw new IOException("Choose a local filesystem folder.");
+                string selected = await selectFolder("Choose " + title.ToLowerInvariant() + " folder", text.Text);
+                if (!ProfileEntry.Describe(recorder).CanEdit || recorder.Applying) return;
+                if (selected != null) { ValidateFolder(selected); text.Text = selected; }
             }
-            catch (Exception ex) { error.Text = ex.Message; }
-        }; return grid;
+            catch (Exception ex) { message.Text = ex.Message; }
+        };
+    }
+    async Task<string> PickFolderAsync(string title, string current)
+    {
+        var provider = TopLevel.GetTopLevel(this)?.StorageProvider ?? throw new IOException("Open Settings in a window to choose a folder.");
+        var selected = await provider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = title, AllowMultiple = false, SuggestedStartLocation = await provider.TryGetFolderFromPathAsync(current) });
+        return selected.Count == 0 ? null : selected[0].TryGetLocalPath() ?? throw new IOException("Choose a local filesystem folder.");
+    }
+    static void ValidateFolder(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path)) throw new ArgumentException("Choose an absolute folder path.");
+        Path.GetFullPath(path);
+    }
+    void ClearStorageErrors() { foreach (var message in folderErrors.Values) message.Text = ""; budgetError.Text = ""; }
+    void ResetEdits()
+    {
+        if (!ProfileEntry.Describe(recorder).CanEdit || recorder.Applying) return;
+        loadingStorage = true; LoadDraft(recorder.Config); startup.IsChecked = WindowsStartup.Enabled;
+        codec.SelectedItem = (codec.ItemsSource as IEnumerable<EncoderOption>)?.FirstOrDefault(item => item.Codec == recorder.Config.VideoCodec);
+        ClearStorageErrors(); error.Text = ""; loadingStorage = false; UpdateSourceSummary(); UpdateAudioSummary(); UpdateState();
+    }
+    long StorageBudget()
+    {
+        if (!decimal.TryParse(cacheBudget.Text, NumberStyles.AllowDecimalPoint | NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite, CultureInfo.CurrentCulture, out decimal gb)
+            || gb <= 0 || gb > long.MaxValue / 1_000_000_000m || decimal.Truncate(gb * 1_000_000_000m) != gb * 1_000_000_000m)
+            throw new ArgumentException("Enter a positive budget in GB, with at most nine decimal places.");
+        return checked((long)(gb * 1_000_000_000m));
     }
     public void SelectPage(int index)
     {
@@ -264,6 +319,8 @@ internal sealed class SettingsPanel : UserControl
         recheckEngine.IsEnabled = repairEngine.IsEnabled = entry.CanEdit && !probing && !recorder.Applying && recorder.Phase != CapturePhase.Recovering;
         repairEngine.Content = recorder.Applying ? "Working…" : "Repair recording engine";
         apply.Content = recorder.Applying ? "Applying…" : "Apply changes"; recording.IsEnabled = entry.CanEdit && !recorder.Applying && recorder.ProfileStatus?.RequiresCorrection == false;
+        if (reset != null) reset.IsEnabled = entry.CanEdit && !recorder.Applying;
+        if (cacheUsage != null) cacheUsage.Text = recorder.Metrics?.CacheBytes >= 0 && !string.IsNullOrEmpty(recorder.Metrics.SampledUtc) ? "Cache used: " + (recorder.Metrics.CacheBytes / 1_000_000_000m).ToString("0.###", CultureInfo.CurrentCulture) + " GB" : "Cache used: unavailable";
     }
     void RefreshWindows()
     {
@@ -306,11 +363,18 @@ internal sealed class SettingsPanel : UserControl
         try
         {
             if (probing || codec.SelectedItem is not EncoderOption chosen) throw new InvalidOperationException("Wait for an available GPU encoder.");
+            ClearStorageErrors();
+            foreach (var field in new[] { clips, screenshots, cacheFolder })
+                try { ValidateFolder(field.Text); } catch (Exception ex) { folderErrors[field].Text = ex.Message; throw; }
+            long budget;
+            try { budget = StorageBudget(); } catch (Exception ex) { budgetError.Text = ex.Message; throw; }
             var next = new Settings { CaptureMode = captureMode.SelectedIndex == 1 ? "window" : "monitor", WindowExecutable = selectedExecutable, WindowClass = selectedClass, ReplayMinutes = (int)(minutes.Value ?? 5), BitrateMbps = (int)(bitrate.Value ?? 20), DisplayIndex = (int)(display.Value ?? -1), FramesPerSecond = (int)fps.SelectedItem, VideoCodec = chosen.Codec, SystemAudio = audio.IsChecked == true, OutputDirectory = clips.Text, ScreenshotDirectory = screenshots.Text, SaveKey = saveShortcut.Key, SaveModifiers = saveShortcut.Modifiers, OverlayKey = overlayShortcut.Key, OverlayModifiers = overlayShortcut.Modifiers, ScreenshotKey = screenshotShortcut.Key, ScreenshotModifiers = screenshotShortcut.Modifiers };
-            next.ReplayCacheBudgetBytes = recorder.Config.ReplayCacheBudgetBytes;
+            next.ReplayCacheBudgetBytes = budget;
+            next.ReplayCacheDirectory = string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(cacheFolder.Text)), Path.TrimEndingDirectorySeparator(ReplayCacheLocations.Default(recorder.DataDirectory)), StringComparison.OrdinalIgnoreCase) ? "" : cacheFolder.Text;
+            if ((minutes.Value ?? 5) * 60m * (bitrate.Value ?? 20) * 1_000_000 / 8 > budget) { budgetError.Text = "This budget cannot hold even the selected video history. Increase it or change replay length/bitrate."; throw new ArgumentException(budgetError.Text); }
             next.Validate(); error.Text = ""; CaptureVisibility.Configure(null); await recorder.ApplyAsync(next, startup.IsChecked == true); CaptureVisibility.Configure(recorder.Config, recorder.CaptureModeKnown); Submitted = next; CloseRequested?.Invoke(); return true;
         }
-        catch (Exception ex) { CaptureVisibility.Configure(recorder.Config, recorder.CaptureModeKnown); error.Text = ex.Message; return false; }
+        catch (Exception ex) { CaptureVisibility.Configure(recorder.Config, recorder.CaptureModeKnown); error.Text = ex.Message; if (ex.Message.Contains("budget", StringComparison.OrdinalIgnoreCase)) budgetError.Text = ex.Message; else if (ex.Message.Contains("cache", StringComparison.OrdinalIgnoreCase)) folderErrors[cacheFolder].Text = ex.Message; return false; }
     }
 }
 

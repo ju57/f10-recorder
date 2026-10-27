@@ -278,6 +278,7 @@ namespace F10Recorder
     {
         readonly Settings settings;
         readonly string cache;
+        readonly IDisposable cacheLease;
         readonly object gate = new object();
         readonly Thread worker;
         readonly bool synthetic;
@@ -326,12 +327,18 @@ namespace F10Recorder
         internal ReplayEngine(Settings config, string dataDirectory, bool startPaused, bool syntheticSource, Func<WindowTargetSnapshot> targetProvider)
         {
             windowTarget = targetProvider;
-            settings = config; capture = new CaptureLifecycle(startPaused); synthetic = syntheticSource; cache = Path.Combine(dataDirectory, "buffer");
+            settings = config; capture = new CaptureLifecycle(startPaused); synthetic = syntheticSource; cache = ReplayCacheLocations.Current(config, dataDirectory);
             Directory.CreateDirectory(cache);
+            cacheLease = new TrustedStorage.ProfileDirectoryLease(cache);
+            cache = ((TrustedStorage.ProfileDirectoryLease)cacheLease).DirectoryPath;
             // Old-session and failed-cleanup material still consumes this profile's
             // budget. Startup must not erase it merely to admit new capture.
-            replays = new ReplayCache(cacheDirectory: cache, cacheBudgetBytes: config.ReplayCacheBudgetBytes);
-            worker = new Thread(Run) { IsBackground = true, Name = "Capture supervisor" }; worker.Start();
+            try
+            {
+                replays = new ReplayCache(cacheDirectory: cache, cacheBudgetBytes: config.ReplayCacheBudgetBytes, retainedDirectories: ReplayCacheLocations.Roots(config, dataDirectory));
+                worker = new Thread(Run) { IsBackground = true, Name = "Capture supervisor" }; worker.Start();
+            }
+            catch { cacheLease.Dispose(); throw; }
         }
         public void Restart() => capture.Restart();
         public void Pause(bool value) => capture.Pause(value);
@@ -481,7 +488,8 @@ namespace F10Recorder
             // Keep the worker's protected profile lease until retirement actually
             // completes. Export has its own timeout; elapsed join time is not cleanup.
             worker.Join();
-            replays.CloseAsync().GetAwaiter().GetResult();
+            try { replays.CloseAsync().GetAwaiter().GetResult(); }
+            finally { cacheLease.Dispose(); }
         }
     }
 }

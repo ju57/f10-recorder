@@ -24,9 +24,9 @@ internal sealed class WorkerRecorder : IWindowsRecorder
     }
     // Headless transport checks exercise the production acknowledgement policy
     // without constructing native windows or starting a worker.
-    internal WorkerRecorder(WorkerStatus initial, Func<WorkerRequest, Task<WorkerReply>> transport)
+    internal WorkerRecorder(WorkerStatus initial, Func<WorkerRequest, Task<WorkerReply>> transport, string dataDirectory = null)
     {
-        status = initial; send = transport; post = action => action();
+        status = initial; send = transport; post = action => action(); DataDirectory = dataDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "F10Recorder");
     }
     public Settings Config => status.Config;
     public ProfileStatus ProfileStatus => status.ProfileStatus;

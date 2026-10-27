@@ -139,7 +139,9 @@ internal sealed class RecorderHost : IWindowsRecorder
         if (Saving || ScreenshotInProgress) throw new InvalidOperationException("Wait for the current replay or screenshot to finish saving.");
         if (!ProfileStatus.CanWrite) throw new InvalidOperationException(ProfileStatus.Message);
         next.Validate();
-        if (next.ReplayCacheBudgetBytes < Config.ReplayCacheBudgetBytes) ValidateBudgetReduction(next.ReplayCacheBudgetBytes);
+        using var cacheSelection = ReplayCacheLocations.PinSelection(next);
+        if (next.ReplayCacheBudgetBytes < Config.ReplayCacheBudgetBytes || !string.Equals(ReplayCacheLocations.Current(next, DataDirectory), ReplayCacheLocations.Current(Config, DataDirectory), StringComparison.OrdinalIgnoreCase))
+            ValidateBudgetReduction(next.ReplayCacheBudgetBytes, next);
         // Reject an unavailable/untrusted engine before changing shortcuts or stopping capture.
         // Every subsequent process launch still verifies and leases the executable again.
         MediaDependency.ResolveExecutable();
@@ -157,6 +159,7 @@ internal sealed class RecorderHost : IWindowsRecorder
                 // Current UI editors know represented fields only. Preserve opaque future
                 // preferences/device identities rather than dropping them on correction.
                 next.AdditionalPreferences = new(profile.Settings.AdditionalPreferences);
+                ReplayCacheLocations.PreservePrevious(next, Config, DataDirectory);
                 if (ProfileStatus.ActivationRequired) profile.Commit(next, paused: profile.State.Paused, userStopped: profile.State.UserStopped, activationRequired: true);
                 else next.Save(settingsPath);
                 settingsCommitted = true;
@@ -177,25 +180,14 @@ internal sealed class RecorderHost : IWindowsRecorder
         }
         finally { Applying = false; Register(Config); Changed?.Invoke(); }
     }
-    void ValidateBudgetReduction(long proposedBudgetBytes)
+    void ValidateBudgetReduction(long proposedBudgetBytes, Settings next)
     {
         try
         {
-            if (engine != null) { engine.ValidateReplayCacheBudget(proposedBudgetBytes); return; }
-            string cache = Path.Combine(DataDirectory, "buffer");
-            bool missing = false;
-            try { File.GetAttributes(cache); }
-            catch (FileNotFoundException) { missing = true; }
-            catch (DirectoryNotFoundException) { missing = true; }
-            if (missing)
-            {
-                // A readable parent without the entry establishes absence. A
-                // hidden/changed entry or denied observation is not an empty cache.
-                if (Directory.EnumerateFileSystemEntries(DataDirectory).Any(p => string.Equals(Path.GetFileName(p), "buffer", StringComparison.OrdinalIgnoreCase)))
-                    throw new IOException("Replay cache changed or could not be observed.");
-                return;
-            }
-            using var retained = new ReplayCache(cacheDirectory: cache);
+            if (engine != null) engine.ValidateReplayCacheBudget(proposedBudgetBytes);
+            // Opaque history is worker-owned; a client supplies only the newly
+            // selected represented folder, never extra roots to inspect.
+            using var retained = new ReplayCache(retainedDirectories: ReplayCacheLocations.Roots(Config, DataDirectory).Append(ReplayCacheLocations.Current(next, DataDirectory)));
             retained.ValidateBudget(proposedBudgetBytes);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or OverflowException)

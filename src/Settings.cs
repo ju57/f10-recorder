@@ -14,6 +14,8 @@ namespace F10Recorder
         [JsonExtensionData] public Dictionary<string, JsonElement> AdditionalPreferences = new Dictionary<string, JsonElement>();
         public int ReplayMinutes = 5;
         public long ReplayCacheBudgetBytes = 10_000_000_000;
+        // Empty preserves the profile's historical buffer directory.
+        public string ReplayCacheDirectory = "";
         public int FramesPerSecond = 60;
         public int BitrateMbps = 20;
         public string VideoCodec = "h264_nvenc";
@@ -41,6 +43,7 @@ namespace F10Recorder
             if (ScreenshotKey == SaveKey && ScreenshotModifiers == SaveModifiers || ScreenshotKey == OverlayKey && ScreenshotModifiers == OverlayModifiers) throw new ArgumentException("Use different shortcuts for screenshots, replays, and the overlay.");
             OutputDirectory = Path.GetFullPath(OutputDirectory);
             ScreenshotDirectory = Path.GetFullPath(ScreenshotDirectory);
+            if (ReplayCacheDirectory.Length > 0) ReplayCacheDirectory = Path.GetFullPath(ReplayCacheDirectory);
         }
         internal static readonly FieldInfo[] StoredFields = typeof(Settings).GetFields(BindingFlags.Instance | BindingFlags.Public).Where(f => f.Name != nameof(AdditionalPreferences)).ToArray();
         internal string FieldIssue(string field)
@@ -50,6 +53,10 @@ namespace F10Recorder
                 case nameof(SchemaVersion): return SchemaVersion == 1 ? null : "Unsupported settings schema version.";
                 case nameof(ReplayMinutes): return ReplayMinutes >= 1 && ReplayMinutes <= 30 ? null : "Replay length must be 1–30 minutes.";
                 case nameof(ReplayCacheBudgetBytes): return ReplayCacheBudgetBytes > 0 ? null : "Replay-cache budget must be a positive number of decimal bytes.";
+                case nameof(ReplayCacheDirectory):
+                    try { if (ReplayCacheDirectory != null && (ReplayCacheDirectory.Length == 0 || !string.IsNullOrWhiteSpace(ReplayCacheDirectory) && Path.IsPathFullyQualified(ReplayCacheDirectory))) { if (ReplayCacheDirectory.Length > 0) Path.GetFullPath(ReplayCacheDirectory); return null; } }
+                    catch (Exception ex) when (ex is ArgumentException || ex is NotSupportedException || ex is PathTooLongException) { }
+                    return "Choose an absolute replay-cache folder.";
                 case nameof(FramesPerSecond): return SupportedFrameRates.Contains(FramesPerSecond) ? null : "Choose 24, 30, 60, or 120 FPS.";
                 case nameof(BitrateMbps): return BitrateMbps >= 5 && BitrateMbps <= 100 ? null : "Bitrate must be 5–100 Mbps.";
                 case nameof(VideoCodec): return VideoCodec == "h264_nvenc" || VideoCodec == "hevc_nvenc" || VideoCodec == "av1_nvenc" ? null : "Choose H.264, HEVC, or AV1.";

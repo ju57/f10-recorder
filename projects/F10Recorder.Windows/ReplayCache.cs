@@ -65,7 +65,7 @@ internal sealed class ReplayCache : IDisposable
     readonly TimeProvider time;
     readonly Func<Task> waitForSegment;
     readonly Action<string> diagnostic;
-    readonly string cacheDirectory;
+    readonly string[] cacheDirectories;
     readonly long cacheBudgetBytes;
     Dictionary<string, long> pendingAllocations = new(StringComparer.OrdinalIgnoreCase);
     ReplayVolumeCapacity pendingTarget;
@@ -74,13 +74,14 @@ internal sealed class ReplayCache : IDisposable
     Task close;
 
     internal ReplayCache(ReplayFiles files = null, TimeProvider time = null,
-        Func<Task> waitForSegment = null, Action<string> diagnostic = null, string cacheDirectory = null, long cacheBudgetBytes = 10_000_000_000)
+        Func<Task> waitForSegment = null, Action<string> diagnostic = null, string cacheDirectory = null, long cacheBudgetBytes = 10_000_000_000, IEnumerable<string> retainedDirectories = null)
     {
         this.files = files ?? new ReplayFiles();
         this.time = time ?? TimeProvider.System;
         this.waitForSegment = waitForSegment ?? (() => Task.Delay(TimeSpan.FromMilliseconds(100), this.time));
         this.diagnostic = diagnostic ?? Log.Write;
-        this.cacheDirectory = cacheDirectory == null ? null : Path.GetFullPath(cacheDirectory);
+        cacheDirectories = cacheDirectory == null && retainedDirectories == null ? null
+            : (cacheDirectory == null ? Enumerable.Empty<string>() : new[] { cacheDirectory }).Concat(retainedDirectories ?? []).Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         if (cacheBudgetBytes <= 0) throw new ArgumentException("Replay-cache budget must be positive.");
         this.cacheBudgetBytes = cacheBudgetBytes;
     }
@@ -110,8 +111,8 @@ internal sealed class ReplayCache : IDisposable
     }
     internal bool IsSaving { get { lock (gate) return saving; } }
     static bool StorageFailure(Exception ex) => ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or OverflowException;
-    Dictionary<string, ReplayFileExtent> Inventory() => ReplayStorage.Inventory(cacheDirectory == null
-        ? sessions.Values.Select(s => s.Info.Directory).Where(Directory.Exists) : [cacheDirectory], files);
+    Dictionary<string, ReplayFileExtent> Inventory() => ReplayStorage.Inventory(cacheDirectories == null
+        ? sessions.Values.Select(s => s.Info.Directory).Where(Directory.Exists) : ReplayCacheLocations.Existing(cacheDirectories), files);
 
     internal void ValidateBudget(long proposedBudgetBytes)
     {
