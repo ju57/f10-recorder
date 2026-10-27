@@ -177,6 +177,8 @@ internal sealed class PilotStorageObservation : IDisposable
             var binding = new PilotStorageBinding(supplied.PlanSha256, supplied.SourceManifestSha256, supplied.Cutoff);
             ValidateBinding(binding);
             Require(supplied.Root != null && Path.IsPathFullyQualified(supplied.Root), "Request root must be the exact absolute preview destination.");
+            Require(string.Equals(supplied.Root, Path.GetFullPath(supplied.Root), StringComparison.Ordinal)
+                && !Path.EndsInDirectorySeparator(supplied.Root), "Use a canonical absolute Windows root without a trailing separator before generating the preview.");
             using var session = Create(supplied.Root);
             foreach (var fixture in new[] { ("first.txt", "first\n"), ("second.txt", "second\n") })
                 using (var file = new StreamWriter(new FileStream(Path.Combine(session.Root, fixture.Item1), FileMode.CreateNew, FileAccess.Write, FileShare.Read))) file.Write(fixture.Item2);

@@ -213,6 +213,14 @@ internal static class PilotStorageObservationChecks
             using var value = JsonDocument.Parse(output.Json);
             Require(output.Code == 2 && !Directory.Exists(target) && !value.RootElement.GetProperty("native_storage_complete").GetBoolean(), "Forged native label initialized a root or was accepted.");
         });
+        Check("noncanonical-request-root-rejects-before-destination-creation", () =>
+        {
+            string target = Path.Combine(root, "noncanonical-target"), request = Path.Combine(root, "noncanonical-request.json");
+            File.WriteAllText(request, JsonSerializer.Serialize(new { root = target.Replace('\\', '/'), plan_sha256 = binding.PlanSha256, source_manifest_sha256 = binding.SourceManifestSha256, cutoff = binding.Cutoff }));
+            var output = Command("--pilot-storage-observe", request);
+            using var result = JsonDocument.Parse(output.Json);
+            Require(output.Code == 2 && !Directory.Exists(target) && result.RootElement.GetProperty("kind").GetString() == "storage-input-rejected", "A noncanonical destination was normalized and created instead of rejected.");
+        });
         var report = new { result = failed == 0 ? "passed" : "failed", checks, engine = false, gpu = false, nativeUi = false };
         string json = PilotStorageObservation.SerializeBounded(report);
         File.WriteAllText(Path.Combine(root, "verification.json"), json);

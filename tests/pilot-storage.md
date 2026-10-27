@@ -13,7 +13,10 @@ authenticate source media, or implement an engine/process lifecycle adapter.
 Default/explicit preview returns the exact proposed host/assembly/arguments and
 effects without stat/hash/resolve/build/mkdir or process/native observation.
 Actual execution requires `-Observe` or `-Checks` and `-NoBuild`. Supply the
-absolute pinned SDK host and this checkout's task-built verification assembly.
+absolute pinned SDK host, this checkout's explicit task-built verification
+assembly and its expected SHA-256 from the reviewed build receipt. There is no
+default assembly fallback. Missing/mismatched build identity rejects before any
+helper/PID/launch artifacts. Preview reports missing identity without hashing.
 No PATH/engine discovery, provisioning or automatic build happens in the wrapper.
 
 ## Build and checks
@@ -26,14 +29,17 @@ $build = Join-Path $PWD 'artifacts/pilot-storage-build'
 & $sdk restore projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj --locked-mode --artifacts-path $build -p:NuGetAudit=true -p:NuGetAuditMode=all
 & $sdk build projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-restore --artifacts-path $build -m:1 --disable-build-servers -p:UseSharedCompilation=false
 $assembly = Join-Path $build 'bin/F10Recorder.WorkerChecks/release/F10Recorder.WorkerChecks.dll'
-./tests/pilot-storage.ps1 -Plan -Checks -NoBuild -Sdk $sdk -AssemblyPath $assembly
-./tests/pilot-storage.ps1 -Checks -NoBuild -Sdk $sdk -AssemblyPath $assembly
+$assemblySha256 = (Get-FileHash -LiteralPath $assembly -Algorithm SHA256).Hash
+./tests/pilot-storage-launch-checks.ps1
+./tests/pilot-storage.ps1 -Plan -Checks -NoBuild -Sdk $sdk -AssemblyPath $assembly -ExpectedAssemblySha256 $assemblySha256
+./tests/pilot-storage.ps1 -Checks -NoBuild -Sdk $sdk -AssemblyPath $assembly -ExpectedAssemblySha256 $assemblySha256
 ```
 
 Set the normal SDK root, CLI home and package-cache variables consistently with
 the existing local SDK/cache. No publish, RID duplication, lock update or package
 provisioning is part of this route. The Windows CI job invokes the same checks
-against its already-built WorkerChecks assembly and propagates the exit code.
+against its just-built explicit WorkerChecks assembly/hash, after the inert
+launch-guard checks, and propagates both exit codes.
 No hosted result is implied by a local run.
 
 The wrapper starts only that DLL's early storage entry point through dotnet,
@@ -44,6 +50,15 @@ stop/verify the exact owned process; combined raw output is capped at 128 KiB.
 There is no child tree/other-PID cleanup. Timeout, truncation or unconfirmed exit
 cannot be reported as a successful observation. Only complete normally exited
 child JSON is emitted as success. The helper itself spawns no processes.
+
+The assembly is opened read-only, hashed and held against ordinary byte
+write/delete for the invocation. Expected/actual matching hashes are retained in
+the launch receipt. This binds a task build; it does not establish source/engine
+trust or authorize arbitrary native/media work. `pilot-storage-launch-checks.ps1`
+calls the wrapper in-process only: missing identity and a mismatched tiny literal
+DLL sentinel reject without helper/launch artifacts. A held regular-file SDK
+ancestor makes even the pre-fix negative control unable to start a host or load
+any DLL. Rejections/sentinels are retained; the sentinel is never executed.
 
 **Overall effects include writes:** initializer creates a fresh root/marker;
 checks/Observe create fixed tiny nonmedia files; checks persist reports; wrapper
@@ -108,7 +123,7 @@ only these fields (unknown properties are rejected):
 }
 ```
 
-Generate a preparation preview using that exact absolute root before creating
+Generate a preparation preview using that exact canonical absolute Windows root before creating
 the request. Hashes must be 64 hex characters; source digest/cutoff/plan remain
 opaque supplied bindings. The command atomically creates the root, marker and
 two fixed literal text files (`first\n`, `second\n`), observes them and prints the
@@ -118,9 +133,15 @@ inferred from a hash-shaped string. Every `--pilot-storage*` option, including
 bad counts/unknown routes, stays in the storage-only dispatcher and cannot fall
 through to the general worker/UI/capture entry point.
 
+Canonicalize the destination with `[IO.Path]::GetFullPath(...)` **before** making
+the preview and request, and use no trailing directory separator. Unsupported
+forms such as `C:/...` reject before root/fixture creation instead of silently
+changing the destination to `C:\...`. A canonical native positive remains valid;
+the rejection protects the preview's exact string binding.
+
 ```powershell
-./tests/pilot-storage.ps1 -Plan -Observe -NoBuild -Sdk $sdk -AssemblyPath $assembly -DataPath artifacts/request.json
-./tests/pilot-storage.ps1 -Observe -NoBuild -Sdk $sdk -AssemblyPath $assembly -DataPath artifacts/request.json > artifacts/native-storage.json
+./tests/pilot-storage.ps1 -Plan -Observe -NoBuild -Sdk $sdk -AssemblyPath $assembly -ExpectedAssemblySha256 $assemblySha256 -DataPath artifacts/request.json
+./tests/pilot-storage.ps1 -Observe -NoBuild -Sdk $sdk -AssemblyPath $assembly -ExpectedAssemblySha256 $assemblySha256 -DataPath artifacts/request.json > artifacts/native-storage.json
 python -B tests/pilot_collector.py --assess artifacts/native-storage.json --root 'THE SAME ABSOLUTE ROOT'
 ```
 
@@ -143,10 +164,10 @@ to a changed supplied contract while converting it to preparation JSON.
 
 | Criteria | Implementation/controlled checks and remaining limits |
 | --- | --- |
-| N01 | Inert default/explicit preview; separate explicit native route and fail-closed dispatcher. |
+| N01/N01b | Inert preview; explicit path/expected hash required before launch, mismatches reject without helper/PID; separate native route and fail-closed dispatcher. |
 | N02 | Real fresh-root volume/unit/free and literal EOF/byte preservation, including marker allocation. |
 | N03 | Separate native/controlled/supplied domains; forged request labels reject; Python flags stay false. |
-| N04 | Atomic creator, anchors, root identity, immutable supplied/native destination bindings and snapshot conversion. |
+| N04/N04b | Atomic creator, anchors, root identity, immutable bindings/snapshot conversion; noncanonical request roots reject before initialization. |
 | N05 | Known-zero vs unavailable; missing/regular-file ancestry, invalid unit and lexical aliases reject. Physical permission/reparse/mount changes deferred. |
 | N06 | Positive two-file control then second-file denial/change retains partial provenance with null total. |
 | N07 | Controlled shared extents count once; allocation/EOF contradictions reject. No actual links created. |

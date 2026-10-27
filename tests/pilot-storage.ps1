@@ -1,30 +1,55 @@
 param(
     [switch]$Plan, [switch]$Observe, [switch]$Checks, [switch]$NoBuild,
-    [string]$Sdk, [string]$AssemblyPath, [string]$DataPath
+    [string]$Sdk, [string]$AssemblyPath, [string]$ExpectedAssemblySha256, [string]$DataPath
 )
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path -Parent $PSScriptRoot
 if (-not $Sdk) { $Sdk = Join-Path $repository '.tools/dotnet/dotnet.exe' }
-if (-not $AssemblyPath) { $AssemblyPath = Join-Path $repository 'projects/F10Recorder.WorkerChecks/bin/Release/net10.0-windows/F10Recorder.WorkerChecks.dll' }
 if (-not $DataPath) { $DataPath = Join-Path $repository ('artifacts/pilot-storage-' + [Guid]::NewGuid().ToString('N')) }
 if ($Observe -and $Checks) { throw 'Choose one storage entry point.' }
 $entry = if ($Observe) { '--pilot-storage-observe' } else { '--pilot-storage-checks' }
+$missingIdentity=@()
+if (-not $PSBoundParameters.ContainsKey('AssemblyPath') -or [string]::IsNullOrWhiteSpace($AssemblyPath)) { $missingIdentity+='AssemblyPath' }
+if (-not $PSBoundParameters.ContainsKey('ExpectedAssemblySha256') -or $ExpectedAssemblySha256 -notmatch '^[0-9A-Fa-f]{64}$') { $missingIdentity+='ExpectedAssemblySha256' }
+$assemblyArgument=if ($AssemblyPath) { $AssemblyPath } else { '<explicit-task-built-assembly-required>' }
 $launch = [ordered]@{
-    Executable=$Sdk; Arguments=@($AssemblyPath,$entry,$DataPath)
+    Executable=$Sdk; Arguments=@($assemblyArgument,$entry,$DataPath)
+    ExpectedAssemblySha256=$ExpectedAssemblySha256; MissingExecutionRequirements=$missingIdentity
     WorkingDirectory=$repository; TimeoutSeconds=60; MaximumCombinedOutputBytes=131072
     EffectsOnExecution=[ordered]@{
         FreshRootAndMarkerWrites=$true; TinyNonmediaFixtureWrites=$true; StorageMetadataReads=$true
+        VerificationAssemblyHashRead=$true
         ReportWrites=$true; Recorder=$false; Ui=$false; Engine=$false; Gpu=$false; Capture=$false
         Startup=$false; VendorChanges=$false; NestedChild=$false
     }
 }
 if ($Plan -or (-not $Observe -and -not $Checks)) { return [pscustomobject]$launch }
+$actualAssemblySha256=$null
+function RejectIdentity([string]$Message) {
+    $expected=if ($ExpectedAssemblySha256 -match '^[0-9A-Fa-f]{64}$') { $ExpectedAssemblySha256 } else { $null }
+    [pscustomobject]@{kind='storage-launch-rejected';error=$Message;helper_started=$false;owned_pid=$null;expected_assembly_sha256=$expected;actual_assembly_sha256=$actualAssemblySha256}|ConvertTo-Json
+    exit 2
+}
+if ($missingIdentity.Count) { RejectIdentity ('Explicit reviewed build identity required: '+($missingIdentity -join ', ')) }
 if (-not $NoBuild) { throw 'Build explicitly with the pinned SDK, then use -NoBuild. This route never provisions or builds.' }
 if (-not [IO.Path]::IsPathFullyQualified($Sdk) -or [IO.Path]::GetFileName($Sdk) -notin @('dotnet.exe','dotnet')) { throw 'Supply the explicit pinned dotnet host path.' }
 if (-not [IO.Path]::IsPathFullyQualified($AssemblyPath)) { throw 'Supply the absolute task-built assembly path.' }
 if ([IO.Path]::GetFileName($AssemblyPath) -ne 'F10Recorder.WorkerChecks.dll') { throw 'Only the task-built storage verification assembly is supported.' }
 $assemblyRelative = [IO.Path]::GetRelativePath($repository, [IO.Path]::GetFullPath($AssemblyPath))
 if ([IO.Path]::IsPathRooted($assemblyRelative) -or $assemblyRelative -eq '..' -or $assemblyRelative.StartsWith('..'+[IO.Path]::DirectorySeparatorChar)) { throw 'Verification assembly must be inside this checkout.' }
+$assemblyLease=$null
+try {
+    $assemblyLease=[IO.File]::Open($AssemblyPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    $hasher=[Security.Cryptography.SHA256]::Create()
+    try { $actualAssemblySha256=[Convert]::ToHexString($hasher.ComputeHash($assemblyLease)) } finally { $hasher.Dispose() }
+} catch {
+    if ($assemblyLease) { $assemblyLease.Dispose() }
+    RejectIdentity 'The explicit verification assembly could not be read and hashed.'
+}
+if (-not $actualAssemblySha256.Equals($ExpectedAssemblySha256,[StringComparison]::OrdinalIgnoreCase)) {
+    $assemblyLease.Dispose()
+    RejectIdentity 'Verification assembly SHA256 differs from the expected reviewed build.'
+}
 $receiptBase = Join-Path $repository ('artifacts/pilot-storage-launch-' + [Guid]::NewGuid().ToString('N'))
 $stdoutPath = $receiptBase+'.stdout.json'
 $stderrPath = $receiptBase+'.stderr.txt'
@@ -74,11 +99,12 @@ finally {
         try { $process.Kill(); $cleanupConfirmed=$process.WaitForExit(5000) } catch { $cleanupConfirmed=$false }
     }
     if ($outputFiles.Count -eq 3) {
-        $receipt=[ordered]@{Arguments=$launch.Arguments;Executable=$Sdk;OwnedPid=$ownedPid;StartedUtc=$startedUtc;ExitCode=$exitCode;CleanupConfirmed=$cleanupConfirmed;Error=$reason;Stdout=$stdoutPath;Stderr=$stderrPath;Effects=$launch.EffectsOnExecution}
+        $receipt=[ordered]@{Arguments=$launch.Arguments;Executable=$Sdk;ExpectedAssemblySha256=$ExpectedAssemblySha256;ActualAssemblySha256=$actualAssemblySha256;OwnedPid=$ownedPid;StartedUtc=$startedUtc;ExitCode=$exitCode;CleanupConfirmed=$cleanupConfirmed;Error=$reason;Stdout=$stdoutPath;Stderr=$stderrPath;Effects=$launch.EffectsOnExecution}
         $bytes=[Text.Encoding]::UTF8.GetBytes(($receipt|ConvertTo-Json -Depth 5))
         $outputFiles[2].Write($bytes,0,$bytes.Length)
     }
     foreach ($file in $outputFiles) { $file.Dispose() }
+    $assemblyLease.Dispose()
     $process.Dispose()
 }
 if ($reason -or -not $cleanupConfirmed) {
