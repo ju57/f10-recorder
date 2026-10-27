@@ -106,6 +106,42 @@ internal static class StorageControlsChecks
                     Require(Find<TextBox>(panel, "ReplayCacheBudgetGB").Text == GB(12_345_678_901), "Custom byte budget was rounded on entry.");
                     Require(Find<TextBox>(panel, "ReplayCacheDirectory").Text == oldRoot, "Historical cache location changed.");
                     checks.Add("defaults-and-exact-custom-budget");
+                    // Exercise the production Settings content against a short logical work
+                    // area, rather than rendering only the Storage page in isolation.
+                    var layoutPanel = new SettingsPanel(client); layoutPanel.SelectPage(3);
+                    var layoutWindow = new Window { Content = layoutPanel, ShowInTaskbar = false };
+                    var layoutSamples = new List<object>(); report["layout"] = layoutSamples;
+                    try
+                    {
+                        foreach (var size in new[] { new Size(900, 520), new Size(780, 520), new Size(900, 820) })
+                        {
+                            Prepare(layoutWindow); layoutPanel.Measure(size); layoutPanel.Arrange(new Rect(size));
+                            layoutSamples.Add(new { requested = size.ToString(), panel = layoutPanel.Bounds.ToString() });
+                            var footerActions = layoutPanel.GetLogicalDescendants().OfType<Button>().Where(b => b.Name is "ApplySettings" or "ResetStorageEdits" || Equals(b.Content, "Close")).ToArray();
+                            Require(footerActions.Length == 3, "Settings footer actions are missing.");
+                            foreach (var action in footerActions)
+                            {
+                                var point = action.TranslatePoint(default, layoutPanel);
+                                Require(point.HasValue && action.Bounds.Height >= 36 && point.Value.Y >= 0 && point.Value.Y + action.Bounds.Height <= size.Height + 1,
+                                    "Settings footer is clipped in the available logical work area: " + action.Name);
+                            }
+                            layoutPanel.SelectPage(0); layoutPanel.SelectPage(3);
+                            Require(Find<TextBox>(layoutPanel, "ReplayCacheBudgetGB").Text == GB(12_345_678_901), "Navigation discarded the Storage draft.");
+                            foreach (string field in new[] { "OutputDirectory", "ScreenshotDirectory", "ReplayCacheDirectory", "ReplayCacheBudgetGB" })
+                            {
+                                var input = Find<TextBox>(layoutPanel, field);
+                                var viewport = input.GetVisualAncestors().OfType<ScrollViewer>().First();
+                                // The form needs room for a full control. Hidden
+                                // fixtures do not establish native keyboard scrolling.
+                                layoutSamples.Add(new { field, height = input.Bounds.Height, viewport = viewport.Viewport.ToString() });
+                                Require(input.Bounds.Height >= 36 && viewport.Viewport.Height >= input.Bounds.Height,
+                                    "Short work area collapses the Storage field viewport: " + field);
+                            }
+                        }
+                        Require(!layoutWindow.IsVisible, "Layout fixture must never be shown.");
+                        checks.Add("short-work-area-keeps-footer-and-scrollable-storage");
+                    }
+                    finally { layoutWindow.Content = null; layoutWindow.Close(); }
                     foreach (string field in new[] { "OutputDirectory", "ScreenshotDirectory", "ReplayCacheDirectory" })
                     {
                         var text = Find<TextBox>(panel, field); var button = Find<Button>(panel, field + "Picker");
