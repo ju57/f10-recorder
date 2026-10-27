@@ -5,6 +5,7 @@
 - Read [README.md](README.md) for product scope, architecture, setup and release requirements. Check the working tree before editing and preserve unrelated changes.
 - Keep this file focused on durable working agreements. Put investigation status, measurements and next steps in the relevant reports; verify current code and runtime state before reusing historical findings.
 - Use a feature branch for implementation and experiments. Follow the README's pull-request workflow. A local commit does not authorize pushing, merging, installing or publishing.
+- Measure delivery by completed acceptance criteria. Before scoping implementation, starting an investigation or preparing a handoff, read [the delivery focus rules](docs/agents/parallel-delivery.md#keep-delivery-focused-on-acceptance). They define completion, supporting work, investigation limits, replanning and local evidence handoffs.
 
 ## Architecture and implementation
 

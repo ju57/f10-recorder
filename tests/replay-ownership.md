@@ -14,10 +14,12 @@ impossibility check, not a calibrated sufficient audio/container/burst estimate.
 Run CoreChecks with `<output> --storage-budget-only` for the focused preference
 cases. The full CoreChecks route also runs these cases and creates larger clock
 fixtures; include those outputs in the experiment's artifact budget.
-The existing Settings editor preserves the loaded custom budget when submitting
+The Settings editor preserves the loaded custom budget when submitting
 an unrelated edit. Its offscreen correction/Apply check submits a literal 30 GB
 budget while correcting FPS and verifies the acknowledged value, without adding
-storage controls or activating capture. See the existing Desktop-only route in
+storage controls or activating capture in that historical test. The separate
+[Storage controls](storage-controls.md) route now verifies the editable budget,
+three inset pickers and cache-location persistence. See the existing Desktop-only route in
 [profile migration checks](profile-migration.md); retained worker snapshots are
 historical inputs, not a new actual-worker persistence trial.
 

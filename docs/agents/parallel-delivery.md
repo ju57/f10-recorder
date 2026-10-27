@@ -4,6 +4,48 @@ Use this protocol when delegating implementation tickets or running parallel
 delivery work. GitHub Issues remain the source of scope and dependencies.
 Existing task authorization controls publication, live testing and merging.
 
+## Keep delivery focused on acceptance
+
+These rules apply to serial and parallel delivery. The coordinating agent owns
+the route from the original criteria to acceptance, including supporting work.
+
+1. **Define completion before starting.** Name the exact original criterion,
+   observable behavior, required checks and remaining manual acceptance. Keep
+   the original requirements intact. A PR or passing test suite is an intermediate
+   result; completion requires the criterion's evidence and required acceptance.
+2. **Deliver supporting work with the behavior it enables.** Keep necessary
+   helpers, adapters, tests and prefactoring inside that delivery. Before splitting
+   out a PR, record the concrete reason, such as independently useful behavior or
+   a safer staged migration, and the remaining route to the original criterion.
+   Size alone does not justify a chain of prerequisite PRs.
+3. **Bound investigations by a decision.** Before starting, record the question,
+   time and resource limits, expected evidence and the implementation decision
+   that evidence will enable. Stop when the question is answered or a limit is
+   reached. Report the result, uncertainty and options before extending the
+   investigation or building further supporting infrastructure.
+4. **Replan when prerequisites multiply.** If one prerequisite reveals another,
+   reassess the whole route before expanding dependent work. Record what remains,
+   available simpler routes and the recommended next action. Obtain a user
+   decision when the new route changes agreed scope, resource limits or action
+   authorization. Independent work within the existing scope may continue.
+5. **Report progress against criteria.** Each handoff and PR summary states the
+   delivered behavior, evidence, exact acceptance gaps, and next action and owner.
+   Distinguish implementation, technical verification and required user/native
+   acceptance. Keep criteria pending until their required acceptance is recorded;
+   test counts and merged PRs alone do not establish completion. Follow the
+   [issue closeout workflow](issue-tracker.md#pr-and-issue-closeout) when publication
+   or closeout is authorized.
+
+Keep one feature handoff in its ignored evidence directory, with role-specific
+briefs and links to earlier snapshots. Preserve the tested patch identity,
+failures, verification limits and supporting evidence locally. Put portable
+behavior and test instructions in the appropriate source documentation. When
+publication is authorized, derive a concise PR/issue acceptance summary from the
+handoff; machine-specific reports and raw evidence remain local. Later candidate
+or merge updates get a linked snapshot or closeout record so earlier evidence
+keeps its original identity. Handoff preparation authorizes no commit, push,
+merge, installation or recording.
+
 ## Admit a bounded slice
 
 The orchestrator pins the issue/spec revision, current main commit, owned files

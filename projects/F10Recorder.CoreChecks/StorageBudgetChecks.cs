@@ -54,6 +54,17 @@ internal static class StorageBudgetChecks
             || !Directory.GetFiles(custom, "settings.json.original-*").Any(p => File.ReadAllBytes(p).SequenceEqual(customOriginal)))
             throw new Exception("P02: unrelated preference edits must preserve custom budget, exact originals, opaque siblings and paused/stopped intent.");
         new Settings { ReplayCacheBudgetBytes = long.MaxValue }.Validate();
+        string locationPath = Path.Combine(root, "cache-location.json");
+        var location = new Settings { ReplayCacheDirectory = Path.GetFullPath(Path.Combine(root, "Chosen cache")), ReplayCacheBudgetBytes = 12_345_678_901 };
+        location.Save(locationPath);
+        var locationAgain = Settings.Load(locationPath);
+        if (locationAgain.ReplayCacheDirectory != location.ReplayCacheDirectory || locationAgain.ReplayCacheBudgetBytes != 12_345_678_901)
+            throw new Exception("Storage location and exact custom budget must round-trip.");
+        File.WriteAllText(locationPath, "{\"ReplayCacheDirectory\":null,\"SystemAudio\":false}");
+        byte[] invalidLocation = File.ReadAllBytes(locationPath);
+        var invalidProfile = ProfileDocuments.ReadSettings(locationPath);
+        if (invalidProfile.Issues.Count == 0 || invalidProfile.Value.SystemAudio || !File.ReadAllBytes(locationPath).SequenceEqual(invalidLocation))
+            throw new Exception("Invalid cache location must preserve originals and valid siblings.");
         Console.WriteLine("Passed: explicit budget correction, high-bitrate video floor, custom-budget and original-intent preservation (P01-P04).");
     }
 }

@@ -1,5 +1,15 @@
 # Verification launch effects
 
+`MigrationTests <fresh-root> --storage-controls-ui` runs the focused Storage
+editor checks using controlled transport and real profile persistence. It renders
+software-only controls through a never-shown ordinary Window, with no capture
+exclusion, engine/probe/GPU, recording, startup or installed-app changes. Supplying
+the explicit WorkerChecks executable and retained private engine root selects the
+separate paused-worker named-pipe integration route, including task-owned hidden
+Ctrl+Alt+Shift+F4-F6 shortcuts and read-only engine verification. Review
+[Storage controls](storage-controls.md) for parameters, effects and limits before
+running either route. Neither route opens the native folder dialog during tests.
+
 Preview the actual launch plan before building, creating output directories or
 starting a process:
 

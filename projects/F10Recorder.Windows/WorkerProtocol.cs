@@ -92,7 +92,7 @@ internal sealed class WorkerProtocolMismatchException(string message) : IOExcept
 
 internal static class WorkerProtocol
 {
-    internal const int Version = 5;
+    internal const int Version = 6;
     internal static bool WasStopped(string data)
     {
         try { var profile = RecordingProfile.Load(data); return profile.State.UserStopped || !profile.Status.CanWrite; }
