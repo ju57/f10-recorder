@@ -18,7 +18,7 @@ internal sealed class SettingsWindow : Window
     IntPtr previousWindow;
     public SettingsWindow(IWindowsRecorder recorder)
     {
-        Title = "F10 Recorder"; Width = 900; Height = 820; MinWidth = 780; MinHeight = 620;
+        Title = "F10 Recorder"; Width = 900; Height = 820; MinWidth = 780; MinHeight = 420;
         Background = Ui.Background; Icon = Ui.TrayIcon(true); WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Panel = new SettingsPanel(recorder); Panel.CloseRequested = Dismiss; Content = Panel;
         Overlay = new OverlayPanel(recorder, Dismiss, () => { Dismiss(); ShowSettings(); });

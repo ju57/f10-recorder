@@ -59,7 +59,7 @@ internal sealed class SettingsPanel : UserControl
         LoadDraft(ProfileEntry.HasUsableConfig(session.Config) ? session.Config : new Settings()); startup.IsChecked = WindowsStartup.Enabled;
         estimate.Name = "RollingCacheEstimate"; audioFormat.Name = "AudioFormat"; playbackDevice.Name = "PlaybackDevicePolicy";
         ToolTip.SetTip(estimate, "Estimate from the selected duration and bitrates, including 10 seconds of cache headroom. Actual disk usage varies.");
-        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Margin = new Thickness(28, 24) };
+        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto"), Margin = new Thickness(28, 24) };
         var heading = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 0, 0, 22) };
         var title = new StackPanel { Spacing = 5 }; title.Children.Add(Ui.Label("F10 Recorder", 27, null, FontWeight.SemiBold)); title.Children.Add(Ui.Label("Keep the moment. Save it when it matters.", 13, Ui.Muted)); heading.Children.Add(title);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
@@ -86,10 +86,13 @@ internal sealed class SettingsPanel : UserControl
             button.MinHeight = 42; button.Padding = new Thickness(18, 10); button.BorderThickness = new Thickness(1);
             AutomationProperties.SetName(button, name + " settings"); navigation.Add(button); tabs.Children.Add(button);
         }
-        header.Children.Add(tabs); Grid.SetRow(header, 1); root.Children.Add(header);
+        header.Children.Add(tabs);
         pages.Add(CapturePage()); pages.Add(AudioPage()); pages.Add(ControlsPage()); pages.Add(StoragePage());
-        var scroll = new ScrollViewer { Content = page, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        Grid.SetRow(scroll, 2); root.Children.Add(scroll);
+        // Status and navigation scroll with the form in short work areas;
+        // the title and footer retain their space without shrinking controls.
+        var body = new StackPanel(); body.Children.Add(header); body.Children.Add(page);
+        var scroll = new ScrollViewer { Content = body, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        Grid.SetRow(scroll, 1); root.Children.Add(scroll);
         var footer = new StackPanel { Spacing = 10, Margin = new Thickness(0, 14, 0, 0) }; footer.Children.Add(error);
         var footerGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto"), ColumnSpacing = 8 };
         var info = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center }; info.Children.Add(estimate);
@@ -100,7 +103,7 @@ internal sealed class SettingsPanel : UserControl
         apply = Ui.Button("Apply changes", primary: true); apply.Name = "ApplySettings"; apply.Click += async (_, _) => await ApplyAsync(); Grid.SetColumn(apply, 2); footerGrid.Children.Add(apply);
         repairEngine.Name = "RepairRecordingEngine"; recheckEngine.Name = "RecheckRecordingEngine"; engineStatus.Name = "RecordingEngineStatus";
         repairEngine.Click += async (_, _) => await RepairEngineAsync(); recheckEngine.Click += async (_, _) => await ProbeAsync();
-        footer.Children.Add(footerGrid); Grid.SetRow(footer, 3); root.Children.Add(footer); Content = root;
+        footer.Children.Add(footerGrid); Grid.SetRow(footer, 2); root.Children.Add(footer); Content = root;
         recording.PropertyChanged += (_, e) => { if (!updating && e.Property == ToggleButton.IsCheckedProperty && ProfileEntry.Describe(recorder).CanEdit && !recorder.Applying && recorder.ProfileStatus?.RequiresCorrection == false) recorder.Pause(recording.IsChecked != true); };
         minutes.PropertyChanged += (_, e) => { if (e.Property == NumericUpDown.ValueProperty) Estimate(); }; bitrate.PropertyChanged += (_, e) => { if (e.Property == NumericUpDown.ValueProperty) Estimate(); };
         audio.PropertyChanged += (_, e) => { if (e.Property == ToggleButton.IsCheckedProperty) UpdateAudioSummary(); };

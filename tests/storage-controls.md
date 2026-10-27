@@ -44,6 +44,16 @@ ordinary Avalonia Window to instantiate native control templates; no capture
 exclusion is set. The native folder dialog is replaced only at its selection
 boundary; manual picker/DPI/accessibility acceptance is not inferred.
 
+The same route includes a short-work-area layout regression on the production
+SettingsPanel at 900x520 and 780x520 logical pixels, plus a 900x820 control.
+Reset, Close and Apply must fit inside the available height, and the form's
+scrolling viewport must fit each full-size Storage input. Navigation retains
+the draft. The title and footer stay fixed while status, navigation and form
+content scroll together; the ordinary window remains 900x820 and can shrink
+vertically for high-DPI work areas. Hidden fixtures do not establish native
+window sizing or keyboard scrolling; repeat those checks with the paused app
+at the actual Windows scaling settings, restoring the original scale afterward.
+
 For the separate actual-worker route, supply the built WorkerChecks executable
 and an existing task-private approved engine root:
 
