@@ -7,6 +7,12 @@ stereo 48 kHz AAC 192 kbps and one 300-second stream-copy MP4 export. Generated
 audio is not the actual system-audio reference. No production estimator or save
 policy changes. Issues #9/#12/#13 and all release gates remain open.
 
+The separate [tiny-root Windows storage observer](pilot-storage.md) now supplies
+real volume/file metadata in this observation format. Its fresh-root setup and
+explicit native command have declared filesystem effects. Persisted output is
+still supplied JSON here; it does not authenticate media, establish a complete
+pilot budget, enable execution or implement the deferred process/trust adapters.
+
 `pilot_collector.py` uses only the Python standard library. It has no process,
 engine discovery/repair/download, filesystem observation, media parsing or native
 cleanup adapter. `execution_enabled` is always false, including successful

@@ -110,6 +110,11 @@ jobs:
         run: |
           python -m unittest discover -s tests -p test_pilot_collector.py -v
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify native pilot storage without capture
+        shell: pwsh
+        run: |
+          ./tests/pilot-storage.ps1 -Checks -NoBuild -Sdk (Get-Command dotnet).Source
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
 # Hardware/UI acceptance is a separate local suite. Hosted runners do not
 # establish NVIDIA capture, fullscreen behavior, or driver performance.
