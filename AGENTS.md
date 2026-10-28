@@ -4,6 +4,8 @@
 
 - Check the working tree and preserve unrelated changes. Use a feature branch and follow the [PR workflow](README.md#contributing).
 - Default to one agent. Use skills when they help the task; no particular implementation skill is mandatory.
+- Own implementation, integration, verification and review fixes for the agreed delivery. Keep supporting changes with the complete, testable behavior they enable; justify separate prerequisite PRs.
+- Exercise the relevant application path early and repair failures. Resolve routine technical choices within existing authorization; if blocked, identify the missing decision or evidence and continue independent work.
 - Deliver the issue's acceptance criteria with appropriate checks. Report delivered behavior, verification and remaining gaps; keep release qualification separate unless it is part of the issue.
 - Carry existing task authorization forward. Implementation or a local commit alone does not authorize pushing, merging, installing or publishing.
 - Preserve user media, settings, installed recorder/startup state and game/NVIDIA preferences. Use isolated test profiles and outputs; restore temporary changes and stop only task-owned processes. Live desktop/system-audio capture needs authorization within the current task.
