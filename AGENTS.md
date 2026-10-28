@@ -1,64 +1,23 @@
 # F10 Recorder agent guidance
 
-## Start here
+## Work on the issue
 
-- Read [README.md](README.md) for product scope, architecture, setup and release requirements. Check the working tree before editing and preserve unrelated changes.
-- Keep this file focused on durable working agreements. Put investigation status, measurements and next steps in the relevant reports; verify current code and runtime state before reusing historical findings.
-- Use a feature branch for implementation and experiments. Follow the README's pull-request workflow. A local commit does not authorize pushing, merging, installing or publishing.
-- Measure delivery by completed acceptance criteria. Before scoping implementation, starting an investigation or preparing a handoff, read [the delivery focus rules](docs/agents/parallel-delivery.md#keep-delivery-focused-on-acceptance). They define completion, supporting work, investigation limits, replanning and local evidence handoffs.
+- Check the working tree and preserve unrelated changes. Use a feature branch and follow the [PR workflow](README.md#contributing).
+- Default to one agent. Use skills when they help the task; no particular implementation skill is mandatory.
+- Deliver the issue's acceptance criteria with appropriate checks. Report delivered behavior, verification and remaining gaps; keep release qualification separate unless it is part of the issue.
+- Carry existing task authorization forward. Implementation or a local commit alone does not authorize pushing, merging, installing or publishing.
+- Preserve user media, settings, installed recorder/startup state and game/NVIDIA preferences. Use isolated test profiles and outputs; restore temporary changes and stop only task-owned processes. Live desktop/system-audio capture needs authorization within the current task.
 
-## Architecture and implementation
+## Architecture
 
-- F10 Recorder is a local rolling replay recorder. Preserve existing recording preferences and user media. Consult the README and settings code for current defaults rather than inferring them from the product name.
-- `projects/F10Recorder.Core` owns portable configuration, clocks, replay selection and notification rules; `projects/F10Recorder.Windows` owns Windows capture/audio and native integrations; `projects/F10Recorder.Desktop` owns the Avalonia UI and worker integration. Keep captured frames out of UI controls.
-- Several SDK projects link active production files from `src/`. Inspect the relevant `.csproj` before editing those sources. The modern .NET/Avalonia application is the only maintained product; modern verification tools may use temporary WinForms test fixtures.
-- Keep buffering, saving and recovery independent of UI lifetime. Preserve per-profile worker ownership and the current-user restriction on the local control channel.
-- Preserve independently decodable replay segments, exclusion of incomplete segments, and pinning/copying before export so pruning cannot remove a save's inputs. Do not use `-segment_wrap` for the rolling cache.
-- Preserve the common A/V acquisition clock and timestamped audio through capture and export. Treat clock, pacing, retention and recovery changes as requiring focused regression checks.
-- Follow nearby code conventions and keep changes scoped. Keep FFmpeg discovery separate from recording preferences; encoder enumeration alone does not establish usable hardware support.
+- The maintained product is the .NET/Avalonia app. `Core` owns portable rules; `Windows` owns capture/audio and native integrations; `Desktop` owns UI and worker integration. Keep captured frames outside UI controls. Inspect the relevant `.csproj` before editing linked `src/` files.
+- Preserve worker independence from UI lifetime, per-profile ownership and the current-user control channel. Preserve the common A/V acquisition clock and independently decodable complete replay segments, pinned/copied before export. Never use `-segment_wrap` for the rolling cache.
 
-## Build and verification
+## Read for the task
 
-- `./build-avalonia.ps1` builds the development app; `./build-avalonia.ps1 -Publish` creates the self-contained package. Publishing a local package does not install it.
-- Use the pinned SDK from `global.json` (`.tools/dotnet/dotnet.exe` when locally provisioned). The portable core check commands are:
-
-  ```powershell
-  dotnet restore projects/F10Recorder.CoreChecks/F10Recorder.CoreChecks.csproj --locked-mode
-  dotnet run --project projects/F10Recorder.CoreChecks/F10Recorder.CoreChecks.csproj -c Release --no-restore -- artifacts/core-checks-local
-  ```
-
-- [.github/workflows/ci.yml](.github/workflows/ci.yml) defines hosted checks. Choose checks appropriate to the changed paths; documentation-only edits need link/content review, not a capture run.
-- For clock changes, follow [tests/audio-clock.md](tests/audio-clock.md) and run `./tests/audio-clock.ps1`. For worker lifecycle changes, use `./tests/worker.ps1`; for UI/native integration, consult `./tests/migration.ps1` and the relevant focused scripts in `tests/`.
-- Before worker/window checks, preview `-Plan` and read [test effects](tests/test-effects.md); read other scripts' parameters and side effects before running them. Live desktop/system-audio capture needs authorization within the current task. Use isolated profiles and output directories; do not install or alter the user's active recorder as part of an ordinary build or test.
-- Gaming and pacing work must follow [tests/game-benchmark.md](tests/game-benchmark.md) and [tests/frame-lineage.md](tests/frame-lineage.md). Before an expensive batch, read [experiment admission](tests/experiment-contract.md). Local ignored `docs/verification.md` and `docs/shadowplay-investigation.md`, when present, provide historical evidence rather than current acceptance guarantees.
-
-## Live investigations and evidence
-
-- Use one session to control the game, NVIDIA settings and recorder during a measurement. Keep heavy decoding and other performance-affecting work outside timing windows.
-- Preserve installed recorder/startup state, game/NVIDIA preferences and existing recordings. Restore temporary changes and stop only task-owned processes. Scope cleanup to verified task-created artifacts; retain evidence needed to reproduce accepted and rejected trials.
-- Record the exact build, binaries, configuration, source and environment for each trial. Retain rejected/inconclusive attempts and reasons; do not relax acceptance gates to obtain a pass.
-- Distinguish static reverse-engineering evidence, diagnostic instrumentation and ordinary production behavior. Name unresolved internals and qualify observer overhead before attributing a performance cause.
-- Full decoding, timestamp ordering, source-picture cadence, A/V marker alignment/drift and gaming overhead establish different properties. Container boundary skew alone does not establish perceptual sync; synthetic checks and hosted CI do not establish live hardware or game acceptance.
-- Report what changed, which checks ran, their results and material limits. Keep recordings, machine-specific reports, credentials, vendor binaries and raw third-party extracts out of commits. Store local trial evidence under ignored `artifacts/`; consult `THIRD_PARTY_NOTICES` and the README before release work.
-
-## Agent skills
-
-### Implementation
-
-Before implementing a feature, fixing a bug or executing an implementation ticket, read and use Matt Pocock's `implement` skill (`mattpocock-skills:implement`, `engineering/implement/SKILL.md`). If it is omitted from the session's skill list, locate it in the installed Matt Pocock plugin before editing; report a missing installation instead of silently skipping it. Task-specific authorization, verification effects and commit restrictions take precedence over the skill's defaults.
-
-### Parallel delivery
-
-Before delegating implementation tickets or running parallel delivery work, read [the parallel delivery protocol](docs/agents/parallel-delivery.md). It defines independent validation, candidate evidence, shared-resource ownership and integration checks.
-
-### Issue tracker
-
-Before issue operations, PR preparation, merge-readiness review or authorized merge closeout, read [the issue and PR workflow](docs/agents/issue-tracker.md). Follow its acceptance mapping and post-merge issue-state verification through completion.
-
-### Triage labels
-
-Use the five canonical triage labels. Before assigning triage states, read `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Use a single-context glossary and ADR layout. Before exploring domain concepts or decisions, read `docs/agents/domain.md`.
+- Product scope/defaults: relevant [README](README.md) sections and settings code. Beta behavior: the issue and [beta spec](docs/beta-spec.md); verify current code before reusing historical findings.
+- Issue operations and PR closeout: [issue tracker](docs/agents/issue-tracker.md). Triage changes: [label vocabulary](docs/agents/triage-labels.md).
+- Terminology or architectural decisions: [domain docs](docs/agents/domain.md), the glossary and relevant ADRs. UI/identity work: [F10 design skill](skills/f10-design/SKILL.md).
+- Builds: use the SDK pinned in [global.json](global.json) and `./build-avalonia.ps1`. Select checks for changed paths from [CI](.github/workflows/ci.yml) and focused `tests/` scripts. Documentation changes need content/link review.
+- Native/UI checks: read [test effects](tests/test-effects.md) and preview supported `-Plan` routes before execution. Clock changes: [audio-clock checks](tests/audio-clock.md). Gaming/pacing measurements: [benchmark](tests/game-benchmark.md) and [frame lineage](tests/frame-lineage.md); expensive batches also require [experiment admission](tests/experiment-contract.md).
+- Release work: [release requirements](README.md#public-release-milestones) and [dependency notices](THIRD_PARTY_NOTICES). Keep credentials, recordings, vendor extracts and machine-specific evidence out of commits; local evidence belongs under ignored `artifacts/`.
