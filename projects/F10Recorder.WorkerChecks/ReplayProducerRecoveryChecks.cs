@@ -135,9 +135,12 @@ internal static class ReplayProducerRecoveryChecks
         {
             string profile = Path.Combine(root, "normal-profile"), security = Path.Combine(root, "normal-security"); Directory.CreateDirectory(profile);
             var latch = new ReplayStorageStopLatch(profile, security);
-            using (var coordinator = new ReplayStorageCoordinator(latch, new ReplayVolumeReservations(security), new Files(), () => new(null, "unmeasured")))
+            string scope = new('B', 64);
+            var headroom = new ReplayCaptureHeadroom(scope, Volume, 4096, 4096, 8192);
+            var model = new ReplayReferenceModel("controlled-normal-recovery", scope, Volume, 4096, 0, 0, [], headroom);
+            using (var coordinator = new ReplayStorageCoordinator(latch, new ReplayVolumeReservations(security), new Files(), () => new(model, null), (_, _) => true))
             {
-                coordinator.BeginCapture(null, profile, profile, () => { });
+                coordinator.BeginCapture(scope, profile, profile, () => { });
                 coordinator.StopForStorageFailure("controlled storage stop"); coordinator.CompleteCapture(true);
             }
             Require(new ReplayStorageStopLatch(profile, security).ProducerAbsenceConfirmed(), "Confirmed normal closure must be durable after replacement.");
