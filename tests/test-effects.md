@@ -16,6 +16,15 @@ This is a finite six-source run with unchanged 500 ms observation and no-refit
 requirements. The outer admission also reserves preflight, closure and subsequent
 native verification; these limits do not themselves start a recording.
 
+After the pre-T02 operator coordination timeout, an exact replacement may carry
+513 previous reserved children plus 32 new (545), at most 38 retained roots,
+72,000 cumulative wall seconds and 50,400 offline seconds. Other storage,
+geometry, foreground and numerical limits above remain unchanged. The full
+previous one-shot ceiling stays charged even though only T01 was acquired.
+The prospective admission binds the external coordinator and its nonmedia
+controls; it waits for ready events and completes normal fixture activation
+before bootstrap, with no UI calls during capture and no automatic batch retry.
+
 An explicitly admitted continuation may retain four independently completed
 T01/T02/T03/H02 sources from a foreground-only failed attempt, then acquire H01
 and H03 against the exact unchanged frozen model and consumer. The original
