@@ -276,6 +276,7 @@ internal static class ReplayCalibrationRun
         }
         internal readonly object Gate = new();
         readonly string root;
+        readonly string rootPrefix;
         readonly CalibrationPlan plan;
         readonly string[] retainedPrefixes;
         readonly string traceName;
@@ -323,7 +324,7 @@ internal static class ReplayCalibrationRun
         {
             plan = plan with { Root = Path.GetFullPath(plan.Root), RetainedRoots = plan.RetainedRoots.Select(Path.GetFullPath).ToArray(),
                 MetadataHandleRoots = plan.MetadataHandleRoots?.Select(Path.GetFullPath).ToArray() };
-            this.plan = plan; root = plan.Root;
+            this.plan = plan; root = plan.Root; rootPrefix = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             Require(currentBudgetBytes == null || currentBudgetBytes > 0, "Current source byte ceiling must be positive.");
             this.currentBudgetBytes = currentBudgetBytes;
             retainedPrefixes = plan.RetainedRoots.Select(r => Path.GetFullPath(r).TrimEnd(Path.DirectorySeparatorChar)
@@ -454,7 +455,7 @@ internal static class ReplayCalibrationRun
         }
         bool CanRetainMetadata(string path)
         {
-            if (!path.StartsWith(Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            if (!path.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase)
                 || closedCases.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase))) return true;
             // Holding a handle through producer close can delay filesystem
             // allocation trimming. Current captured chunks and MP4s therefore

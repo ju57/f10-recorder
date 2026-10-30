@@ -31,7 +31,8 @@ internal class ReplayInventoryReader : ReplayFiles, IDisposable
     }
     internal override ReplayFileExtent ObserveInventory(string path, ReplayFileExtent enumerated)
     {
-        if (!roots.Any(r => Path.GetFullPath(path).StartsWith(r, StringComparison.OrdinalIgnoreCase)) || mayRetain?.Invoke(path) == false)
+        string full = Path.GetFullPath(path);
+        if (!roots.Any(r => full.StartsWith(r, StringComparison.OrdinalIgnoreCase)) || mayRetain?.Invoke(path) == false)
         {
             if (handles.Remove(path, out var old)) old.Handle.Dispose();
             OpenCount++; return base.ObserveInventory(path, enumerated);

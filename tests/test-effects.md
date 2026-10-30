@@ -29,6 +29,8 @@ records the actual foreground owner/window identity before normal owned shutdown
 These are collector/resource changes only. Exact already-frozen product DLLs may
 be referenced without rebuilding them, with every helper/source/consumer binding
 declared in the fresh admission. No failed source becomes a passing sample.
+The observer normalizes each leaf path once before retained-root matching and
+caches its current-root prefix; every live-handle allocation/EOF refresh remains.
 
 `--replay-calibration-capture-evidence-checks <fresh-root>` reproduces duplicate
 legacy success-only exit hashes and checks six distinct capture PID/start/session
