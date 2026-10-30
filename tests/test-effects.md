@@ -21,7 +21,7 @@ qualification for changed consumer DLLs.
 
 The foreground-loss replacement preserves the failed batch and charges all342
 prior children plus32fresh (374ceiling),128GB/126.5GBstop,660wall/420offline
-minutes,25retained roots/106GBretained,24576files/384directories and2GBoutside
+minutes,25retained roots/106GBretained,21504files/352directories and2GBoutside
 allowance. Actual wrapper preflight/closure reserves are300/300seconds.
 It still requires six new independent sources and three held-out cases without
 refitting. A foreground interruption invalidates its source; the collector now

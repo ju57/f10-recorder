@@ -107,7 +107,7 @@ internal static class ReplayCalibrationRun
     {
         bool foregroundReplacement = plan != null && plan.MaximumChildren == 374 && plan.RetainedChildren == 342
             && plan.BudgetBytes == 128_000_000_000 && plan.StopBytes == 126_500_000_000
-            && plan.DeadlineSeconds == 39600 && plan.DirectoryLimit == 384 && plan.FileLimit == 24576 && plan.OfflineDeadlineSeconds == 25200
+            && plan.DeadlineSeconds == 39600 && plan.DirectoryLimit == 352 && plan.FileLimit == 21504 && plan.OfflineDeadlineSeconds == 25200
             && plan.OutputComponentBytes == 2_000_000_000 && plan.RetainedBudgetBytes == 106_000_000_000
             && plan.OutsideBuildAllowanceBytes == 2_000_000_000;
         bool lifecycleReplacement = foregroundReplacement || plan != null && plan.MaximumChildren == 342 && plan.RetainedChildren == 310

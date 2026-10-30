@@ -154,7 +154,7 @@ internal static class CalibrationForeground
             Reject(() => ReplayCalibrationRun.ValidateResources(lifecycle with { OutsideBuildAllowanceBytes = 2_000_000_001 }));
             var foreground = lifecycle with { MaximumChildren = 374, RetainedChildren = 342,
                 BudgetBytes = 128_000_000_000, StopBytes = 126_500_000_000, DeadlineSeconds = 39600,
-                OfflineDeadlineSeconds = 25200, DirectoryLimit = 384, FileLimit = 24576,
+                OfflineDeadlineSeconds = 25200, DirectoryLimit = 352, FileLimit = 21504,
                 RetainedBudgetBytes = 106_000_000_000, RetainedElapsedSeconds = 31200, RetainedOfflineSeconds = 18200,
                 RetainedRoots = lifecycle.RetainedRoots.Append(Path.Combine(root, "foreground-failed-history")).ToArray() };
             Directory.CreateDirectory(foreground.RetainedRoots[^1]);
@@ -162,8 +162,8 @@ internal static class CalibrationForeground
             Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { RetainedChildren = 341 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { RetainedChildren = 343 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { FloorBytes = 59_999_999_999 }));
-            Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { FileLimit = 24577 }));
-            Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { DirectoryLimit = 385 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { FileLimit = 21505 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { DirectoryLimit = 353 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { StopBytes = 126_500_000_001 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { OutsideBuildAllowanceBytes = 2_000_000_001 }));
         });
