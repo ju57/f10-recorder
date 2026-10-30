@@ -29,6 +29,7 @@ internal static class ReplayOwnershipChecks
         internal bool Disposed;
         internal int ExportCount;
         internal Action ExportAction;
+        internal Action<string> OutputWritten;
         internal readonly TaskCompletionSource ExportEntered = Signal();
         internal readonly TaskCompletionSource StopEntered = Signal();
         internal readonly TaskCompletionSource DisposeEntered = Signal();
@@ -37,12 +38,20 @@ internal static class ReplayOwnershipChecks
         internal string Contents;
         internal int OutputBytes = 2048;
         internal bool MissingOutput;
+        Action storageCheck;
+        internal Func<ReplayOutputSelection, ReplayOutputDemand> OutputEstimate;
+        internal string ExporterIdentity = "controlled-exporter-v1";
+        public string OutputDemandIdentity => ExporterIdentity;
+        internal bool ProducerAbsent = true;
+        public bool OutputProducerStopped => ProducerAbsent; // Controlled ownership observation; no actual media process.
+        public ReplayOutputDemand EstimateOutput(ReplayOutputSelection selection) => OutputEstimate?.Invoke(selection)
+            ?? ReplayOutputDemand.Unmeasured("Controlled source has no qualified estimate.");
 
-        internal Source(string directory, string codec = "h264_nvenc", bool audio = false, double age = 200)
+        internal Source(string directory, string codec = "h264_nvenc", bool audio = false, double age = 200, int replaySeconds = 60)
         {
             Directory.CreateDirectory(directory);
             string extension = codec == "av1_nvenc" ? ".mkv" : ".ts";
-            ReplayInfo = new(directory, Path.Combine(directory, "segments.csv"), 60, 5, 60, codec, extension, audio, audio);
+            ReplayInfo = new(directory, Path.Combine(directory, "segments.csv"), replaySeconds, 5, 60, codec, extension, audio, audio);
             Epoch = Stopwatch.GetTimestamp() - (long)(Stopwatch.Frequency * age);
             clock = new(new MediaClock(Epoch, Stopwatch.Frequency, 0, 0));
         }
@@ -63,6 +72,12 @@ internal static class ReplayOwnershipChecks
         public void FreezeAt(long timestamp) => clock.StopAt(timestamp);
         public void StopCapture() { Stopped = true; StopEntered.TrySetResult(); }
         public void CheckCaptureHealth(double end) { Require(!Disposed, "Maintenance reached a disposed source."); }
+        public void Export(IReadOnlyList<string> arguments, string snapshot, Action<ReplayProducerProof> producerChanged, Action checkStorage)
+        {
+            storageCheck = checkStorage;
+            try { storageCheck?.Invoke(); Export(arguments, snapshot); storageCheck?.Invoke(); }
+            finally { storageCheck = null; }
+        }
         public void Export(IReadOnlyList<string> arguments, string snapshot)
         {
             Require(!Disposed, "Export reached a disposed source.");
@@ -71,10 +86,18 @@ internal static class ReplayOwnershipChecks
             Concat = File.ReadAllLines(Path.Combine(snapshot, "concat.txt"));
             Contents = string.Join("|", Concat.Where(s => s.StartsWith("file '")).Select(s => File.ReadAllText(Path.Combine(snapshot, s[6..^1]))));
             ExportEntered.TrySetResult();
-            ExportRelease?.Task.WaitAsync(Deadline).GetAwaiter().GetResult();
+            if (ExportRelease != null)
+            {
+                var waiting = Stopwatch.StartNew();
+                while (!ExportRelease.Task.Wait(100))
+                {
+                    Require(waiting.Elapsed < Deadline, "Controlled export wait expired.");
+                    storageCheck?.Invoke();
+                }
+            }
             Require(!Disposed && Directory.Exists(snapshot), "Retirement removed export resources.");
             ExportAction?.Invoke();
-            if (!MissingOutput) File.WriteAllBytes(arguments[^1], new byte[OutputBytes]);
+            if (!MissingOutput) { File.WriteAllBytes(arguments[^1], new byte[OutputBytes]); OutputWritten?.Invoke(arguments[^1]); }
         }
         public void Dispose() { Require(Stopped, "Resources released before acquisition stopped."); Disposed = true; DisposeEntered.TrySetResult(); }
     }
@@ -88,10 +111,14 @@ internal static class ReplayOwnershipChecks
         internal Action<string> DeletedDirectory;
         internal bool RealHardLinks, FailPublish, FailCleanup;
         internal int Copies, LinkAttempts, LinkError;
+        internal long InventoryLeafReads;
         internal readonly ConcurrentQueue<string> Cleaned = new();
         internal Func<string, ReplayFileExtent> Observation;
         internal Func<string, ReplayVolumeCapacity> CapacityObservation;
         internal override ReplayFileExtent Observe(string path) => Observation?.Invoke(path) ?? base.Observe(path);
+        internal override ReplayFileExtent ObserveInventory(string path, ReplayFileExtent enumerated)
+        { Interlocked.Increment(ref InventoryLeafReads); return Observation?.Invoke(path) ?? base.ObserveInventory(path, enumerated); }
+        internal override ReplayFileExtent ObserveManifest(string path, ReplayFileExtent enumerated) => Observation?.Invoke(path) ?? base.ObserveManifest(path, enumerated);
         internal override ReplayVolumeCapacity ObserveCapacity(string path) => CapacityObservation == null ? base.ObserveCapacity(path) : CapacityObservation(path);
         internal override bool TryHardLink(string copy, string original)
         {
@@ -142,13 +169,13 @@ internal static class ReplayOwnershipChecks
         internal readonly ReplayCache Cache;
         internal readonly ReplaySessionId Id;
         internal Fixture(string root, string codec = "h264_nvenc", bool audio = false,
-            TimeProvider time = null, Func<Task> wait = null, long budget = 10_000_000_000)
+            TimeProvider time = null, Func<Task> wait = null, long budget = 10_000_000_000, ReplayVolumeReservations reservations = null, int replaySeconds = 60)
         {
             Root = root; Destination = Path.Combine(root, "clips"); Directory.CreateDirectory(Destination);
             Existing = Path.Combine(Destination, "existing.mp4"); File.WriteAllText(Existing, "preserve this saved video");
-            Source = new(Path.Combine(root, "buffer", "session-fixture"), codec, audio);
+            Source = new(Path.Combine(root, "buffer", "session-fixture"), codec, audio, replaySeconds: replaySeconds);
             Source.Segments(0, 3);
-            Cache = new(Files, time, wait, Diagnostics.Enqueue, Path.Combine(root, "buffer"), budget); Id = Cache.RegisterSession(Source);
+            Cache = new(Files, time, wait, Diagnostics.Enqueue, Path.Combine(root, "buffer"), budget, volumeReservations: reservations); Id = Cache.RegisterSession(Source);
         }
         internal SaveSubmission Save(double end = 3) => Cache.TrySave(Id, Source.Trigger(end), Destination);
         public void Dispose()
@@ -160,6 +187,144 @@ internal static class ReplayOwnershipChecks
     }
 
     internal static int Run(string root) => RunAsync(root).GetAwaiter().GetResult();
+    internal static int RunContention(string root)
+    {
+        if (Directory.Exists(root)) throw new IOException("Contention checks require fresh evidence.");
+        Directory.CreateDirectory(root); Log.DirectoryPath = root;
+        var results = new List<object>(); int failures = 0;
+        foreach (bool persistent in new[] { false, true })
+        {
+            string path = Path.Combine(root, persistent ? "persistent" : "transient"); Directory.CreateDirectory(path);
+            using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+            ReplayStorageCoordinator coordinator = null; Fixture f = null; Thread releaser = null;
+            int armed = 0, injected = 0; bool stopped = false;
+            var clock = Stopwatch.StartNew(); ReplaySaveResult saved = null; Exception failure = null;
+            try
+            {
+                var store = new ReplayVolumeReservations(Path.Combine(path, "private"), ReplayStorageSafety.MinimumBytes);
+                f = new Fixture(path, reservations: store, replaySeconds: 300);
+                f.Source.Segments(0, 300); f.Files.RealHardLinks = true;
+                var capacity = ReplayStorage.ObserveCapacity(path); string scope = new('C', 64);
+                var headroom = new ReplayCaptureHeadroom(scope, capacity.Volume, capacity.AllocationUnit, 4096, 8192);
+                var model = new ReplayReferenceModel("controlled-contention", scope, capacity.Volume, capacity.AllocationUnit, 0, 0, [], headroom);
+                f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-contention", s.Identity,
+                    s.ExporterIdentity, capacity.Volume, capacity.AllocationUnit, ReplayReferenceModel.Round(16384, capacity.AllocationUnit), false, null);
+                Directory.CreateDirectory(Path.Combine(path, "profile"));
+                coordinator = new(new ReplayStorageStopLatch(Path.Combine(path, "profile"), Path.Combine(path, "private")), store,
+                    f.Files, () => new(model, null), (_, _) => true);
+                coordinator.BeginCapture(scope, f.Source.ReplayInfo.Directory, f.Destination, () => stopped = true);
+                f.Files.CapacityObservation = directory =>
+                {
+                    if (Volatile.Read(ref armed) == 1 && Thread.CurrentThread.Name == "Capture storage safety"
+                        && Interlocked.CompareExchange(ref injected, 1, 0) == 0)
+                    {
+                        entered.Set();
+                        if (!release.Wait(5000)) throw new IOException("Controlled supervisor lock release deadline.");
+                    }
+                    return ReplayStorage.ObserveCapacity(directory);
+                };
+                f.Files.BeforeLink = () =>
+                {
+                    if (Interlocked.CompareExchange(ref armed, 1, 0) != 0) return;
+                    // Refresh immediately before the forced short locked poll.
+                    coordinator.Poll(); coordinator.StartSupervision();
+                    if (!entered.Wait(5000)) throw new IOException("Supervisor did not enter its actual locked capacity observation.");
+                    if (!persistent)
+                    {
+                        releaser = new Thread(() => { Thread.Sleep(80); release.Set(); }) { IsBackground = true };
+                        releaser.Start();
+                    }
+                };
+                var submission = f.Save(300);
+                Require(submission.Accepted, "Controlled initial admission rejected: " + submission.Rejection);
+                saved = submission.Completion.WaitAsync(TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
+                Require(injected == 1, "The accepted snapshot never overlapped the real supervisor's ledger lock.");
+                if (persistent)
+                {
+                    Require(!saved.Succeeded && saved.Error.Contains("lock is busy") && f.Source.ExportCount == 0
+                        && Directory.GetDirectories(f.Source.ReplayInfo.Directory, "save-*").Length == 1
+                        && Directory.GetFiles(f.Destination, "Replay-*.mp4").Length == 0,
+                        "Persistent contention must reject bounded accepted work and retain inputs before export/publication.");
+                    Require(clock.Elapsed.TotalSeconds < 5, "Persistent contention did not terminate promptly.");
+                }
+                else Require(saved.Succeeded && f.Source.ExportCount == 1 && !stopped && File.Exists(saved.File),
+                    "Transient accepted-work contention failed: " + saved.Error);
+            }
+            catch (Exception ex) { failure = ex; failures++; }
+            finally
+            {
+                release.Set(); releaser?.Join(1000);
+                coordinator?.CompleteCapture(true); coordinator?.Dispose(); f?.Dispose();
+            }
+            results.Add(new { name = persistent ? "persistent-accepted-contention-retains-before-export" : "transient-accepted-contention-completes-300-input-snapshot",
+                passed = failure == null, error = failure?.ToString(), injected, stopped, saved, elapsedSeconds = clock.Elapsed.TotalSeconds });
+        }
+        {
+            string path = Path.Combine(root, "stale-capture"); Directory.CreateDirectory(path);
+            string profile = Path.Combine(path, "profile"), authority = Path.Combine(path, "private"); Directory.CreateDirectory(profile);
+            var store = new ReplayVolumeReservations(authority, ReplayStorageSafety.MinimumBytes);
+            var capacity = ReplayStorage.ObserveCapacity(path); string scope = new('C', 64);
+            var headroom = new ReplayCaptureHeadroom(scope, capacity.Volume, capacity.AllocationUnit, 4096, 8192);
+            var model = new ReplayReferenceModel("controlled-stale-contention", scope, capacity.Volume, capacity.AllocationUnit, 0, 0, [], headroom);
+            var latch = new ReplayStorageStopLatch(profile, authority); bool stopped = false; Exception failure = null;
+            using var coordinator = new ReplayStorageCoordinator(latch, store, catalog: () => new(model, null), applicable: (_, _) => true);
+            try
+            {
+                var freshness = Stopwatch.StartNew();
+                coordinator.BeginCapture(scope, path, path, () => stopped = true);
+                using (TrustedStorage.AcquireLock(authority, "replay-volume-reservations"))
+                {
+                    coordinator.StartSupervision();
+                    var deadline = Stopwatch.StartNew();
+                    while (!stopped && deadline.ElapsedMilliseconds < 1500) Thread.Sleep(5);
+                    Require(stopped && coordinator.Stopped && latch.Read().Held,
+                        "Persistent contention refreshed stale evidence instead of preserving the500ms stop/hold.");
+                    Require(freshness.ElapsedMilliseconds >= ReplayStorageCoordinator.MaximumObservationGapMilliseconds,
+                        "Contention stopped before the declared freshness interval.");
+                }
+            }
+            catch (Exception ex) { failure = ex; failures++; }
+            finally { coordinator.CompleteCapture(true); }
+            results.Add(new { name = "persistent-capture-contention-stops-at-unchanged-freshness-boundary", passed = failure == null, error = failure?.ToString(), stopped });
+        }
+        foreach (bool sealing in new[] { true, false })
+        {
+            string path = Path.Combine(root, sealing ? "producer-sealing" : "claim-release"); Directory.CreateDirectory(path);
+            string authority = Path.Combine(path, "private"), owner = Guid.NewGuid().ToString("N");
+            var store = new ReplayVolumeReservations(authority); var capacity = ReplayStorage.ObserveCapacity(path);
+            using var job = new Native.ProcessJob(recoverable: true);
+            var proof = ReplayProducerProof.Current(job.Name, false);
+            store.Update(owner, [new(Path.Combine(path, "growth"), path, capacity.Volume, capacity.AllocationUnit, 4096,
+                ReplayVolumeClaimKind.UnmaterializedGrowth)], new ReplayFiles(), proof);
+            Exception failure = null; IDisposable held = null; Task mutation = null;
+            try
+            {
+                held = TrustedStorage.AcquireLock(authority, "replay-volume-reservations");
+                var entered = Signal();
+                mutation = Task.Run(() => { entered.SetResult(); if (sealing) store.SetProducer(owner, proof with { Sealed = true }, acceptedWork: true); else store.Release(owner, acceptedWork: true); });
+                entered.Task.WaitAsync(Deadline).GetAwaiter().GetResult(); Thread.Sleep(80);
+                Require(!mutation.IsCompleted, "Controlled accepted mutation bypassed a held ledger lock.");
+                held.Dispose(); held = null;
+                mutation.WaitAsync(Deadline).GetAwaiter().GetResult();
+                using var ledger = JsonDocument.Parse(File.ReadAllText(Path.Combine(authority, "replay-volume-reservations.json")));
+                var owners = ledger.RootElement.GetProperty("Owners");
+                Require(sealing ? owners.GetArrayLength() == 1 && owners[0].GetProperty("Producer").GetProperty("Sealed").GetBoolean()
+                    : owners.GetArrayLength() == 0, "Accepted mutation did not commit the expected sealed producer/claim release.");
+            }
+            catch (Exception ex) { failure = ex; failures++; }
+            finally
+            {
+                held?.Dispose();
+                if (mutation != null) try { mutation.WaitAsync(Deadline).GetAwaiter().GetResult(); } catch { }
+                store.Release(owner);
+            }
+            results.Add(new { name = sealing ? "accepted-producer-sealing-recovers-transient-contention" : "accepted-claim-release-recovers-transient-contention", passed = failure == null, error = failure?.ToString() });
+        }
+        File.WriteAllText(Path.Combine(root, "contention-checks.json"), JsonSerializer.Serialize(new { failures, results,
+            effects = "Actual native ledger, capture coordinator, replay snapshot/export lifecycle with300tiny text inputs and controlled80ms/persistent lock schedules. Export is a2048byte stand-in; no child, engine, media, GPU, audio, UI, shortcut, startup or account catalog action." }, new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine($"Accepted replay contention: {results.Count - failures}/{results.Count} passed");
+        return failures == 0 ? 0 : 1;
+    }
     static async Task<int> RunAsync(string root)
     {
         Directory.CreateDirectory(root);
@@ -171,6 +336,324 @@ internal static class ReplayOwnershipChecks
             try { await check(Path.Combine(root, name)); results.Add(new { name, result = "passed" }); }
             catch (Exception ex) { failed++; results.Add(new { name, result = "failed", error = ex.ToString() }); }
         }
+
+
+
+        await Check("loaded-catalog-reaches-replay-and-status-with-withdrawal", async path =>
+        {
+            using var f = new Fixture(path, reservations: new ReplayVolumeReservations(Path.Combine(path, "authority")), replaySeconds: 300);
+            string catalog = Path.Combine(path, "catalog"); TrustedStorage.CreatePrivateDirectory(catalog);
+            var controlledReceipt = ReplayCalibrationCatalogChecks.Fixture(catalog);
+            string receiptPath = Path.Combine(catalog, ReplayCalibrationCatalog.FileName);
+            File.WriteAllBytes(receiptPath, JsonSerializer.SerializeToUtf8Bytes(controlledReceipt));
+            f.Source.Segments(0, 300);
+            f.Source.ExporterIdentity = ReplayReferenceModel.ExporterIdentity;
+            f.Source.OutputEstimate = selection => ReplayCalibrationCatalog.LoadFrom(catalog, ReplayCalibrationCatalogChecks.ControlledHost)
+                .Estimate(selection, controlledReceipt.Model.Scope, f.Source.ReplayInfo.Directory, ReplayCalibrationCatalogChecks.ControlledHost);
+            var elapsed = Stopwatch.StartNew();
+            var accepted = f.Save(300); Require(accepted.Accepted, accepted.Rejection);
+            var saved = await accepted.Completion.WaitAsync(TimeSpan.FromSeconds(60));
+            if (!saved.Succeeded) File.WriteAllText(Path.Combine(path, "failed-save-diagnostics.json"), JsonSerializer.Serialize(new { saved, diagnostics = f.Diagnostics.TakeLast(8).ToArray() }));
+            Require(saved.Succeeded, saved.Error);
+            File.WriteAllText(Path.Combine(path, "full-selection-cost.json"), JsonSerializer.Serialize(new { elapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds, f.Files.InventoryLeafReads, f.Files.Copies }));
+            var metrics = new RecorderMetrics(); f.Cache.Status.OutputDemand.WriteMetrics(metrics);
+            Require(metrics.ReplayOutputDemandKind == "CalibratedEstimate" && metrics.ReplayOutputDemandRevision == controlledReceipt.Model.Revision
+                && metrics.ReplayOutputDemandReason == null, "Loaded evidence must reach actual replay admission and ordinary metrics projection.");
+            File.Delete(receiptPath); // Controlled task receipt, never an installed catalog.
+            accepted = f.Save(300); Require(!accepted.Accepted && accepted.Rejection.Contains("unmeasured"), "Withdrawal must reject before accepting an unreserved output.");
+            f.Cache.Status.OutputDemand.WriteMetrics(metrics);
+            Require(metrics.ReplayOutputDemandKind == "Unmeasured" && metrics.ReplayOutputDemandRevision == null
+                && !string.IsNullOrWhiteSpace(metrics.ReplayOutputDemandReason),
+                "Withdrawal must remain explicit after rejection.");
+        });
+
+        await Check("shared-volume-ordinary-replay-admission", async path =>
+        {
+            var authority = new ReplayVolumeReservations(Path.Combine(path, "authority"));
+            using var first = new Fixture(Path.Combine(path, "first"), reservations: authority);
+            using var second = new Fixture(Path.Combine(path, "second"), reservations: new ReplayVolumeReservations(Path.Combine(path, "authority")));
+            long free = 20480;
+            foreach (var f in new[] { first, second })
+            {
+                f.Source.Segments(0, 1);
+                f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-shared-reference", s.Identity,
+                    s.ExporterIdentity, "shared-volume", 4096, 4096, false, null);
+                f.Files.CapacityObservation = _ => new("shared-volume", 4096, free);
+                f.Files.Observation = p => new("shared-volume", p, 4096, new FileInfo(p).Length, 4096);
+            }
+            first.Source.ExportRelease = Signal();
+            var accepted = first.Save(1);
+            await first.Source.ExportEntered.Task.WaitAsync(Deadline);
+            try
+            {
+                // First snapshot has materialized; its output still needs 4096.
+                // Second's own 12288 fits, but 4096 + 12288 cannot fit 12288.
+                free = 12288;
+                var rejected = second.Save(1);
+                if (rejected.Accepted) await Finish(rejected);
+                Require(!rejected.Accepted && second.Files.Copies == 0 && second.Source.ExportCount == 0,
+                    "Another profile's remaining output promise must reject this otherwise exact-fit ordinary replay.");
+            }
+            finally { first.Source.ExportRelease.TrySetResult(); }
+            Require((await Finish(accepted)).Succeeded, "The first accepted replay must retain successful publication.");
+            Require((await Finish(second.Save(1))).Succeeded, "Confirmed completion must release the first promise for the next exact-fit replay.");
+        });
+
+        await Check("shared-volume-open-tail-reserves-before-acceptance", async path =>
+        {
+            var entered = Signal(); var release = Signal(); Fixture fixture = null;
+            var authority = new ReplayVolumeReservations(Path.Combine(path, "authority"));
+            using var f = fixture = new Fixture(path, reservations: authority, wait: async () =>
+            {
+                entered.TrySetResult(); await release.Task.WaitAsync(Deadline); fixture.Source.Segments(0, 2);
+            });
+            f.Source.Segments(0, 1);
+            var target = ReplayStorage.ObserveCapacity(f.Destination);
+            f.Files.CapacityObservation = _ => target with { AvailableBytes = 4_000_000_000 };
+            f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-open-envelope", s.Identity,
+                s.ExporterIdentity, target.Volume, target.AllocationUnit, 2 * target.AllocationUnit, !s.Closed, null,
+                s.Closed ? null : 4 * target.AllocationUnit);
+            try
+            {
+                var accepted = f.Save(2); Require(accepted.Accepted, accepted.Rejection);
+                await entered.Task.WaitAsync(Deadline);
+                Require(authority.ObserveUnreserved(f.Destination, f.Files).Bytes == 4_000_000_000 - 6 * target.AllocationUnit,
+                    "Accepted unfinished-tail work must charge the entire copy/concat plus output envelope, before any copying.");
+                Require(f.Files.Copies == 0 && f.Source.ExportCount == 0, "Tail waiting must not copy or export incomplete input.");
+                release.TrySetResult();
+                Require((await Finish(accepted)).Succeeded, "Closed selection must replace, rather than add to, its initial envelope.");
+                Require(authority.ObserveUnreserved(f.Destination, f.Files).Bytes == 4_000_000_000, "Successful closed export must release all future promises.");
+            }
+            finally { release.TrySetResult(); }
+        });
+        await Check("shared-volume-unmeasured-rejects-before-acceptance", path =>
+        {
+            using var f = new Fixture(path, reservations: new ReplayVolumeReservations(Path.Combine(path, "authority")));
+            var rejected = f.Save();
+            Require(!rejected.Accepted && rejected.Rejection.Contains("unmeasured") && f.Source.ExportCount == 0 && f.Files.Copies == 0,
+                "Account-wide promises cannot treat unknown output demand as zero.");
+            Require(Directory.GetDirectories(f.Source.ReplayInfo.Directory, "save-*").Length == 0, "Rejected work must create no snapshot.");
+            return Task.CompletedTask;
+        });
+        await Check("stopped-capture-export-observes-external-pressure", async path =>
+        {
+            var authority = new ReplayVolumeReservations(Path.Combine(path, "authority"), ReplayStorageSafety.MinimumBytes);
+            using var f = new Fixture(path, reservations: authority);
+            f.Source.Segments(0, 1); f.Source.StopCapture();
+            var target = ReplayStorage.ObserveCapacity(f.Destination); long free = 3_000_000_000;
+            f.Files.CapacityObservation = _ => target with { AvailableBytes = Volatile.Read(ref free) };
+            f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-pressure", s.Identity,
+                s.ExporterIdentity, target.Volume, target.AllocationUnit, 2 * target.AllocationUnit, false, null);
+            f.Source.ExportRelease = Signal();
+            var accepted = f.Save(1); await f.Source.ExportEntered.Task.WaitAsync(Deadline);
+            Volatile.Write(ref free, ReplayStorageSafety.MinimumBytes + 2 * target.AllocationUnit - 1);
+            var result = await Finish(accepted);
+            Require(!result.Succeeded && f.Source.ExportCount == 1 && File.Exists(f.Source.Chunk(0))
+                && Directory.GetDirectories(f.Source.ReplayInfo.Directory, "save-*").Length == 1,
+                "Pressure while acquisition is stopped must fail the owned export and retain its inputs without retry.");
+        });
+        await Check("shared-volume-qualified-exporter-absence", async path =>
+        {
+            var authority = new ReplayVolumeReservations(Path.Combine(path, "authority"));
+            using var f = new Fixture(path, reservations: authority);
+            f.Source.Segments(0, 1);
+            var target = ReplayStorage.ObserveCapacity(f.Destination);
+            f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-absence", s.Identity,
+                s.ExporterIdentity, target.Volume, target.AllocationUnit, 2 * target.AllocationUnit, false, null);
+            f.Source.ExportAction = () => f.Source.ProducerAbsent = false;
+            var result = await Finish(f.Save(1));
+            Require(!result.Succeeded && Directory.GetDirectories(f.Source.ReplayInfo.Directory, "save-*").Length == 1,
+                "Unknown producer absence must retain inputs and qualified output claims.");
+            var blocked = f.Save(1);
+            Require(!blocked.Accepted, "A retained shared promise must block a second replay while producer absence is unknown.");
+            f.Source.ProducerAbsent = true; f.Source.ExportAction = null;
+            Require((await Finish(f.Save(1))).Succeeded, "Confirmed later absence permits new work without erasing retained media.");
+        });
+        await Check("stopped-capture-export-observes-model-withdrawal", async path =>
+        {
+            using var f = new Fixture(path, reservations: new ReplayVolumeReservations(Path.Combine(path, "authority")));
+            f.Source.Segments(0, 1); f.Source.StopCapture();
+            var target = ReplayStorage.ObserveCapacity(f.Destination); bool withdrawn = false;
+            f.Source.OutputEstimate = s => Volatile.Read(ref withdrawn) ? ReplayOutputDemand.Unmeasured("Controlled model withdrawal.")
+                : new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-withdrawal", s.Identity,
+                    s.ExporterIdentity, target.Volume, target.AllocationUnit, 2 * target.AllocationUnit, false, null);
+            f.Source.ExportRelease = Signal();
+            var accepted = f.Save(1); await f.Source.ExportEntered.Task.WaitAsync(Deadline);
+            Volatile.Write(ref withdrawn, true);
+            var result = await Finish(accepted);
+            Require(!result.Succeeded && result.Error.Contains("calibration changed") && File.Exists(f.Source.Chunk(0))
+                && Directory.GetDirectories(f.Source.ReplayInfo.Directory, "save-*").Length == 1,
+                "Model withdrawal must fail stopped-source export without losing protected footage or retrying.");
+        });
+
+        await Check("shared-volume-release-before-publication-and-cleanup", async path =>
+        {
+            var authority = new ReplayVolumeReservations(Path.Combine(path, "authority"));
+            using var f = new Fixture(path, reservations: authority);
+            var target = ReplayStorage.ObserveCapacity(f.Destination);
+            f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-release-reference", s.Identity,
+                s.ExporterIdentity, target.Volume, target.AllocationUnit, 2 * target.AllocationUnit, false, null);
+            int observations = 0;
+            void ObserveOtherProfile()
+            {
+                var remaining = authority.ObserveUnreserved(f.Destination, f.Files);
+                Require(remaining.Bytes > 0, "Another profile must observe released growth after producer absence.");
+                observations++;
+            }
+            f.Files.Published = ObserveOtherProfile;
+            f.Files.DeletedDirectory = p => { if (Path.GetFileName(p).StartsWith("save-")) ObserveOtherProfile(); };
+            var saved = await Finish(f.Save());
+            Require(saved.Succeeded && observations == 2 && string.IsNullOrEmpty(f.Cache.Status.StorageError),
+                "Publication and snapshot cleanup must not leave durable claims naming disappeared paths.");
+        });
+
+        await Check("shared-volume-publication-stays-saved-after-ledger-lock", async path =>
+        {
+            string authorityPath = Path.Combine(path, "authority");
+            using var f = new Fixture(path, reservations: new ReplayVolumeReservations(authorityPath));
+            var target = ReplayStorage.ObserveCapacity(f.Destination);
+            f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-release-reference", s.Identity,
+                s.ExporterIdentity, target.Volume, target.AllocationUnit, 2 * target.AllocationUnit, false, null);
+            FileStream block = null;
+            try
+            {
+                f.Files.Published = () => block = new FileStream(Path.Combine(authorityPath, "replay-volume-reservations.json"),
+                    FileMode.Open, FileAccess.Read, FileShare.Read);
+                var saved = await Finish(f.Save());
+                Require(saved.Succeeded && File.Exists(saved.File) && string.IsNullOrEmpty(f.Cache.Status.StorageError),
+                    "A ledger lock after publication cannot recreate completed ownership or reverse Saved.");
+                Require(!f.Save().Accepted, "A newly inaccessible ledger still blocks fresh admission.");
+                block.Dispose(); block = null; f.Files.Published = null;
+                Require((await Finish(f.Save())).Succeeded, "A restored ledger permits a new replay without stale prior growth.");
+            }
+            finally { block?.Dispose(); f.Files.Published = null; }
+        });
+
+        await Check("shared-volume-prepublication-failure-retains-anchors", async path =>
+        {
+            string authorityPath = Path.Combine(path, "authority");
+            var authority = new ReplayVolumeReservations(authorityPath);
+            using var f = new Fixture(path, reservations: authority);
+            var target = ReplayStorage.ObserveCapacity(f.Destination);
+            f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-release-reference", s.Identity,
+                s.ExporterIdentity, target.Volume, target.AllocationUnit, 2 * target.AllocationUnit, false, null);
+            FileStream block = null; bool published = false;
+            try
+            {
+                f.Files.Published = () => published = true;
+                f.Source.OutputWritten = _ => block = new FileStream(Path.Combine(authorityPath, "replay-volume-reservations.json"),
+                    FileMode.Open, FileAccess.Read, FileShare.Read);
+                var failed = await Finish(f.Save());
+                Require(!failed.Succeeded && !published && !string.IsNullOrEmpty(f.Cache.Status.StorageError),
+                    "Unreleased durable growth must fail before publication and report the blocker.");
+                Require(Directory.GetDirectories(f.Source.ReplayInfo.Directory, "save-*").Length == 1
+                    && Directory.GetFiles(f.Destination, "*.partial.mp4").Length == 1,
+                    "Failed update/release must retain inspectable output and snapshot anchors.");
+                block.Dispose(); block = null;
+                Require(authority.ObserveUnreserved(f.Destination, f.Files).Bytes > 0,
+                    "Another profile must validate the retained holder after the I/O fault ends.");
+                f.Source.OutputWritten = null;
+                Require((await Finish(f.Save())).Succeeded, "Confirmed producer absence and successful release permit a later replay.");
+            }
+            finally { block?.Dispose(); f.Source.OutputWritten = null; }
+        });
+        await Check("output-reservation-actual-volume-tracer", async path =>
+        {
+            using var f = new Fixture(path);
+            f.Source.Segments(0, 1);
+            long outputFree = 4095;
+            f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "fixture-only-r1", s.Identity,
+                s.ExporterIdentity, "volume-B", 4096, 4096, false, null);
+            f.Files.CapacityObservation = p => p.StartsWith(f.Destination, StringComparison.OrdinalIgnoreCase)
+                ? new("volume-B", 4096, outputFree) : new("volume-A", 4096, 1_000_000);
+            f.Files.Observation = p => new(p.StartsWith(f.Destination, StringComparison.OrdinalIgnoreCase) ? "volume-B" : "volume-A",
+                p, Path.GetFileName(p).StartsWith("chunk-") ? 1024 : p.EndsWith(".ts") || p.EndsWith("concat.txt") ? 4096 : 0,
+                new FileInfo(p).Length, Path.GetFileName(p).StartsWith("chunk-") ? 1024 : 4096);
+            var rejected = f.Save(1);
+            if (rejected.Accepted) await Finish(rejected);
+            Require(!rejected.Accepted && rejected.Rejection.Contains("output", StringComparison.OrdinalIgnoreCase)
+                && f.Files.Copies == 0 && f.Source.ExportCount == 0,
+                "One byte short on output volume B must reject before copies/export despite spare cache volume A.");
+            outputFree = 4096;
+            Require((await Finish(f.Save(1))).Succeeded, "Exact output allocation capacity must admit the real replay export path.");
+        });
+
+        await Check("output-reservation-same-volume-and-materialization", async path =>
+        {
+            using var f = new Fixture(path);
+            f.Source.Segments(0, 1);
+            long free = 12287;
+            f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "fixture-only-r1", s.Identity,
+                s.ExporterIdentity, "volume-V", 4096, 4096, false, null);
+            f.Files.CapacityObservation = _ => new("volume-V", 4096, free);
+            f.Files.Observation = p => new("volume-V", p,
+                Path.GetFileName(p).StartsWith("chunk-") || p.EndsWith(".ts") || p.EndsWith("concat.txt") || p.EndsWith(".partial.mp4") ? 4096 : 0,
+                new FileInfo(p).Length, 4096);
+            var rejected = f.Save(1);
+            if (rejected.Accepted) await Finish(rejected);
+            Require(!rejected.Accepted, "Shared-volume 8192 input/concat plus 4096 output must reject 12287 free bytes.");
+            free = 12288;
+            f.Files.BeforeCopy = (_, _) => free = 8192;
+            f.Source.ExportAction = () => free = 4096; // Both snapshot files now occupy their own extents.
+            f.Source.OutputWritten = _ =>
+            {
+                free = 0; // Output is also materialized: there is no remaining allocation promise.
+                f.Cache.Maintain(f.Id);
+            };
+            Require((await Finish(f.Save(1))).Succeeded, "Materialized snapshot/output bytes must not be subtracted again from current free capacity.");
+        });
+
+        await Check("output-reservation-late-tail-extension", async path =>
+        {
+            Fixture fixture = null;
+            using var f = fixture = new Fixture(path, wait: () =>
+            {
+                fixture.Source.Segments(0, 2);
+                return Task.CompletedTask;
+            });
+            f.Source.Segments(0, 1);
+            f.Files.CapacityObservation = p => p.StartsWith(f.Destination, StringComparison.OrdinalIgnoreCase)
+                ? new("volume-B", 4096, 4096) : new("volume-A", 4096, 1_000_000);
+            f.Files.Observation = p => new("volume-A", p, Path.GetFileName(p).StartsWith("chunk-") ? 4096 : 0, new FileInfo(p).Length, 4096);
+            f.Source.OutputEstimate = s => s.Closed
+                ? new(ReplayOutputEvidenceKind.CalibratedEstimate, "fixture-only-r1", s.Identity, s.ExporterIdentity, "volume-B", 4096, 8192, false, null)
+                : ReplayOutputDemand.Unmeasured("Tail has not closed; initial admission is provisional.");
+            var accepted = f.Save(2);
+            Require(accepted.Accepted, accepted.Rejection);
+            var result = await Finish(accepted);
+            Require(!result.Succeeded && result.Error.Contains("output capacity") && f.Source.ExportCount == 0 && f.Files.Copies == 0
+                && File.Exists(f.Source.Chunk(0)) && File.Exists(f.Source.Chunk(1)),
+                "A newly known tail must extend demand before copying/export, fail truthfully when it cannot fit, and preserve inputs.");
+        });
+
+        await Check("output-reservation-binding-and-unmeasured", async path =>
+        {
+            using var f = new Fixture(path);
+            f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "fixture-only-r1", "stale-selection",
+                s.ExporterIdentity, "not-consulted", 4096, 4096, false, null);
+            var stale = f.Save();
+            if (stale.Accepted) await Finish(stale);
+            Require(!stale.Accepted && stale.Rejection.Contains("stale") && f.Source.ExportCount == 0, "Stale selection evidence must fail before export.");
+            f.Source.OutputEstimate = null;
+            Require((await Finish(f.Save())).Succeeded && f.Cache.Status.OutputDemand.Kind == ReplayOutputEvidenceKind.Unmeasured,
+                "An unmeasured source must stay explicitly unmeasured while ordinary saves remain viable.");
+        });
+
+        await Check("output-reservation-publication-and-failed-cleanup", async path =>
+        {
+            using var f = new Fixture(path);
+            f.Source.Segments(0, 1);
+            f.Files.CapacityObservation = _ => new("volume-V", 4096, 1_000_000);
+            f.Files.Observation = p => new("volume-V", p, 4096, new FileInfo(p).Length, 4096);
+            f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "fixture-only-r1", s.Identity,
+                s.ExporterIdentity, "volume-V", 4096, 4096, false, null);
+            f.Files.FailCleanup = true;
+            var result = await Finish(f.Save(1));
+            Require(result.Succeeded && File.Exists(result.File) && !f.Cache.IsSaving
+                && Directory.GetDirectories(f.Source.ReplayInfo.Directory, "save-*").Length == 1,
+                "Published output must remain Saved while failed cleanup keeps its allocated inputs observable.");
+            Require((await Finish(f.Save(1))).Succeeded, "A stopped exporter must release future growth even when retained cleanup fails.");
+        });
 
         await Check("known-input-capacity-equality-and-rejection", async path =>
         {
@@ -678,6 +1161,26 @@ internal static class ReplayOwnershipChecks
                 "R02: retirement deletion overlapped its held observation or broke unrelated maintenance: " + maintenanceError);
         });
 
+        await Check("storage-stop-preserves-footage-and-owned-export", async path =>
+        {
+            using var f = new Fixture(path);
+            f.Source.ExportRelease = Signal();
+            var save = f.Save();
+            await f.Source.ExportEntered.Task.WaitAsync(Deadline);
+            f.Cache.PreserveSession(f.Id);
+            var retirement = f.Cache.RetireSessionAsync(f.Id);
+            Require(!retirement.IsCompleted && !f.Source.Disposed, "A storage stop must leave accepted export ownership intact.");
+            f.Source.ExportRelease.SetResult();
+            var result = await Finish(save);
+            await retirement.WaitAsync(Deadline);
+            Require(result.Succeeded && File.Exists(result.File) && f.Source.Disposed,
+                "Accepted output must finish before source disposal during a storage stop.");
+            Require(Directory.Exists(f.Source.ReplayInfo.Directory) && File.Exists(f.Source.Chunk(0)),
+                "A storage stop must retain source footage after capture resources are disposed.");
+            long retained = ReplayStorage.Bytes(ReplayStorage.Inventory([f.Source.ReplayInfo.Directory], f.Files));
+            Require(retained > 0 && f.Cache.Status.CacheBytes >= retained,
+                "Retained source allocation must remain charged after retirement.");
+        });
         await Check("pins-prune-retire", async path =>
         {
             using var f = new Fixture(path);

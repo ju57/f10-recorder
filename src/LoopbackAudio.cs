@@ -26,6 +26,7 @@ namespace F10Recorder
         public string FfmpegFormat { get; private set; }
         public string EndpointId { get; private set; }
         public Exception Failure { get { return failure; } }
+        internal bool ProducerAbsent { get { lock (gate) return worker == null || !worker.IsAlive; } }
 
         public LoopbackAudio()
         {

@@ -17,16 +17,18 @@ internal sealed class RecorderHost : IWindowsRecorder
     readonly HotkeyWindow shortcuts;
     readonly ForegroundApplicationTracker foreground;
     readonly RecorderNotifications notices;
+    readonly ReplayStorageCoordinator storage;
     ReplayEngine engine;
     RecordingProfile profile;
     WindowCaptureTarget windowTarget;
-    bool disposed;
+    bool disposed, ready;
     bool savedPauseIntent;
+    bool storageWarningPresented, storageHoldPresented;
     public Settings Config { get; private set; }
     public ProfileStatus ProfileStatus => profile.Status;
     public string DataDirectory { get; }
     public bool Paused { get; private set; }
-    public bool Ready { get; private set; }
+    public bool Ready { get => ready && !storage.Stopped; private set => ready = value; }
     public CapturePhase Phase { get; private set; } = CapturePhase.Starting;
     public bool CanSave => !Applying && !Paused && engine?.CanSave == true;
     public bool Applying { get; private set; }
@@ -39,7 +41,10 @@ internal sealed class RecorderHost : IWindowsRecorder
     public bool ScreenshotRegistered => shortcuts.ScreenshotRegistered;
     public string ApplicationName => Config.CaptureMode == "window" ? Path.GetFileNameWithoutExtension(Config.WindowExecutable) : foreground.ApplicationName;
     public int CaptureProcessId => engine?.CaptureProcessId ?? 0;
-    public RecorderMetrics Metrics => engine?.Metrics ?? new RecorderMetrics();
+    public RecorderMetrics Metrics
+    {
+        get { var result = engine?.Metrics ?? new RecorderMetrics(); storage.WriteMetrics(result); return result; }
+    }
     public string EngineCapabilityContext { get; private set; }
     public bool Saving => engine?.IsSaving == true;
     internal Func<Task> PrepareRemoteScreenshot;
@@ -62,7 +67,9 @@ internal sealed class RecorderHost : IWindowsRecorder
         data = WorkerIdentity.DataPath(data);
         Initialize(data); owner = new RecorderDispatch(dispatch); synthetic = syntheticSource; customStartupWriter = setStartup != null; startupWriter = setStartup ?? WindowsStartup.SetEnabled; captureScreenshot = screenshotSource ?? ScreenshotCapture.Capture;
         DataDirectory = data; settingsPath = Path.Combine(data, "settings.json"); profile = RecordingProfile.Load(data); Config = profile.Settings;
-        Paused = paused || profile.State.Paused || profile.State.UserStopped || ProfileStatus.ActivationRequired;
+        storage = new ReplayStorageCoordinator(new ReplayStorageStopLatch(data),
+            new ReplayVolumeReservations(ProfileOwnership.RootDirectory, ReplayStorageSafety.MinimumBytes));
+        Paused = storage.Hold.Held || paused || profile.State.Paused || profile.State.UserStopped || ProfileStatus.ActivationRequired;
         savedPauseIntent = paused || profile.State.Paused;
         repairMedia = repairEngine ?? (() => MediaDependency.Install(DataDirectory, true));
         shortcuts = new HotkeyWindow(controlTitle); foreground = new ForegroundApplicationTracker();
@@ -83,19 +90,33 @@ internal sealed class RecorderHost : IWindowsRecorder
         try { shortcuts.Register(settings); }
         catch (Exception ex) { State = ex.Message; Log.Write(ex.Message); }
     }
-    void StartEngine()
+    void StartEngine(bool explicitStorageResume = false)
     {
         var Dispatch = owner.NextGeneration();
         EngineCapabilityContext = Guid.NewGuid().ToString("N");
         windowTarget?.Dispose(); windowTarget = null;
+        var hold = storage.Hold;
+        if (!explicitStorageResume && hold.Held) Paused = true;
         if (ProfileStatus.ActivationRequired || Paused)
         {
-            engine = null; Paused = true; Ready = false; Phase = CapturePhase.Paused; State = ProfileStatus.ActivationRequired ? ProfileStatus.Message : "Paused";
+            engine = null; Paused = true; Ready = false; Phase = CapturePhase.Paused; State = hold.Held ? "Storage safety hold: " + hold.Reason : ProfileStatus.ActivationRequired ? ProfileStatus.Message : "Paused";
+            Changed?.Invoke(); return;
+        }
+        try { storage.RequireAdmission(ReplayCacheLocations.Current(Config, DataDirectory), Config.OutputDirectory, Config); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or OverflowException)
+        {
+            storage.StopForStorageFailure(error.Message);
+            Paused = true; Ready = false; Phase = CapturePhase.Paused; State = "Storage safety hold: " + error.Message;
             Changed?.Invoke(); return;
         }
         if (Config.CaptureMode == "window" && !synthetic) windowTarget = new WindowCaptureTarget(Config);
-        engine = new ReplayEngine(Config, DataDirectory, Paused, synthetic, windowTarget == null ? null : windowTarget.Read);
+        engine = new ReplayEngine(Config, DataDirectory, Paused, synthetic, windowTarget == null ? null : windowTarget.Read, storage, explicitStorageResume);
         var current = engine;
+        current.StorageWarning += reason => Dispatch(() =>
+        {
+            if (!storageWarningPresented) Notification?.Invoke("Replay storage is low", reason, NotificationKind.Warning, 6000);
+            storageWarningPresented = true;
+        });
         current.CaptureStatusChanged += () => Dispatch(() => PresentCaptureStatus(current.ReadCaptureStatus()));
         PresentCaptureStatus(current.ReadCaptureStatus());
         engine.SaveStarted += () => Dispatch(notices.SaveStarted);
@@ -105,6 +126,18 @@ internal sealed class RecorderHost : IWindowsRecorder
     {
         State = status.Ready && !shortcuts.SaveRegistered ? "Buffering · save shortcut unavailable" : status.Message;
         Phase = status.Phase; Ready = status.Ready;
+        var metrics = Metrics;
+        if (metrics.ReplayStorageSafetyWarning && !storageWarningPresented)
+            Notification?.Invoke("Replay storage is low", "Unreserved replay storage is below five decimal GB.", NotificationKind.Warning, 6000);
+        storageWarningPresented = metrics.ReplayStorageSafetyWarning;
+        if (engine?.StorageHeld == true)
+        {
+            Paused = true; Ready = false; Phase = CapturePhase.Paused;
+            State = "Storage safety hold: " + metrics.ReplayStorageSafetyReason;
+            if (!storageHoldPresented) Notification?.Invoke("Replay recording paused for storage", metrics.ReplayStorageSafetyReason, NotificationKind.Warning, 6000);
+            storageHoldPresented = true;
+        }
+        else storageHoldPresented = false;
         notices.CaptureChanged(status.Phase, status.Message, Ready, Paused, Config, shortcuts.SaveRegistered);
         Changed?.Invoke();
     }
@@ -113,18 +146,40 @@ internal sealed class RecorderHost : IWindowsRecorder
     public void Pause(bool value)
     {
         if (Applying || disposed) return;
+        bool held = storage.Hold.Held;
+        if (!value && (Paused || held))
+        {
+            if (Saving || ScreenshotInProgress) throw new IOException("Wait for the accepted replay or screenshot to finish saving.");
+            engine?.RequireResumeReady();
+            storage.RequireAdmission(ReplayCacheLocations.Current(Config, DataDirectory), Config.OutputDirectory, Config);
+        }
+        if (!value && held)
+        {
+            if (engine != null) engine.RequireStorageResume();
+            else
+            {
+                storage.RequireResume(ReplayCacheLocations.Current(Config, DataDirectory), Config.OutputDirectory);
+            }
+        }
         if (value) savedPauseIntent = true;
-        if (Paused == value) return;
+        if (Paused == value && !held) return;
         if (!value && ProfileStatus.ActivationRequired)
         {
             if (!ProfileStatus.CanWrite || ProfileStatus.RequiresCorrection) throw new InvalidOperationException(ProfileStatus.Message);
             try { profile.Commit(Config, paused: false, userStopped: false, activationRequired: false); }
             catch { profile = RecordingProfile.Load(DataDirectory); State = ProfileStatus.Message; Changed?.Invoke(); throw; }
-            Config = profile.Settings; Paused = false; StartEngine();
+            Config = profile.Settings; Paused = false; StartEngine(held);
         }
-        else { Paused = value; if (engine == null && !value) StartEngine(); else engine?.Pause(value); }
+        else
+        {
+            Paused = value;
+            if (engine == null && !value) StartEngine(held);
+            else engine?.Pause(value);
+        }
         savedPauseIntent = value;
-        PresentCaptureStatus(engine.ReadCaptureStatus()); notices.PauseChanged(value);
+        if (engine != null) PresentCaptureStatus(engine.ReadCaptureStatus());
+        else Changed?.Invoke();
+        notices.PauseChanged(value);
     }
     public void Restart()
     {
@@ -142,6 +197,7 @@ internal sealed class RecorderHost : IWindowsRecorder
         using var cacheSelection = ReplayCacheLocations.PinSelection(next);
         if (next.ReplayCacheBudgetBytes < Config.ReplayCacheBudgetBytes || !string.Equals(ReplayCacheLocations.Current(next, DataDirectory), ReplayCacheLocations.Current(Config, DataDirectory), StringComparison.OrdinalIgnoreCase))
             ValidateBudgetReduction(next.ReplayCacheBudgetBytes, next);
+        if (!Paused) storage.RequireAdmission(ReplayCacheLocations.Current(next, DataDirectory), next.OutputDirectory, next);
         // Reject an unavailable/untrusted engine before changing shortcuts or stopping capture.
         // Every subsequent process launch still verifies and leases the executable again.
         MediaDependency.ResolveExecutable();
@@ -252,7 +308,7 @@ internal sealed class RecorderHost : IWindowsRecorder
     public void Dispose()
     {
         if (disposed) return; disposed = true; owner.Dispose();
-        shortcuts.Dispose(); foreground.Dispose(); engine?.Dispose(); windowTarget?.Dispose();
+        shortcuts.Dispose(); foreground.Dispose(); engine?.Dispose(); storage.Dispose(); windowTarget?.Dispose();
     }
     public Task StopAsync()
     {

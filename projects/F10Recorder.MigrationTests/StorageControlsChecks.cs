@@ -106,9 +106,24 @@ internal static class StorageControlsChecks
                     Require(Find<TextBox>(panel, "ReplayCacheBudgetGB").Text == GB(12_345_678_901), "Custom byte budget was rounded on entry.");
                     Require(Find<TextBox>(panel, "ReplayCacheDirectory").Text == oldRoot, "Historical cache location changed.");
                     checks.Add("defaults-and-exact-custom-budget");
+                    var demandStatus = Find<TextBlock>(panel, "ReplayOutputDemandStatus");
+                    Require(demandStatus.Text.Contains("unmeasured", StringComparison.OrdinalIgnoreCase)
+                        && demandStatus.TextWrapping == Avalonia.Media.TextWrapping.Wrap,
+                        "An ordinary paused profile must show its explicit unmeasured output estimate without hiding overflow.");
+                    checks.Add("explicit-unmeasured-output-status");
                     // Exercise the production Settings content against a short logical work
                     // area, rather than rendering only the Storage page in isolation.
-                    var layoutPanel = new SettingsPanel(client); layoutPanel.SelectPage(3);
+                    var heldStatus = Snapshot();
+                    heldStatus.Metrics.ReplayStorageSafetyHeld = true;
+                    heldStatus.Metrics.ReplayStorageSafetyKind = "Stop";
+                    heldStatus.Metrics.ReplayStorageSafetyReason = "The storage stop remains held until the capture producer has exited and qualified capacity checks allow explicit Resume. " + new string('x', 360);
+                    using var heldClient = new WorkerRecorder(heldStatus, _ => throw new IOException("The held-state UI fixture must not issue commands."), profilePath);
+                    var layoutPanel = new SettingsPanel(heldClient); layoutPanel.SelectPage(3);
+                    var heldText = Find<TextBlock>(layoutPanel, "ReplayOutputDemandStatus");
+                    Require(heldText.Text.Contains("Recording stopped for storage.") && heldText.Text.Contains("Use Resume")
+                        && heldText.TextWrapping == Avalonia.Media.TextWrapping.Wrap,
+                        "A persistent storage stop must explain explicit Resume and keep the reason readable.");
+                    checks.Add("persistent-storage-stop-and-explicit-resume-message");
                     var layoutWindow = new Window { Content = layoutPanel, ShowInTaskbar = false };
                     var layoutSamples = new List<object>(); report["layout"] = layoutSamples;
                     try

@@ -9,5 +9,7 @@ namespace F10Recorder
         internal static Func<string> CaptureHealthProbe = null;
         // Verification-only before/after overrides; the application never sets this.
         internal static Func<List<string>, List<string>> CaptureArgumentProbe = null;
+        internal static Action<IReadOnlyList<string>> CaptureArgumentObserver = null;
+        internal static Action<IReadOnlyList<string>> ExportArgumentObserver = null;
     }
 }

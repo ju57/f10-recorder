@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -43,32 +44,59 @@ namespace F10Recorder
                 }
             }
         }
-        internal static IDisposable OpenVerifiedExecutable(string path)
+        internal static ExecutableLease OpenVerifiedExecutable(string path)
+            => ExecutableLease.Open(path);
+        internal sealed class ExecutableLease : IDisposable
         {
-            string full = Path.GetFullPath(path);
-            CheckOwned(RootDirectory, full);
-            string name = Path.GetFileName(full);
-            string expectedHash = name.Equals("ffmpeg.exe", StringComparison.OrdinalIgnoreCase) ? ExecutableSha256
-                : name.Equals("ffprobe.exe", StringComparison.OrdinalIgnoreCase) ? ProbeSha256 : null;
-            if (expectedHash == null) throw new IOException("Only approved recording-engine tools may run.");
-            var lease = new ExecutableLease();
-            try
+            readonly object gate = new object();
+            IDisposable root, parents;
+            FileStream file;
+            bool disposed;
+            internal string PathName { get; private set; }
+            ExecutableLease() { }
+            internal static ExecutableLease Open(string path)
             {
-                lease.Root = TrustedStorage.Acquire(RootDirectory);
-                lease.Parents = TrustedStorage.PinDirectories(Path.GetDirectoryName(full));
-                lease.File = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
-                TrustedStorage.ValidateFile(full);
-                using (var sha = SHA256.Create())
-                    if (!BitConverter.ToString(sha.ComputeHash(lease.File)).Replace("-", "").Equals(expectedHash, StringComparison.OrdinalIgnoreCase)) throw new IOException("The recording engine failed verification. Choose Repair recording engine.");
-                return lease;
+                string full = Path.GetFullPath(path);
+                CheckOwned(RootDirectory, full);
+                string name = Path.GetFileName(full);
+                string expectedHash = name.Equals("ffmpeg.exe", StringComparison.OrdinalIgnoreCase) ? ExecutableSha256
+                    : name.Equals("ffprobe.exe", StringComparison.OrdinalIgnoreCase) ? ProbeSha256 : null;
+                if (expectedHash == null) throw new IOException("Only approved recording-engine tools may run.");
+                var lease = new ExecutableLease();
+                try
+                {
+                    lease.root = TrustedStorage.Acquire(RootDirectory);
+                    lease.parents = TrustedStorage.PinDirectories(Path.GetDirectoryName(full));
+                    lease.file = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    TrustedStorage.ValidateFile(full);
+                    using (var sha = SHA256.Create())
+                        if (!BitConverter.ToString(sha.ComputeHash(lease.file)).Replace("-", "").Equals(expectedHash, StringComparison.OrdinalIgnoreCase)) throw new IOException("The recording engine failed verification. Choose Repair recording engine.");
+                    lease.PathName = full;
+                    return lease;
+                }
+                catch { lease.Dispose(); throw; }
             }
-            catch { lease.Dispose(); throw; }
-        }
-        sealed class ExecutableLease : IDisposable
-        {
-            internal IDisposable Root, Parents;
-            internal FileStream File;
-            public void Dispose() { if (File != null) File.Dispose(); if (Parents != null) Parents.Dispose(); if (Root != null) Root.Dispose(); }
+            internal Process Start(ProcessStartInfo info)
+            {
+                lock (gate)
+                {
+                    if (disposed) throw new ObjectDisposedException(nameof(ExecutableLease));
+                    if (!string.Equals(Path.GetFullPath(info.FileName), PathName, StringComparison.OrdinalIgnoreCase))
+                        throw new IOException("The verified engine lease cannot start a different executable.");
+                    return Process.Start(info);
+                }
+            }
+            public void Dispose()
+            {
+                lock (gate)
+                {
+                    if (disposed) return;
+                    disposed = true;
+                    if (file != null) file.Dispose();
+                    if (parents != null) parents.Dispose();
+                    if (root != null) root.Dispose();
+                }
+            }
         }
         internal static bool TryValidate(string path, out string version)
         {

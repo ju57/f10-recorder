@@ -21,6 +21,15 @@ namespace F10Recorder
         public long UiWorkingSetBytes;
         public double UiCpuPercent;
         public long CacheBytes;
+        // Missing fields from an older worker never imply measured output demand.
+        public string ReplayOutputDemandKind = "Unmeasured";
+        public string ReplayOutputDemandRevision;
+        public string ReplayOutputDemandReason = "Output/finalization calibration is not available for this recording profile.";
+        public string ReplayStorageError;
+        public string ReplayStorageSafetyKind = "Unmeasured";
+        public string ReplayStorageSafetyReason = "Capture poll and stop growth have not been qualified for this recording profile.";
+        public bool ReplayStorageSafetyHeld;
+        public bool ReplayStorageSafetyWarning;
         public int Recoveries;
         public double LastSaveMilliseconds;
         public long LastSaveBytes;

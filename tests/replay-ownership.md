@@ -1,5 +1,10 @@
 # Replay ownership checks
 
+The supplied output-demand integration and its separate independent cases are
+described in [output demand checks](replay-output-demand.md). Production demand
+remains unmeasured pending reference calibration; this is no storage-safety
+acceptance claim. Production capture/output admission now requires qualification. The known-input-only fixtures below remain measurement controls without the production account ledger; see [producer commitments](../docs/storage-admission.md).
+
 Run `./tests/replay-ownership.ps1 -Plan` to preview effects, then
 `./tests/replay-ownership.ps1` to build and run the file-only checks. The pinned
 SDK and locked dependencies are used. Evidence is written to a unique ignored
