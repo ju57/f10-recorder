@@ -376,8 +376,13 @@ namespace F10Recorder
                     }
                     exportProducerStopped = absent;
                 }, checkStorage: checkStorage);
-            if (!LastExport.Success) throw new IOException("Replay save failed (" + LastExport.Failure + "): "
-                + LastExport.Error + " " + LastExport.StandardError[..Math.Min(4096, LastExport.StandardError.Length)]);
+            if (!LastExport.Success)
+            {
+                if (LastExport.ProducerAbsent)
+                    Log.Write(FormattableString.Invariant($"Replay export guard invocation: work={LastExport.LastStorageCheckWorkMilliseconds:F3}ms; preceding idle={LastExport.LastStorageCheckIdleMilliseconds:F3}ms; producer absent=True."));
+                throw new IOException("Replay save failed (" + LastExport.Failure + "): "
+                    + LastExport.Error + " " + LastExport.StandardError[..Math.Min(4096, LastExport.StandardError.Length)]);
+            }
         }
         public static Process StartProcess(string executable, IEnumerable<string> args, string workDirectory)
         {

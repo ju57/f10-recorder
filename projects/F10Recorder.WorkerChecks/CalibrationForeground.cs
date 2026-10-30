@@ -166,6 +166,19 @@ internal static class CalibrationForeground
             Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { DirectoryLimit = 353 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { StopBytes = 126_500_000_001 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { OutsideBuildAllowanceBytes = 2_000_000_001 }));
+            var cadence = foreground with { MaximumChildren = 423, RetainedChildren = 391,
+                BudgetBytes = 144_000_000_000, StopBytes = 142_500_000_000, DeadlineSeconds = 46800,
+                OfflineDeadlineSeconds = 28800, DirectoryLimit = 448, FileLimit = 24576,
+                RetainedBudgetBytes = 124_000_000_000, RetainedElapsedSeconds = 38000, RetainedOfflineSeconds = 23000,
+                RetainedRoots = foreground.RetainedRoots.Concat(Enumerable.Range(0, 3).Select(n => Path.Combine(root, "cadence-history-" + n))).ToArray() };
+            foreach (string directory in cadence.RetainedRoots) Directory.CreateDirectory(directory);
+            ReplayCalibrationRun.ValidateResources(cadence);
+            Reject(() => ReplayCalibrationRun.ValidateResources(cadence with { RetainedChildren = 390 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(cadence with { RetainedChildren = 392 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(cadence with { FloorBytes = 59_999_999_999 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(cadence with { FileLimit = 24577 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(cadence with { DirectoryLimit = 449 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(cadence with { StopBytes = 142_500_000_001 }));
         });
         File.WriteAllText(Path.Combine(root, "foreground-checks.json"), JsonSerializer.Serialize(new {
             result = "passed", results, effects = "Pure admission delegates and tiny receipt; no window, input injection, child, engine, sound or capture." }, new JsonSerializerOptions { WriteIndented = true }));

@@ -62,6 +62,7 @@ internal static class WorkerChecks
             if (args.Length == 2 && args[0] == "--replay-calibration-startup-checks") return CalibrationStartupChecks.Run(Path.GetFullPath(args[1]));
             if (args.Length == 2 && args[0] == "--replay-calibration-fixture-publication-checks") return CalibrationFixturePublicationChecks.Run(Path.GetFullPath(args[1]));
             if (args.Length == 3 && args[0] == "--replay-calibration-export-startup-checks") return ReplayExportStartupChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
+            if (args.Length == 3 && args[0] == "--replay-calibration-export-slow-checks") return ReplayExportStartupChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), slowObservation: true);
             if (args.Length == 3 && args[0] == "--replay-calibration-export-snapshot-checks") return ReplayExportSnapshotChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
             if (args.Length == 3 && args[0] == "--replay-calibration-export-stale-checks") return ReplayExportStartupChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), stale: true);
             if (args.Length == 3 && args[0] == "--replay-calibration-engine-lease-checks") return ReplayExecutableLeaseChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));

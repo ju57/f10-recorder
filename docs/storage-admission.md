@@ -38,8 +38,9 @@ up to 200 ms. Capture supervision retries a busy observation after 5 ms within
 the same 500 ms freshness window; contention never refreshes its timestamp.
 Persistent contention still fails work and retains uncertain claims and media.
 
-Export checks storage and its model every 200 ms through the actual process
-adapter, including after capture stops. More than 500 ms since a successful
+Export checks storage and its model on a 200 ms start cadence through the actual
+process adapter, including after capture stops. Scan work counts toward that
+cadence instead of adding another 200 ms afterward. More than 500 ms since a successful
 observation, lost capacity, withdrawal or peak exceedance fails the export;
 the adapter stops only its owned child. No publication occurs before confirmed
 producer absence and successful claim release. Unknown cleanup retains claims

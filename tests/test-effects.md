@@ -32,6 +32,20 @@ declared in the fresh admission. No failed source becomes a passing sample.
 The observer normalizes each leaf path once before retained-root matching and
 caches its current-root prefix; every live-handle allocation/EOF refresh remains.
 
+The export-cadence correction preserves391prior children plus32fresh (423ceiling),
+144GB/142.5GBstop,780wall/480offline minutes,28retained roots/124GBretained,
+24576files/448directories and2GBoutside allowance. Its wrapper reserves300seconds
+each for preflight and closure. Six new sources,three heldout,no refit,500msactive
+observations and the60GBcaller floor remain mandatory.
+
+`--replay-calibration-export-slow-checks <fresh-root> <engine-root>` runs one
+CPU-only16x16/null-output child for4.5seconds with330msactual observation work,
+250msunseal/600msseal callbacks and a12second adapter deadline. It requires at
+least four post-seal observations,successful exit and every measured evidence gap
+at most500ms. The old completion-based200mswait fails this control. The corrected
+start cadence includes scan work. The existing600msobservation sensitivity still
+must reject and confirm owned-child absence. No desktop/audio/GPU/model action.
+
 `--replay-calibration-capture-evidence-checks <fresh-root>` reproduces duplicate
 legacy success-only exit hashes and checks six distinct capture PID/start/session
 receipts plus rejection of missing/non-UTC/relative identity. Controlled values

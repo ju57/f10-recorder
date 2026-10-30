@@ -105,7 +105,12 @@ internal static class ReplayCalibrationRun
         hardBytes = plan.BudgetBytes, minimumFreeBytes = plan.FloorBytes, deadlineSeconds = plan.DeadlineSeconds };
     internal static void ValidateResources(CalibrationPlan plan)
     {
-        bool foregroundReplacement = plan != null && plan.MaximumChildren == 374 && plan.RetainedChildren == 342
+        bool cadenceReplacement = plan != null && plan.MaximumChildren == 423 && plan.RetainedChildren == 391
+            && plan.BudgetBytes == 144_000_000_000 && plan.StopBytes == 142_500_000_000
+            && plan.DeadlineSeconds == 46800 && plan.DirectoryLimit == 448 && plan.FileLimit == 24576 && plan.OfflineDeadlineSeconds == 28800
+            && plan.OutputComponentBytes == 2_000_000_000 && plan.RetainedBudgetBytes == 124_000_000_000
+            && plan.OutsideBuildAllowanceBytes == 2_000_000_000;
+        bool foregroundReplacement = cadenceReplacement || plan != null && plan.MaximumChildren == 374 && plan.RetainedChildren == 342
             && plan.BudgetBytes == 128_000_000_000 && plan.StopBytes == 126_500_000_000
             && plan.DeadlineSeconds == 39600 && plan.DirectoryLimit == 352 && plan.FileLimit == 21504 && plan.OfflineDeadlineSeconds == 25200
             && plan.OutputComponentBytes == 2_000_000_000 && plan.RetainedBudgetBytes == 106_000_000_000
@@ -151,7 +156,7 @@ internal static class ReplayCalibrationRun
                 || plan.MaximumChildren == 74 && plan.DirectoryLimit == 72 && plan.FileLimit == 5120 && plan.OfflineDeadlineSeconds == 2700
                     && plan.OutputComponentBytes == 2_000_000_000 && plan.RetainedBudgetBytes == 24_000_000_000)),
             "Calibration limits or frozen six-source order differ from an admitted historical or lifecycle replacement boundary.");
-        Require(plan.RetainedRoots != null && plan.RetainedRoots.Length >= 4 && plan.RetainedRoots.Length <= (foregroundReplacement ? 25 : lifecycleReplacement ? 24 : evidenceReplacement ? 17 : exportReplacement ? 16 : readinessReplacement ? 15 : startupReplacement ? 14 : contentionReplacement ? 11 : fresh ? 10 : 8)
+        Require(plan.RetainedRoots != null && plan.RetainedRoots.Length >= 4 && plan.RetainedRoots.Length <= (cadenceReplacement ? 28 : foregroundReplacement ? 25 : lifecycleReplacement ? 24 : evidenceReplacement ? 17 : exportReplacement ? 16 : readinessReplacement ? 15 : startupReplacement ? 14 : contentionReplacement ? 11 : fresh ? 10 : 8)
             && plan.RetainedRoots.Distinct(StringComparer.OrdinalIgnoreCase).Count() == plan.RetainedRoots.Length
             && plan.RetainedRoots.All(r => Directory.Exists(r) && !Path.GetFullPath(r).Equals(Path.GetFullPath(plan.Root), StringComparison.OrdinalIgnoreCase))
             && double.IsFinite(plan.RetainedElapsedSeconds) && plan.RetainedElapsedSeconds >= 0 && plan.RetainedElapsedSeconds < plan.DeadlineSeconds
@@ -172,7 +177,7 @@ internal static class ReplayCalibrationRun
         sampleIntervalMs = 100, maximumActiveGapMs = 500, observationContract = "active-offline-v1", expectedBytes = 18_000_000_000L,
         fileLimit = plan.FileLimit, directoryLimit = plan.DirectoryLimit, offlineDeadlineSeconds = plan.OfflineDeadlineSeconds,
         completeOfflineBatchCeilingSeconds = CompleteOfflineBatchSeconds,
-        additionalReplacementVerificationSeconds = plan.MaximumChildren is 147 or 179 or 256 or 288 or 342 or 374 ? FullReplacementVerificationSeconds : plan.MaximumChildren == 137 ? 210 : plan.MaximumChildren == 115 ? ReplacementVerificationSeconds : 0,
+        additionalReplacementVerificationSeconds = plan.MaximumChildren is 147 or 179 or 256 or 288 or 342 or 374 or 423 ? FullReplacementVerificationSeconds : plan.MaximumChildren == 137 ? 210 : plan.MaximumChildren == 115 ? ReplacementVerificationSeconds : 0,
         phaseLimitsSeconds = new { captureSetup = 330, exportController = 130, exportChild = 120,
             foregroundAdmission = CalibrationForeground.DeadlineSeconds, mainInspection = MainInspectionSeconds, mainDecodeChild = MainInspectionSeconds - InspectionCleanupSeconds,
             shortInspection = ShortInspectionSeconds, shortDecodeChild = ShortInspectionSeconds - InspectionCleanupSeconds,

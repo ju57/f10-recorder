@@ -19,6 +19,8 @@ internal sealed class ReplayExportProcessReceipt
     public string StandardOutput { get; internal set; } = "";
     public string StandardError { get; internal set; } = "";
     public long ElapsedMilliseconds { get; internal set; }
+    public double LastStorageCheckWorkMilliseconds { get; internal set; }
+    public double LastStorageCheckIdleMilliseconds { get; internal set; }
     public string Failure { get; internal set; }
     public string Error { get; internal set; }
     public bool Success => Failure == null && ProducerAbsent && ActualExitObserved && ExitCode == 0 && CaptureComplete;
@@ -49,6 +51,21 @@ internal static class ReplayExportProcess
         using var stdout = new MemoryStream();
         using var stderr = new MemoryStream();
         using var cancellation = new CancellationTokenSource();
+        long storageObservationStarted = Stopwatch.GetTimestamp();
+        long storageObservationFinished = storageObservationStarted;
+        void ObserveStorage()
+        {
+            // The200mscadence includes real observation work. Waiting200ms
+            // after a330msscan would consume530msof the same500msbudget.
+            storageObservationStarted = Stopwatch.GetTimestamp();
+            receipt.LastStorageCheckIdleMilliseconds = Stopwatch.GetElapsedTime(storageObservationFinished).TotalMilliseconds;
+            try { checkStorage?.Invoke(); }
+            finally
+            {
+                storageObservationFinished = Stopwatch.GetTimestamp();
+                receipt.LastStorageCheckWorkMilliseconds = Stopwatch.GetElapsedTime(storageObservationStarted, storageObservationFinished).TotalMilliseconds;
+            }
+        }
         void ObservedWork(Action work)
         {
             if (checkStorage == null) { work(); return; }
@@ -65,7 +82,7 @@ internal static class ReplayExportProcess
                     Thread.Sleep(25);
                     if (!pendingWork.IsCompleted)
                     {
-                        checkStorage();
+                        ObserveStorage();
                         if (elapsed.ElapsedMilliseconds >= timeoutMilliseconds)
                         {
                             receipt.TimedOut = true;
@@ -80,11 +97,11 @@ internal static class ReplayExportProcess
             try { pendingWork.GetAwaiter().GetResult(); }
             catch (Exception error) { failure ??= error; }
             if (failure != null) ExceptionDispatchInfo.Capture(failure).Throw();
-            checkStorage();
+            ObserveStorage();
         }
         try
         {
-            checkStorage?.Invoke();
+            ObserveStorage();
             ObservedWork(() => lease = MediaDependency.OpenVerifiedExecutable(executable));
             // Revoke closed-output claims before CreateProcess can create output.
             ObservedWork(() => producerStopped?.Invoke(false));
@@ -101,14 +118,10 @@ internal static class ReplayExportProcess
             });
             ObservedWork(() => started?.Invoke(process));
             var logs = new[] { stdout, stderr };
-            long storageChecked = Stopwatch.GetTimestamp();
             while (true)
             {
-                if (Stopwatch.GetElapsedTime(storageChecked).TotalMilliseconds >= 200)
-                {
-                    checkStorage?.Invoke();
-                    storageChecked = Stopwatch.GetTimestamp();
-                }
+                if (Stopwatch.GetElapsedTime(storageObservationStarted).TotalMilliseconds >= 200)
+                    ObserveStorage();
                 for (int i = 0; i < streams.Length; i++)
                 {
                     if (ended[i]) continue;
