@@ -47,6 +47,13 @@ and evidence. These checks cannot prevent an arbitrary external writer from
 exhausting a disk between observations; native pressure/quota qualification
 remains a separate requirement.
 
+Verified executable loading, process creation/job assignment and durable producer
+callbacks can block. The adapter owns and joins each such operation while its
+caller continues the same real storage checks. A failed check still waits for
+an in-flight creation to yield its actual child handle before owned cleanup;
+it never releases the executable lease or reports absence for an orphaned launch.
+This preserves observation coverage through startup without widening500ms.
+
 | Producer | Current integration | Outstanding obligation |
 | --- | --- | --- |
 | Replay acquisition | Qualified poll/stop growth, durable guard, actual job/worker proof | Fresh empirical qualification and active-worker acceptance |

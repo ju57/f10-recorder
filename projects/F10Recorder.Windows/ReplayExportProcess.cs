@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Text;
 
 namespace F10Recorder;
@@ -48,24 +49,57 @@ internal static class ReplayExportProcess
         using var stdout = new MemoryStream();
         using var stderr = new MemoryStream();
         using var cancellation = new CancellationTokenSource();
+        void ObservedWork(Action work)
+        {
+            if (checkStorage == null) { work(); return; }
+            // CreateProcess, executable verification and durable producer writes
+            // can block while the output grows. Keep the SAME real storage guard
+            // running on this owner thread instead of spending its freshness
+            // window waiting for lifecycle work and then a competing cache lock.
+            var pendingWork = Task.Run(work);
+            Exception failure = null;
+            try
+            {
+                while (!pendingWork.IsCompleted)
+                {
+                    Thread.Sleep(25);
+                    if (!pendingWork.IsCompleted)
+                    {
+                        checkStorage();
+                        if (elapsed.ElapsedMilliseconds >= timeoutMilliseconds)
+                        {
+                            receipt.TimedOut = true;
+                            throw new IOException("Recording-engine lifecycle work exceeded its deadline.");
+                        }
+                    }
+                }
+            }
+            catch (Exception error) { failure = error; }
+            // Always join, including guard failure. A launch may already own a
+            // child: cleanup needs its actual handle, never an orphaned Task/PID.
+            try { pendingWork.GetAwaiter().GetResult(); }
+            catch (Exception error) { failure ??= error; }
+            if (failure != null) ExceptionDispatchInfo.Capture(failure).Throw();
+            checkStorage();
+        }
         try
         {
-            lease = MediaDependency.OpenVerifiedExecutable(executable);
             checkStorage?.Invoke();
+            ObservedWork(() => lease = MediaDependency.OpenVerifiedExecutable(executable));
             // Revoke closed-output claims before CreateProcess can create output.
-            producerStopped?.Invoke(false);
-            checkStorage?.Invoke(); // Producer metadata may have consumed observation time before launch.
+            ObservedWork(() => producerStopped?.Invoke(false));
             receipt.ProducerAbsent = false;
-            process = CaptureSession.StartVerifiedProcess(lease, arguments)
-                ?? throw new IOException("The recording-engine process did not start.");
-            receipt.ProcessId = process.Id;
-            receipt.ProcessStartedUtc = process.StartTime.ToUniversalTime();
-            streams[0] = process.StandardOutput.BaseStream;
-            streams[1] = process.StandardError.BaseStream;
-            job?.Add(process);
-            checkStorage?.Invoke(); // Creation/job assignment cannot hide inside the next polling interval.
-            started?.Invoke(process);
-            checkStorage?.Invoke(); // Seal durable ownership before entering ordinary polling.
+            ObservedWork(() =>
+            {
+                process = CaptureSession.StartVerifiedProcess(lease, arguments)
+                    ?? throw new IOException("The recording-engine process did not start.");
+                receipt.ProcessId = process.Id;
+                receipt.ProcessStartedUtc = process.StartTime.ToUniversalTime();
+                streams[0] = process.StandardOutput.BaseStream;
+                streams[1] = process.StandardError.BaseStream;
+                job?.Add(process);
+            });
+            ObservedWork(() => started?.Invoke(process));
             var logs = new[] { stdout, stderr };
             long storageChecked = Stopwatch.GetTimestamp();
             while (true)
@@ -112,7 +146,7 @@ internal static class ReplayExportProcess
         }
         catch (Exception error) when (ExpectedFailure(error))
         {
-            receipt.Failure = process == null ? "launch-failed" : "process-failed";
+            receipt.Failure = receipt.TimedOut ? "timeout" : process == null ? "launch-failed" : "process-failed";
             receipt.Error = error.Message;
         }
         finally

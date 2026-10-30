@@ -1,5 +1,24 @@
 # Verification launch effects
 
+Export lifecycle work (verified lease, process creation/job assignment and
+producer callbacks) now runs as an owned, joined operation while the caller
+continues real storage observations. No timestamp is refreshed without the
+existing storage check; the500ms freshness gate stays unchanged. Guard failure
+joins an in-flight launch before cleanup so its child handle cannot be orphaned.
+The CPU startup control holds a seal callback600ms while observations continue;
+the negative blocks an actual observation600ms after launch and requires failure
+with confirmed owned-child absence. Each still starts one tiny CPU/null-output
+child, no desktop/audio/GPU/model or user-state action.
+
+The bounded lifecycle correction replacement carries310conservative children
+plus32fresh (342full-batch ceiling),112GB/110.5GBstop,600wall/360offline minutes,
+24retained roots/92GBretained,20480files/320directories and2GBoutside allowance.
+The fresh wrapper additionally budgets its actual240second preflight and300second
+closure. All finite-source,500msactive,60GBcaller floor, no-refit and normal-exit
+requirements remain. Later ordinary-worker/physical checks have their own exact
+admissions; neither a prior qualified model nor a software numeric control is
+qualification for changed consumer DLLs.
+
 `--replay-calibration-capture-evidence-checks <fresh-root>` reproduces duplicate
 legacy success-only exit hashes and checks six distinct capture PID/start/session
 receipts plus rejection of missing/non-UTC/relative identity. Controlled values
