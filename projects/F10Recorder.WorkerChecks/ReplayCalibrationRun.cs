@@ -1090,8 +1090,28 @@ internal static partial class ReplayCalibrationRun
             sampler.EndActive();
             foreach (string label in Order)
             {
+                Action<int, IntPtr> focus = null;
+                if (plan.MaximumChildren == 513)
+                {
+                    // Normal desktop activation completes before capture/bootstrap.
+                    // Keep the same bounded handshake already used by continuation.
+                    Write(Path.Combine(plan.Root, "operator-ready-" + label + ".json"), new { label, noCaptureAdmitted = true });
+                    var wait = Stopwatch.StartNew();
+                    while (!File.Exists(Path.Combine(plan.Root, "operator-launch-" + label + ".json")))
+                    { sampler.Check(); Require(wait.Elapsed.TotalSeconds < 60, "Operator source-launch coordination deadline; no capture admitted."); Thread.Sleep(50); }
+                    focus = (pid, hwnd) =>
+                    {
+                        Write(Path.Combine(plan.Root, "operator-focus-ready-" + label + ".json"), new { label, pid, hwnd = hwnd.ToInt64(), noCaptureAdmitted = true });
+                        var activation = Stopwatch.StartNew();
+                        CalibrationForeground.Wait(() => File.Exists(Path.Combine(plan.Root, "operator-focused-" + label + ".json")) && GetForegroundWindow() == hwnd,
+                            () => { Native.GetWindowThreadProcessId(hwnd, out uint owner); return owner != pid; },
+                            () => sampler.Check(), () => Thread.Sleep(25), () => activation.Elapsed.TotalSeconds);
+                        Write(Path.Combine(plan.Root, "operator-handoff-" + label + ".json"), new { label, pid, hwnd = hwnd.ToInt64(),
+                            activationCompleteBeforeBootstrap = true, waitedMilliseconds = activation.Elapsed.TotalMilliseconds });
+                    };
+                }
                 sampler.BeginActive();
-                var sample = Collect(plan, label, sampler, model, processes);
+                var sample = Collect(plan, label, sampler, model, processes, focus);
                 sampler.EndActive(); samples.Add(sample);
                 sampler.BeginOffline("inspection", 32_000_000, MainInspectionSeconds);
                 // Capture has stopped before decoding. Held-out observations never fit the model.
