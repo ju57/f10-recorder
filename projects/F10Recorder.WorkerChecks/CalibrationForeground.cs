@@ -152,6 +152,20 @@ internal static class CalibrationForeground
             Reject(() => ReplayCalibrationRun.ValidateResources(lifecycle with { DirectoryLimit = 321 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(lifecycle with { StopBytes = 110_500_000_001 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(lifecycle with { OutsideBuildAllowanceBytes = 2_000_000_001 }));
+            var foreground = lifecycle with { MaximumChildren = 374, RetainedChildren = 342,
+                BudgetBytes = 128_000_000_000, StopBytes = 126_500_000_000, DeadlineSeconds = 39600,
+                OfflineDeadlineSeconds = 25200, DirectoryLimit = 384, FileLimit = 24576,
+                RetainedBudgetBytes = 106_000_000_000, RetainedElapsedSeconds = 31200, RetainedOfflineSeconds = 18200,
+                RetainedRoots = lifecycle.RetainedRoots.Append(Path.Combine(root, "foreground-failed-history")).ToArray() };
+            Directory.CreateDirectory(foreground.RetainedRoots[^1]);
+            ReplayCalibrationRun.ValidateResources(foreground);
+            Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { RetainedChildren = 341 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { RetainedChildren = 343 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { FloorBytes = 59_999_999_999 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { FileLimit = 24577 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { DirectoryLimit = 385 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { StopBytes = 126_500_000_001 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(foreground with { OutsideBuildAllowanceBytes = 2_000_000_001 }));
         });
         File.WriteAllText(Path.Combine(root, "foreground-checks.json"), JsonSerializer.Serialize(new {
             result = "passed", results, effects = "Pure admission delegates and tiny receipt; no window, input injection, child, engine, sound or capture." }, new JsonSerializerOptions { WriteIndented = true }));

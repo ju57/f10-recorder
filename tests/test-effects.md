@@ -19,6 +19,17 @@ requirements remain. Later ordinary-worker/physical checks have their own exact
 admissions; neither a prior qualified model nor a software numeric control is
 qualification for changed consumer DLLs.
 
+The foreground-loss replacement preserves the failed batch and charges all342
+prior children plus32fresh (374ceiling),128GB/126.5GBstop,660wall/420offline
+minutes,25retained roots/106GBretained,24576files/384directories and2GBoutside
+allowance. Actual wrapper preflight/closure reserves remain240/300seconds.
+It still requires six new independent sources and three held-out cases without
+refitting. A foreground interruption invalidates its source; the collector now
+records the actual foreground owner/window identity before normal owned shutdown.
+These are collector/resource changes only. Exact already-frozen product DLLs may
+be referenced without rebuilding them, with every helper/source/consumer binding
+declared in the fresh admission. No failed source becomes a passing sample.
+
 `--replay-calibration-capture-evidence-checks <fresh-root>` reproduces duplicate
 legacy success-only exit hashes and checks six distinct capture PID/start/session
 receipts plus rejection of missing/non-UTC/relative identity. Controlled values

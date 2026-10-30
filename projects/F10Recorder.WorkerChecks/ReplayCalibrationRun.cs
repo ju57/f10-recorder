@@ -31,6 +31,7 @@ internal static class ReplayCalibrationRun
     static readonly string[] Order = ["T01", "T02", "T03", "H02", "H01", "H03"];
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     static void Require(bool value, string message) { if (!value) throw new IOException(message); }
     static string HashFile(string path) { using var file = File.OpenRead(path); return Convert.ToHexString(SHA256.HashData(file)); }
     static void Write(string path, object value)
@@ -104,7 +105,12 @@ internal static class ReplayCalibrationRun
         hardBytes = plan.BudgetBytes, minimumFreeBytes = plan.FloorBytes, deadlineSeconds = plan.DeadlineSeconds };
     internal static void ValidateResources(CalibrationPlan plan)
     {
-        bool lifecycleReplacement = plan != null && plan.MaximumChildren == 342 && plan.RetainedChildren == 310
+        bool foregroundReplacement = plan != null && plan.MaximumChildren == 374 && plan.RetainedChildren == 342
+            && plan.BudgetBytes == 128_000_000_000 && plan.StopBytes == 126_500_000_000
+            && plan.DeadlineSeconds == 39600 && plan.DirectoryLimit == 384 && plan.FileLimit == 24576 && plan.OfflineDeadlineSeconds == 25200
+            && plan.OutputComponentBytes == 2_000_000_000 && plan.RetainedBudgetBytes == 106_000_000_000
+            && plan.OutsideBuildAllowanceBytes == 2_000_000_000;
+        bool lifecycleReplacement = foregroundReplacement || plan != null && plan.MaximumChildren == 342 && plan.RetainedChildren == 310
             && plan.BudgetBytes == 112_000_000_000 && plan.StopBytes == 110_500_000_000
             && plan.DeadlineSeconds == 36000 && plan.DirectoryLimit == 320 && plan.FileLimit == 20480 && plan.OfflineDeadlineSeconds == 21600
             && plan.OutputComponentBytes == 2_000_000_000 && plan.RetainedBudgetBytes == 92_000_000_000
@@ -145,7 +151,7 @@ internal static class ReplayCalibrationRun
                 || plan.MaximumChildren == 74 && plan.DirectoryLimit == 72 && plan.FileLimit == 5120 && plan.OfflineDeadlineSeconds == 2700
                     && plan.OutputComponentBytes == 2_000_000_000 && plan.RetainedBudgetBytes == 24_000_000_000)),
             "Calibration limits or frozen six-source order differ from an admitted historical or lifecycle replacement boundary.");
-        Require(plan.RetainedRoots != null && plan.RetainedRoots.Length >= 4 && plan.RetainedRoots.Length <= (lifecycleReplacement ? 24 : evidenceReplacement ? 17 : exportReplacement ? 16 : readinessReplacement ? 15 : startupReplacement ? 14 : contentionReplacement ? 11 : fresh ? 10 : 8)
+        Require(plan.RetainedRoots != null && plan.RetainedRoots.Length >= 4 && plan.RetainedRoots.Length <= (foregroundReplacement ? 25 : lifecycleReplacement ? 24 : evidenceReplacement ? 17 : exportReplacement ? 16 : readinessReplacement ? 15 : startupReplacement ? 14 : contentionReplacement ? 11 : fresh ? 10 : 8)
             && plan.RetainedRoots.Distinct(StringComparer.OrdinalIgnoreCase).Count() == plan.RetainedRoots.Length
             && plan.RetainedRoots.All(r => Directory.Exists(r) && !Path.GetFullPath(r).Equals(Path.GetFullPath(plan.Root), StringComparison.OrdinalIgnoreCase))
             && double.IsFinite(plan.RetainedElapsedSeconds) && plan.RetainedElapsedSeconds >= 0 && plan.RetainedElapsedSeconds < plan.DeadlineSeconds
@@ -166,7 +172,7 @@ internal static class ReplayCalibrationRun
         sampleIntervalMs = 100, maximumActiveGapMs = 500, observationContract = "active-offline-v1", expectedBytes = 18_000_000_000L,
         fileLimit = plan.FileLimit, directoryLimit = plan.DirectoryLimit, offlineDeadlineSeconds = plan.OfflineDeadlineSeconds,
         completeOfflineBatchCeilingSeconds = CompleteOfflineBatchSeconds,
-        additionalReplacementVerificationSeconds = plan.MaximumChildren is 147 or 179 or 256 or 288 or 342 ? FullReplacementVerificationSeconds : plan.MaximumChildren == 137 ? 210 : plan.MaximumChildren == 115 ? ReplacementVerificationSeconds : 0,
+        additionalReplacementVerificationSeconds = plan.MaximumChildren is 147 or 179 or 256 or 288 or 342 or 374 ? FullReplacementVerificationSeconds : plan.MaximumChildren == 137 ? 210 : plan.MaximumChildren == 115 ? ReplacementVerificationSeconds : 0,
         phaseLimitsSeconds = new { captureSetup = 330, exportController = 130, exportChild = 120,
             foregroundAdmission = CalibrationForeground.DeadlineSeconds, mainInspection = MainInspectionSeconds, mainDecodeChild = MainInspectionSeconds - InspectionCleanupSeconds,
             shortInspection = ShortInspectionSeconds, shortDecodeChild = ShortInspectionSeconds - InspectionCleanupSeconds,
@@ -734,7 +740,17 @@ internal static class ReplayCalibrationRun
             double triggerAt = label is "T01" or "H01" ? 304 : label is "T02" or "H03" ? 302.25 : 302.75;
             while (((IReplaySessionSource)capture).SaveCutoffAt(Stopwatch.GetTimestamp()) < triggerAt)
             {
-                sampler.Check(); Require(!fixture.HasExited && GetForegroundWindow() == hwnd, "Controlled source lost foreground or exited.");
+                sampler.Check();
+                IntPtr foreground = GetForegroundWindow();
+                if (fixture.HasExited || foreground != hwnd)
+                {
+                    GetWindowThreadProcessId(foreground, out uint foregroundOwner);
+                    Write(Path.Combine(root, "foreground-failure.json"), new { utc = DateTime.UtcNow, label,
+                        expectedWindow = hwnd.ToInt64(), actualWindow = foreground.ToInt64(), actualOwner = foregroundOwner,
+                        fixturePid = fixture.Id, fixtureExited = fixture.HasExited,
+                        effects = "Foreground owner identity only; interrupted source remains invalid and is never repaired into a passing sample." });
+                    throw new IOException("Controlled source lost foreground or exited.");
+                }
                 var bounds = Native.DisplayBounds(IntPtr.Zero); Require(bounds.Width == 1920 && bounds.Height == 1080, "Display dimensions changed during capture.");
                 var health = capture.ReadHealth();
                 if (total.Elapsed.TotalSeconds >= 330 || !health.Healthy)
