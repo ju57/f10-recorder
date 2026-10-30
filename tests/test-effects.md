@@ -1,5 +1,20 @@
 # Verification launch effects
 
+An explicitly admitted continuation may retain four independently completed
+T01/T02/T03/H02 sources from a foreground-only failed attempt, then acquire H01
+and H03 against the exact unchanged frozen model and consumer. The original
+attempt stays failed. Qualification binds both raw observation traces and all
+six original source receipts; the final audit checks eight exports, decodes and
+archives across their actual roots. No sample is rewritten or refitted.
+This continuation carries423prior children plus8new (431),144GB/142.5GBstop,
+780wall/480offline minutes,29retained roots/124GBretained and unchanged24576file,
+448directory,2GBoutside and60GBcaller-floor limits. Whole controller1800seconds,
+preflight360/closure360 and240offline plus720verification are reserved.
+`--replay-calibration-continuation-checks <plan>` starts no child or media;
+it rejects changed budgets, missing source provenance and nested output roots.
+Operator launch markers coordinate normal activation of the owned fixture;
+the existing10second foreground admission and500msactive limit remain.
+
 Export lifecycle work (verified lease, process creation/job assignment and
 producer callbacks) now runs as an owned, joined operation while the caller
 continues real storage observations. No timestamp is refreshed without the

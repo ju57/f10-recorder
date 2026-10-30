@@ -10,8 +10,17 @@ internal static class ReplayCalibrationTimingChecks
         using (var input = File.OpenRead(planFile))
             if (Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(input)) != expectedHash) throw new IOException("Prospective plan changed.");
         using var document = JsonDocument.Parse(File.ReadAllText(planFile));
-        var plan = document.RootElement.GetProperty("plan").Deserialize<CalibrationPlan>();
-        if (startup) ReplayCalibrationStartup.ValidateResources(plan); else ReplayCalibrationRun.ValidateResources(plan);
+        CalibrationPlan plan;
+        if (document.RootElement.TryGetProperty("PriorRoot", out _))
+        {
+            var continuation = document.RootElement.Deserialize<CalibrationContinuationPlan>();
+            ReplayCalibrationRun.ValidateContinuation(continuation); plan = continuation.Plan;
+        }
+        else
+        {
+            plan = document.RootElement.GetProperty("plan").Deserialize<CalibrationPlan>();
+            if (startup) ReplayCalibrationStartup.ValidateResources(plan); else ReplayCalibrationRun.ValidateResources(plan);
+        }
         root = Path.GetFullPath(root);
         if (Directory.Exists(root) || plan.RetainedRoots.Any(r => root.StartsWith(Path.GetFullPath(r) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
             throw new IOException("Use a fresh independent sampler control root.");

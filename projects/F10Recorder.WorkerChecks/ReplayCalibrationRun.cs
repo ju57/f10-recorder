@@ -19,7 +19,7 @@ internal sealed record CalibrationPlan(string Root, string EngineRoot, string En
 
 // Purpose-specific controller. It never provisions tools, edits ordinary profiles,
 // runs games, changes NVIDIA/display/audio preferences or retries a failed batch.
-internal static class ReplayCalibrationRun
+internal static partial class ReplayCalibrationRun
 {
     internal const int MainInspectionSeconds = 60, ShortInspectionSeconds = 30, ArchiveSeconds = 60;
     internal const int CompleteOfflineBatchSeconds = 6 * MainInspectionSeconds + 2 * ShortInspectionSeconds + 8 * ArchiveSeconds;
