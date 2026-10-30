@@ -82,6 +82,7 @@ internal sealed class ReplayCache : IDisposable
     readonly object gate = new();
     readonly Dictionary<ReplaySessionId, Session> sessions = new();
     readonly ReplayFiles files;
+    readonly ReplaySnapshotInventory snapshotInventory;
     readonly ReplayVolumeReservations volumeReservations;
     readonly string volumeReservationOwner = Guid.NewGuid().ToString("N");
     bool volumeReservationHeld;
@@ -115,6 +116,9 @@ internal sealed class ReplayCache : IDisposable
         Func<Task> waitForSegment = null, Action<string> diagnostic = null, string cacheDirectory = null, long cacheBudgetBytes = 10_000_000_000, IEnumerable<string> retainedDirectories = null, ReplayVolumeReservations volumeReservations = null)
     {
         this.files = files ?? new ReplayFiles();
+        // Fault-injecting/custom filesystem providers retain their own exact
+        // observation semantics. The maintained native path owns this reader.
+        if (this.files.GetType() == typeof(ReplayFiles)) snapshotInventory = new();
         this.volumeReservations = volumeReservations;
         this.time = time ?? TimeProvider.System;
         this.waitForSegment = waitForSegment ?? (() => Task.Delay(TimeSpan.FromMilliseconds(100), this.time));
@@ -151,8 +155,13 @@ internal sealed class ReplayCache : IDisposable
     }
     internal bool IsSaving { get { lock (gate) return saving; } }
     static bool StorageFailure(Exception ex) => ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or OverflowException;
-    Dictionary<string, ReplayFileExtent> Inventory() => ReplayStorage.Inventory(cacheDirectories == null
-        ? sessions.Values.Select(s => s.Info.Directory).Where(Directory.Exists) : ReplayCacheLocations.Existing(cacheDirectories), files);
+    Dictionary<string, ReplayFileExtent> Inventory()
+    {
+        snapshotInventory?.BeginScan();
+        try { return ReplayStorage.Inventory(cacheDirectories == null
+            ? sessions.Values.Select(s => s.Info.Directory).Where(Directory.Exists) : ReplayCacheLocations.Existing(cacheDirectories), snapshotInventory ?? files); }
+        finally { snapshotInventory?.EndScan(); }
+    }
 
     internal void ValidateBudget(long proposedBudgetBytes)
     {
@@ -571,11 +580,21 @@ internal sealed class ReplayCache : IDisposable
         {
             if (close != null) return close;
             closing = true;
-            return close = Task.WhenAll(sessions.Keys.ToArray().Select(RetireSessionAsync));
+            return close = CloseResources(Task.WhenAll(sessions.Keys.ToArray().Select(RetireSessionAsync)));
         }
     }
 
-    public void Dispose() => CloseAsync().GetAwaiter().GetResult();
+    async Task CloseResources(Task retirement)
+    {
+        try { await retirement.ConfigureAwait(false); }
+        finally { lock (gate) snapshotInventory?.Dispose(); }
+    }
+
+    public void Dispose()
+    {
+        CloseAsync().GetAwaiter().GetResult();
+        lock (gate) snapshotInventory?.Dispose();
+    }
 
     async Task<(string File, long Bytes)> SaveAsync(Session session, double end, string root, string snapshot, string final, string partial)
     {
@@ -678,6 +697,7 @@ internal sealed class ReplayCache : IDisposable
                     // Copies have new file identities. Bind the evidence to the
                     // actual immutable snapshot consumed by this export.
                     var output = PlanOutput(session, selection, end, root, partial, true, out var demand);
+                    snapshotInventory?.Seal(snapshot);
                     RequireStorageCapacity(pendingAllocations, snapshot, pendingTarget, output);
                     pendingOutput = output;
                     outputDemand = demand;
@@ -742,7 +762,14 @@ internal sealed class ReplayCache : IDisposable
 
     void Cleanup(Action action, string path)
     {
-        try { action(); }
+        try
+        {
+            // Directory retirement already owns the inventory gate at its call
+            // sites. Partial-output unlinking must keep its independent path.
+            if (snapshotInventory != null && Directory.Exists(path))
+                lock (gate) snapshotInventory.ReleaseUnder(path);
+            action();
+        }
         catch (IOException ex) { Report("Replay cleanup failed for " + path + ": " + ex.Message); }
         catch (UnauthorizedAccessException ex) { Report("Replay cleanup failed for " + path + ": " + ex.Message); }
     }

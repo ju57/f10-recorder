@@ -1,5 +1,21 @@
 # Verification launch effects
 
+`--replay-calibration-snapshot-inventory-checks <fresh-root>` uses tiny private native files,
+with no child/capture/audio/model action. It checks that acquisition files keep
+short metadata leases, sealed snapshot handles refresh real allocation/EOF,
+replacement revalidates identity, atomic metadata remains unheld and namespace
+retirement closes its handles. The native cache bounds retained handles at 4096;
+its 500 ms guard remains unchanged. A changed product DLL still needs its own exact
+calibration identity and runtime verification.
+
+The sealed-snapshot correction's full replacement boundary carries 481 previous
+children plus 32 new (513), 168 GB cap / 166.5 GB stop, 60 GB caller-free floor,
+64,800 cumulative wall seconds / 46,800 offline seconds, at most 37 retained
+roots / 144 GB, 32,768 files / 576 directories, and 2.2 GB outside builds.
+This is a finite six-source run with unchanged 500 ms observation and no-refit
+requirements. The outer admission also reserves preflight, closure and subsequent
+native verification; these limits do not themselves start a recording.
+
 An explicitly admitted continuation may retain four independently completed
 T01/T02/T03/H02 sources from a foreground-only failed attempt, then acquire H01
 and H03 against the exact unchanged frozen model and consumer. The original

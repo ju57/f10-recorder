@@ -182,6 +182,20 @@ internal static class CalibrationForeground
             Reject(() => ReplayCalibrationRun.ValidateResources(cadence with { FileLimit = 24577 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(cadence with { DirectoryLimit = 449 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(cadence with { StopBytes = 142_500_000_001 }));
+            var snapshot = cadence with { MaximumChildren = 513, RetainedChildren = 481,
+                BudgetBytes = 168_000_000_000, StopBytes = 166_500_000_000, DeadlineSeconds = 64800,
+                OfflineDeadlineSeconds = 46800, DirectoryLimit = 576, FileLimit = 32768,
+                RetainedBudgetBytes = 144_000_000_000, OutsideBuildAllowanceBytes = 2_200_000_000,
+                RetainedElapsedSeconds = 54730, RetainedOfflineSeconds = 37246,
+                RetainedRoots = cadence.RetainedRoots.Concat(Enumerable.Range(0, 9).Select(n => Path.Combine(root, "snapshot-history-" + n))).ToArray() };
+            foreach (string directory in snapshot.RetainedRoots) Directory.CreateDirectory(directory);
+            ReplayCalibrationRun.ValidateResources(snapshot);
+            Reject(() => ReplayCalibrationRun.ValidateResources(snapshot with { RetainedChildren = 480 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(snapshot with { RetainedChildren = 482 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(snapshot with { FileLimit = 32769 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(snapshot with { FloorBytes = 59_999_999_999 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(snapshot with { RetainedElapsedSeconds = 60600.01 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(snapshot with { RetainedOfflineSeconds = 45510.01 }));
         });
         File.WriteAllText(Path.Combine(root, "foreground-checks.json"), JsonSerializer.Serialize(new {
             result = "passed", results, effects = "Pure admission delegates and tiny receipt; no window, input injection, child, engine, sound or capture." }, new JsonSerializerOptions { WriteIndented = true }));

@@ -99,6 +99,8 @@ jobs:
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-fixture-publication-checks artifacts/replay-fixture-publication-ci
       - name: Verify manifest observation races without capture or GPU
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-storage-races artifacts/replay-storage-races-ci
+      - name: Verify sealed snapshot metadata without capture or GPU
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-snapshot-inventory-checks artifacts/replay-snapshot-inventory-ci
       - name: Verify snapshot evidence archive without capture or GPU
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-archive-checks artifacts/replay-archive-ci
       - name: Verify sampler timing without capture or GPU

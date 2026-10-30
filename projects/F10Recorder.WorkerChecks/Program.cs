@@ -63,6 +63,7 @@ internal static class WorkerChecks
             if (args.Length == 2 && args[0] == "--replay-calibration-fixture-publication-checks") return CalibrationFixturePublicationChecks.Run(Path.GetFullPath(args[1]));
             if (args.Length == 3 && args[0] == "--replay-calibration-export-startup-checks") return ReplayExportStartupChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
             if (args.Length == 3 && args[0] == "--replay-calibration-continue") return ReplayCalibrationRun.Continue(Path.GetFullPath(args[1]), args[2]);
+            if (args.Length == 2 && args[0] == "--replay-calibration-snapshot-inventory-checks") return ReplaySnapshotInventoryChecks.Run(Path.GetFullPath(args[1]));
             if (args.Length == 2 && args[0] == "--replay-calibration-continuation-checks") return ReplayCalibrationRun.ContinuationChecks(Path.GetFullPath(args[1]));
             if (args.Length == 3 && args[0] == "--replay-calibration-export-slow-checks") return ReplayExportStartupChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), slowObservation: true);
             if (args.Length == 3 && args[0] == "--replay-calibration-export-snapshot-checks") return ReplayExportSnapshotChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
