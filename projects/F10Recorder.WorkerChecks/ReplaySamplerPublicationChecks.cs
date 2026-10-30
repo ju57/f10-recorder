@@ -40,13 +40,16 @@ internal static class ReplaySamplerPublicationChecks
             for (int n = 0; n < 40; n++)
             {
                 sampler.Check();
+                // This fixture already owns the scalar claim. Use the same
+                // bounded accepted-work acquisition as concurrent export writers;
+                // a normal polling collision is not a publication failure.
                 claims.Update(owner, [new(Path.Combine(root, "export-growth"), root, capacity.Volume, capacity.AllocationUnit,
-                    4096 + n, ReplayVolumeClaimKind.UnmaterializedGrowth)], files);
+                    4096 + n, ReplayVolumeClaimKind.UnmaterializedGrowth)], files, acceptedWork: true);
                 updates++;
                 if (stopped || coordinator.Stopped) throw new IOException("Production coordinator stopped during observer publication control.");
                 Thread.Sleep(30);
             }
-            claims.Release(owner);
+            claims.Release(owner, acceptedWork: true);
             coordinator.CompleteCapture(true);
             if (coordinator.CapturePending || coordinator.Stopped || latch.Read().Held)
                 throw new IOException("Atomic capture guard/claim closure failed while sampler was active.");
@@ -59,7 +62,7 @@ internal static class ReplaySamplerPublicationChecks
             sampler?.Dispose();
             // No child exists. Release only this fixture's scalar owner and
             // retry its confirmed closure after observer handles have closed.
-            try { claims.Release(owner); coordinator.CompleteCapture(true); }
+            try { claims.Release(owner, acceptedWork: true); coordinator.CompleteCapture(true); }
             catch (Exception error) { failure ??= error; }
         }
         File.WriteAllText(Path.Combine(root, "publication-check.json"), JsonSerializer.Serialize(new {
