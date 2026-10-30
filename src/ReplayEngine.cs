@@ -447,6 +447,7 @@ namespace F10Recorder
         volatile bool resumeStorage;
         int preserveForStorage;
         internal bool StorageHeld => storage.Hold.Held;
+        internal bool Paused => capture.Paused;
         internal event Action<string> StorageWarning;
         readonly ReplaySaveNotifications saveNotifications = new ReplaySaveNotifications();
         ReplaySessionId? sessionId;

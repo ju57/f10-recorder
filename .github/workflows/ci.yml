@@ -121,6 +121,8 @@ jobs:
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-storage-safety artifacts/replay-storage-safety-ci
       - name: Verify capture storage supervision with controlled producers
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-storage-runtime artifacts/replay-storage-runtime-ci
+      - name: Verify host Pause after explicit storage Resume without media
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-storage-host-resume artifacts/replay-storage-host-resume-ci
       - name: Verify producer crash recovery without media
         shell: pwsh
         run: |

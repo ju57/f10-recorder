@@ -123,16 +123,20 @@ internal sealed class RecorderHost : IWindowsRecorder
         engine.SaveFinished += (message, success) => Dispatch(() => { notices.SaveFinished(message, success); Saved?.Invoke(message, success); Changed?.Invoke(); });
     }
     void PresentCaptureStatus(CaptureStatus status)
+        => PresentCaptureStatus(status, Metrics, engine?.StorageHeld == true, engine?.Paused ?? Paused);
+    internal void PresentCaptureStatus(CaptureStatus status, RecorderMetrics metrics, bool storageHeld, bool capturePaused)
     {
         State = status.Ready && !shortcuts.SaveRegistered ? "Buffering · save shortcut unavailable" : status.Message;
         Phase = status.Phase; Ready = status.Ready;
-        var metrics = Metrics;
         if (metrics.ReplayStorageSafetyWarning && !storageWarningPresented)
             Notification?.Invoke("Replay storage is low", "Unreserved replay storage is below five decimal GB.", NotificationKind.Warning, 6000);
         storageWarningPresented = metrics.ReplayStorageSafetyWarning;
-        if (engine?.StorageHeld == true)
+        if (storageHeld)
         {
-            Paused = true; Ready = false; Phase = CapturePhase.Paused;
+            // The previous guard remains durable until the replacement arms.
+            // Preserve the engine's explicit Resume intent during that interval;
+            // otherwise a later Pause is skipped as already satisfied.
+            Paused = capturePaused; Ready = false; Phase = CapturePhase.Paused;
             State = "Storage safety hold: " + metrics.ReplayStorageSafetyReason;
             if (!storageHoldPresented) Notification?.Invoke("Replay recording paused for storage", metrics.ReplayStorageSafetyReason, NotificationKind.Warning, 6000);
             storageHoldPresented = true;

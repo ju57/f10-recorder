@@ -1,5 +1,13 @@
 # Verification launch effects
 
+`--replay-storage-host-resume <fresh-root>` supplies supervisor observations to
+an isolated paused host and checks explicit Resume intent while the previous
+durable guard is still present, later healthy buffering, an effective subsequent
+Pause command and a new storage stop. It owns only a hidden shortcut window and
+tiny profile/report files; no capture engine, child, media, audio, model, visible
+UI or startup write runs. Native acquisition/producer shutdown remain separate
+verification requirements.
+
 `--replay-calibration-frozen-history-checks <fresh-root>` uses tiny native files,
 data-read/share-read leases and synchronous kernel change notifications. It
 checks historical/current hardlink deduplication, denied historical writes and

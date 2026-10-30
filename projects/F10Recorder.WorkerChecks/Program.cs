@@ -22,6 +22,9 @@ internal static class WorkerChecks
     [STAThread]
     internal static int Main(string[] args)
     {
+        if (args.Any(a => a.StartsWith("--replay-storage-host-resume", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 2 && args[0] == "--replay-storage-host-resume"
+                ? ReplayStorageHostResumeChecks.Run(Path.GetFullPath(args[1])) : 2;
         if (args.Any(a => a.StartsWith("--replay-storage-contention", StringComparison.OrdinalIgnoreCase)))
             return args.Length == 2 && args[0] == "--replay-storage-contention" ? ReplayOwnershipChecks.RunContention(Path.GetFullPath(args[1])) : 2;
         if (args.Any(a => a.StartsWith("--replay-manifest", StringComparison.OrdinalIgnoreCase)))
