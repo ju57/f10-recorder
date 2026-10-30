@@ -20,6 +20,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: f3409284857ec9528863aa20006a8c67d31d3f55
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.401
@@ -36,6 +37,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: f3409284857ec9528863aa20006a8c67d31d3f55
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.401
@@ -67,7 +69,15 @@ jobs:
       - name: Verify Storage controls without capture or GPU
         run: dotnet run --project projects/F10Recorder.MigrationTests/F10Recorder.MigrationTests.csproj -c Release --no-build -- artifacts/storage-controls-ci --storage-controls-ui
       - name: Verify replay ownership without capture or GPU
-        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-ownership artifacts/replay-ownership-ci
+        shell: pwsh
+        run: |
+          dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-ownership artifacts/replay-ownership-ci
+          $code = $LASTEXITCODE
+          if ($code) {
+            $report = Get-Content artifacts/replay-ownership-ci/verification.json -Raw | ConvertFrom-Json
+            $report.checks | Where-Object result -ne 'passed' | ConvertTo-Json -Depth 8
+          }
+          exit $code
       - name: Verify coordinated completed-segment publication without media
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-manifest-stream artifacts/replay-manifest-ci
       - name: Verify supplied replay output reservations without capture or GPU
