@@ -1,5 +1,22 @@
 # Verification launch effects
 
+`--replay-calibration-frozen-history-checks <fresh-root>` uses tiny native files,
+data-read/share-read leases and synchronous kernel change notifications. It
+checks historical/current hardlink deduplication, denied historical writes and
+deletion, fresh mutable-current allocation, detected namespace changes, existing
+writer rejection and handle cleanup. No process, capture, audio, UI or model
+action runs. Seven native/protection/integration controls run; they do not make a
+media attempt eligible or qualified.
+
+A fresh exact 577-child boundary carries all 545 previous reserved children,
+39 retained roots and the same 168 GB / 166.5 GB stop, 60 GB floor, 72,000 wall /
+50,400 offline seconds, 32,768 files / 576 directories and 2.2 GB outside bounds.
+This full replacement freezes historical data with native read leases and sticky
+subtree change notifications, charges its fresh native allocation baseline on
+every live scan and checks actual caller-free space per volume. Current writes
+are still observed natively under the unchanged 500 ms rule. Pre/post full hashes
+remain required; historical mutation or monitor failure aborts qualification.
+
 `--replay-calibration-snapshot-inventory-checks <fresh-root>` uses tiny private native files,
 with no child/capture/audio/model action. It checks that acquisition files keep
 short metadata leases, sealed snapshot handles refresh real allocation/EOF,

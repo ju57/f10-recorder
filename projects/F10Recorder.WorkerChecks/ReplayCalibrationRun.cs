@@ -15,7 +15,8 @@ internal sealed record CalibrationPlan(string Root, string EngineRoot, string En
     double? RetainedOfflineSeconds = null, string RehearsalEvidenceRoot = null, double RehearsalElapsedSeconds = 0,
     string[] MetadataHandleRoots = null, bool ReuseCurrentMetadataHandles = false,
     int DirectoryLimit = 48, long OutputComponentBytes = 1_032_000_000, long RetainedBudgetBytes = 32_000_000_000,
-    int FileLimit = 4096, int OfflineDeadlineSeconds = 1800, long OutsideBuildAllowanceBytes = 1_000_000_000);
+    int FileLimit = 4096, int OfflineDeadlineSeconds = 1800, long OutsideBuildAllowanceBytes = 1_000_000_000,
+    bool FreezeRetainedAllocations = false);
 
 // Purpose-specific controller. It never provisions tools, edits ordinary profiles,
 // runs games, changes NVIDIA/display/audio preferences or retries a failed batch.
@@ -85,6 +86,7 @@ internal static partial class ReplayCalibrationRun
             OutputComponentBytes: resourceRecord.RootElement.TryGetProperty("outputComponentBytes", out var ob) ? ob.GetInt64() : 1_032_000_000,
             RetainedBudgetBytes: resourceRecord.RootElement.TryGetProperty("retainedBudgetBytes", out var rb) ? rb.GetInt64() : 32_000_000_000,
             FileLimit: resourceRecord.RootElement.TryGetProperty("fileLimit", out var fl) ? fl.GetInt32() : 4096,
+            FreezeRetainedAllocations: resourceRecord.RootElement.TryGetProperty("freezeRetainedAllocations", out var fr) && fr.GetBoolean(),
             OfflineDeadlineSeconds: resourceRecord.RootElement.GetProperty("offlineDeadlineSeconds").GetInt32(),
             OutsideBuildAllowanceBytes: resourceRecord.RootElement.GetProperty("outsideBuildAllowanceBytes").GetInt64());
         plan = plan with { BudgetBytes = resourceRecord.RootElement.GetProperty("budgetBytes").GetInt64(),
@@ -105,7 +107,12 @@ internal static partial class ReplayCalibrationRun
         hardBytes = plan.BudgetBytes, minimumFreeBytes = plan.FloorBytes, deadlineSeconds = plan.DeadlineSeconds };
     internal static void ValidateResources(CalibrationPlan plan)
     {
-        bool coordinatedReplacement = plan != null && plan.MaximumChildren == 545 && plan.RetainedChildren == 513
+        bool frozenHistoryReplacement = plan != null && plan.MaximumChildren == 577 && plan.RetainedChildren == 545
+            && plan.BudgetBytes == 168_000_000_000 && plan.StopBytes == 166_500_000_000
+            && plan.DeadlineSeconds == 72000 && plan.DirectoryLimit == 576 && plan.FileLimit == 32768 && plan.OfflineDeadlineSeconds == 50400
+            && plan.OutputComponentBytes == 2_000_000_000 && plan.RetainedBudgetBytes == 144_000_000_000
+            && plan.OutsideBuildAllowanceBytes == 2_200_000_000 && plan.FreezeRetainedAllocations;
+        bool coordinatedReplacement = frozenHistoryReplacement || plan != null && plan.MaximumChildren == 545 && plan.RetainedChildren == 513
             && plan.BudgetBytes == 168_000_000_000 && plan.StopBytes == 166_500_000_000
             && plan.DeadlineSeconds == 72000 && plan.DirectoryLimit == 576 && plan.FileLimit == 32768 && plan.OfflineDeadlineSeconds == 50400
             && plan.OutputComponentBytes == 2_000_000_000 && plan.RetainedBudgetBytes == 144_000_000_000
@@ -166,7 +173,8 @@ internal static partial class ReplayCalibrationRun
                 || plan.MaximumChildren == 74 && plan.DirectoryLimit == 72 && plan.FileLimit == 5120 && plan.OfflineDeadlineSeconds == 2700
                     && plan.OutputComponentBytes == 2_000_000_000 && plan.RetainedBudgetBytes == 24_000_000_000)),
             "Calibration limits or frozen six-source order differ from an admitted historical or lifecycle replacement boundary.");
-        Require(plan.RetainedRoots != null && plan.RetainedRoots.Length >= 4 && plan.RetainedRoots.Length <= (coordinatedReplacement ? 38 : snapshotReplacement ? 37 : cadenceReplacement ? 28 : foregroundReplacement ? 25 : lifecycleReplacement ? 24 : evidenceReplacement ? 17 : exportReplacement ? 16 : readinessReplacement ? 15 : startupReplacement ? 14 : contentionReplacement ? 11 : fresh ? 10 : 8)
+        Require(!plan.FreezeRetainedAllocations || frozenHistoryReplacement, "Read-only history requires its exact prospective admission.");
+        Require(plan.RetainedRoots != null && plan.RetainedRoots.Length >= 4 && plan.RetainedRoots.Length <= (frozenHistoryReplacement ? 39 : coordinatedReplacement ? 38 : snapshotReplacement ? 37 : cadenceReplacement ? 28 : foregroundReplacement ? 25 : lifecycleReplacement ? 24 : evidenceReplacement ? 17 : exportReplacement ? 16 : readinessReplacement ? 15 : startupReplacement ? 14 : contentionReplacement ? 11 : fresh ? 10 : 8)
             && plan.RetainedRoots.Distinct(StringComparer.OrdinalIgnoreCase).Count() == plan.RetainedRoots.Length
             && plan.RetainedRoots.All(r => Directory.Exists(r) && !Path.GetFullPath(r).Equals(Path.GetFullPath(plan.Root), StringComparison.OrdinalIgnoreCase))
             && double.IsFinite(plan.RetainedElapsedSeconds) && plan.RetainedElapsedSeconds >= 0 && plan.RetainedElapsedSeconds < plan.DeadlineSeconds
@@ -187,7 +195,8 @@ internal static partial class ReplayCalibrationRun
         sampleIntervalMs = 100, maximumActiveGapMs = 500, observationContract = "active-offline-v1", expectedBytes = 18_000_000_000L,
         fileLimit = plan.FileLimit, directoryLimit = plan.DirectoryLimit, offlineDeadlineSeconds = plan.OfflineDeadlineSeconds,
         completeOfflineBatchCeilingSeconds = CompleteOfflineBatchSeconds,
-        additionalReplacementVerificationSeconds = plan.MaximumChildren is 147 or 179 or 256 or 288 or 342 or 374 or 423 or 513 or 545 ? FullReplacementVerificationSeconds : plan.MaximumChildren == 137 ? 210 : plan.MaximumChildren == 115 ? ReplacementVerificationSeconds : 0,
+        additionalReplacementVerificationSeconds = plan.MaximumChildren is 147 or 179 or 256 or 288 or 342 or 374 or 423 or 513 or 545 or 577 ? FullReplacementVerificationSeconds : plan.MaximumChildren == 137 ? 210 : plan.MaximumChildren == 115 ? ReplacementVerificationSeconds : 0,
+        historicalAllocation = plan.FreezeRetainedAllocations ? "fresh native baseline; GENERIC_READ/share-read leases deny data writes and unlink through aliases; sticky synchronous subtree change handles; per-volume caller-free; full pre/post hashes" : "native allocation refreshed each scan",
         phaseLimitsSeconds = new { captureSetup = 330, exportController = 130, exportChild = 120,
             foregroundAdmission = CalibrationForeground.DeadlineSeconds, mainInspection = MainInspectionSeconds, mainDecodeChild = MainInspectionSeconds - InspectionCleanupSeconds,
             shortInspection = ShortInspectionSeconds, shortDecodeChild = ShortInspectionSeconds - InspectionCleanupSeconds,
@@ -298,6 +307,7 @@ internal static partial class ReplayCalibrationRun
         readonly long? currentBudgetBytes;
         internal long CurrentAllocatedBytes;
         readonly TimedFiles inventoryFiles;
+        readonly FrozenCalibrationHistory frozenHistory;
         readonly HashSet<string> closedCases = new(StringComparer.OrdinalIgnoreCase);
         readonly Thread thread;
         readonly Stopwatch clock = Stopwatch.StartNew();
@@ -359,10 +369,25 @@ internal static partial class ReplayCalibrationRun
             activeCoverage = active; phase = active ? "active" : "boundary";
             inventoryFiles = new TimedFiles(plan.MetadataHandleRoots ?? [], CanRetainMetadata, root);
             if (plan.ReuseCurrentMetadataHandles) inventoryFiles.RetainHandlesUnder(root);
-            thread = new Thread(Loop) { IsBackground = true, Name = "bounded-calibration-storage" };
-            thread.Start();
-            Require(ready.Wait(5000), "Initial storage observation timed out.");
-            Check();
+            Require(!plan.FreezeRetainedAllocations || !active, "Historical leases must be acquired outside active media coverage.");
+            frozenHistory = plan.FreezeRetainedAllocations ? new(plan.RetainedRoots, plan.FileLimit, plan.DirectoryLimit) : null;
+            try
+            {
+                if (frozenHistory != null)
+                    Write(Path.Combine(root, "frozen-history.json"), new { frozenHistory.FileCount, frozenHistory.DirectoryCount,
+                        frozenHistory.AllocatedBytes, frozenHistory.Volumes, readOnlyDataLeases = true, synchronousStickyChanges = true,
+                        metadataHash = ReplayReferenceModel.Hash(frozenHistory.Inventory), mutation = "abort without rearming or rewriting evidence" });
+                thread = new Thread(Loop) { IsBackground = true, Name = "bounded-calibration-storage" };
+                thread.Start();
+                Require(ready.Wait(5000), "Initial storage observation timed out.");
+                Check();
+            }
+            catch
+            {
+                stop = true;
+                if (thread?.IsAlive == true) Require(thread.Join(5000), "Failed observer constructor did not stop.");
+                frozenHistory?.Dispose(); inventoryFiles.Dispose(); ready.Dispose(); throw;
+            }
         }
         void Loop()
         {
@@ -382,23 +407,27 @@ internal static partial class ReplayCalibrationRun
                         double entered = clock.Elapsed.TotalMilliseconds;
                         Require(offlineDeadline == 0 || clock.Elapsed.TotalSeconds <= offlineDeadline, "Offline storage phase deadline exceeded.");
                         files.Reset();
+                        frozenHistory?.Check();
                         // Inspect fresh attributes from the same anchored native
                         // enumeration as identity/EOF/allocation, avoiding a second
                         // path-based query for every media entry on every scan.
-                        var inventory = ReplayStorage.Inventory([root, .. plan.RetainedRoots], files,
-                            maximumFiles: plan.FileLimit, maximumDirectories: plan.DirectoryLimit, inspectAttributes: ValidateMediaAttributes);
+                        var inventory = ReplayStorage.Inventory(frozenHistory == null ? [root, .. plan.RetainedRoots] : [root], files,
+                            maximumFiles: plan.FileLimit - (frozenHistory?.FileCount ?? 0),
+                            maximumDirectories: plan.DirectoryLimit - (frozenHistory?.DirectoryCount ?? 0), inspectAttributes: ValidateMediaAttributes);
                         files.EndScan(); // Release absent names before allocation/capacity accounting.
-                        Volatile.Write(ref MetadataHandles, files.HandleCount);
+                        Volatile.Write(ref MetadataHandles, files.HandleCount + (frozenHistory?.FileCount ?? 0));
                         double inventoried = clock.Elapsed.TotalMilliseconds;
                         if (files.MaximumLeafMilliseconds > SlowestLeafMilliseconds)
                         { SlowestLeafMilliseconds = files.MaximumLeafMilliseconds; SlowestLeafPath = files.MaximumLeafPath; }
-                        Require(inventory.Count <= plan.FileLimit, "Calibration inventory exceeded the approved file limit.");
-                        MaximumFiles = Math.Max(MaximumFiles, inventory.Count);
-                        MaximumDirectories = Math.Max(MaximumDirectories, new[] { root }.Concat(plan.RetainedRoots)
-                            .Sum(r => 1 + Directory.GetDirectories(r, "*", SearchOption.AllDirectories).Length));
-                        Used = checked(ReplayStorage.Bytes(inventory) + plan.OutsideBuildAllowanceBytes);
-                        var retainedInventory = inventory.Where(i => retainedPrefixes.Any(prefix => i.Key.StartsWith(prefix,
-                            StringComparison.OrdinalIgnoreCase))).ToDictionary(i => i.Key, i => i.Value);
+                        int fileCount = checked(inventory.Count + (frozenHistory?.FileCount ?? 0));
+                        Require(fileCount <= plan.FileLimit, "Calibration inventory exceeded the approved file limit.");
+                        MaximumFiles = Math.Max(MaximumFiles, fileCount);
+                        MaximumDirectories = Math.Max(MaximumDirectories, frozenHistory == null
+                            ? new[] { root }.Concat(plan.RetainedRoots).Sum(r => 1 + Directory.GetDirectories(r, "*", SearchOption.AllDirectories).Length)
+                            : frozenHistory.DirectoryCount + 1 + Directory.GetDirectories(root, "*", SearchOption.AllDirectories).Length);
+                        Used = checked((frozenHistory?.BytesIncluding(inventory) ?? ReplayStorage.Bytes(inventory)) + plan.OutsideBuildAllowanceBytes);
+                        var retainedInventory = frozenHistory == null ? inventory.Where(i => retainedPrefixes.Any(prefix => i.Key.StartsWith(prefix,
+                            StringComparison.OrdinalIgnoreCase))).ToDictionary(i => i.Key, i => i.Value) : null;
                         if (currentBudgetBytes.HasValue)
                         {
                             string currentPrefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
@@ -406,7 +435,7 @@ internal static partial class ReplayCalibrationRun
                                 .ToDictionary(i => i.Key, i => i.Value));
                             Require(CurrentAllocatedBytes < currentBudgetBytes.Value, "Startup diagnostic source byte stop reached.");
                         }
-                        Require(ReplayStorage.Bytes(retainedInventory) <= plan.RetainedBudgetBytes, "Retained evidence envelope exceeded.");
+                        Require((frozenHistory?.AllocatedBytes ?? ReplayStorage.Bytes(retainedInventory)) <= plan.RetainedBudgetBytes, "Retained evidence envelope exceeded.");
                         PeakUsed = Math.Max(PeakUsed, Used);
                         foreach (string label in Order)
                         {
@@ -418,9 +447,20 @@ internal static partial class ReplayCalibrationRun
                         }
                         double accounted = clock.Elapsed.TotalMilliseconds;
                         var capacity = ReplayStorage.ObserveCapacity(root);
-                        foreach (string retained in plan.RetainedRoots)
-                            Require(ReplayStorage.ObserveCapacity(retained).AvailableBytes >= plan.FloorBytes + 1_256_000_000L,
-                                "A retained evidence volume no longer has its caller-free reserve.");
+                        if (frozenHistory == null)
+                            foreach (string retained in plan.RetainedRoots)
+                                Require(ReplayStorage.ObserveCapacity(retained).AvailableBytes >= plan.FloorBytes + 1_256_000_000L,
+                                    "A retained evidence volume no longer has its caller-free reserve.");
+                        else
+                            foreach (var volume in frozenHistory.Volumes)
+                            {
+                                var observedCapacity = volume.Identity.Equals(capacity.Volume, StringComparison.OrdinalIgnoreCase)
+                                    ? capacity : ReplayStorage.ObserveCapacity(volume.Directory);
+                                Require(observedCapacity.Volume.Equals(volume.Identity, StringComparison.OrdinalIgnoreCase)
+                                    && observedCapacity.AllocationUnit == volume.AllocationUnit
+                                    && observedCapacity.AvailableBytes >= plan.FloorBytes + 1_256_000_000L,
+                                    "A frozen historical volume changed or lost its caller-free reserve.");
+                            }
                         Require(Used < plan.StopBytes && capacity.AvailableBytes >= plan.FloorBytes + 1_256_000_000L,
                             "Calibration byte stop or free-space reserve breached.");
                         Require(clock.Elapsed.TotalSeconds + plan.RetainedElapsedSeconds < plan.DeadlineSeconds, "Calibration cumulative wall deadline exceeded.");
@@ -428,7 +468,8 @@ internal static partial class ReplayCalibrationRun
                             peaks[item.Value.Identity] = Math.Max(peaks.GetValueOrDefault(item.Value.Identity), item.Value.AllocatedBytes);
                         double observed = clock.Elapsed.TotalMilliseconds;
                         if (activeCoverage) ObserveCaptureGrowth(inventory, observed);
-                        trace.WriteLine(FormattableString.Invariant($"{at},{observed - at},{gap},{observed - previousCompletion},{Used},{capacity.AvailableBytes},{inventory.Count},{entered - at},{inventoried - entered},{files.LeafMilliseconds},{files.LeafCount},{files.MaximumLeafMilliseconds},{phase},\"{files.MaximumLeafPath?.Replace("\"", "\"\"")}\",{files.OpenCount},{files.HandleCount},{accounted - inventoried},{observed - accounted}"));
+                        frozenHistory?.Check();
+                        trace.WriteLine(FormattableString.Invariant($"{at},{observed - at},{gap},{observed - previousCompletion},{Used},{capacity.AvailableBytes},{fileCount},{entered - at},{inventoried - entered},{files.LeafMilliseconds},{files.LeafCount},{files.MaximumLeafMilliseconds},{phase},\"{files.MaximumLeafPath?.Replace("\"", "\"\"")}\",{files.OpenCount},{MetadataHandles},{accounted - inventoried},{observed - accounted}"));
                         trace.Flush();
                         double completed = clock.Elapsed.TotalMilliseconds;
                         MaximumGap = Math.Max(MaximumGap, Math.Max(completed - at, completed - previousCompletion));
@@ -591,6 +632,7 @@ internal static partial class ReplayCalibrationRun
         internal void Check(long next = 0)
         {
             Require(Failure == null, Failure);
+            frozenHistory?.Check();
             Require(offlineDeadline == 0 || clock.Elapsed.TotalSeconds <= offlineDeadline, "Offline storage phase deadline exceeded.");
             Require(RetainedOfflineSeconds + offlineElapsed + (offlineDeadline == 0 ? 0 : clock.Elapsed.TotalSeconds - offlineStarted) <= MaximumOfflineSeconds,
                 "Cumulative offline analysis exceeded its approved allowance.");
@@ -624,7 +666,7 @@ internal static partial class ReplayCalibrationRun
             if (activeCoverage) SamplingGap(lastCompletion, stopped);
             Check();
         }
-        public void Dispose() { stop = true; Require(thread.Join(5000), "Storage observer did not stop."); ready.Dispose(); }
+        public void Dispose() { stop = true; Require(thread.Join(5000), "Storage observer did not stop."); frozenHistory?.Dispose(); ready.Dispose(); }
     }
     sealed class RetainFiles(Sampler sampler) : ReplayFiles
     {
@@ -1096,7 +1138,7 @@ internal static partial class ReplayCalibrationRun
             foreach (string label in Order)
             {
                 Action<int, IntPtr> focus = null;
-                if (plan.MaximumChildren is 513 or 545)
+                if (plan.MaximumChildren is 513 or 545 or 577)
                 {
                     // Normal desktop activation completes before capture/bootstrap.
                     // Keep the same bounded handshake already used by continuation.

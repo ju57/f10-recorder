@@ -206,6 +206,15 @@ internal static class CalibrationForeground
             Reject(() => ReplayCalibrationRun.ValidateResources(coordinated with { RetainedChildren = 514 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(coordinated with { RetainedElapsedSeconds = 67800.01 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(coordinated with { RetainedOfflineSeconds = 49110.01 }));
+            var frozen = coordinated with { MaximumChildren = 577, RetainedChildren = 545, FreezeRetainedAllocations = true,
+                RetainedElapsedSeconds = 61500, RetainedOfflineSeconds = 42800,
+                RetainedRoots = coordinated.RetainedRoots.Append(Path.Combine(root, "frozen-history")).ToArray() };
+            Directory.CreateDirectory(frozen.RetainedRoots[^1]);
+            ReplayCalibrationRun.ValidateResources(frozen);
+            Reject(() => ReplayCalibrationRun.ValidateResources(frozen with { FreezeRetainedAllocations = false }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(coordinated with { FreezeRetainedAllocations = true }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(frozen with { RetainedChildren = 544 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(frozen with { RetainedChildren = 546 }));
         });
         File.WriteAllText(Path.Combine(root, "foreground-checks.json"), JsonSerializer.Serialize(new {
             result = "passed", results, effects = "Pure admission delegates and tiny receipt; no window, input injection, child, engine, sound or capture." }, new JsonSerializerOptions { WriteIndented = true }));
