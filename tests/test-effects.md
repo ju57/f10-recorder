@@ -1,5 +1,13 @@
 # Verification launch effects
 
+The host Resume correction's exact replacement boundary carries622reserved
+children plus32fresh (654), including the independent8-child physical disk
+fixture, and allows43retained roots/160GBretained. Cumulative bounds are192GBcap/
+190.5GBstop,60GBcaller floor,86400wall/61200offline seconds,36864files/640dirs
+and2.2GBoutside. Immutable historical leases, full pre/post hashes, unchanged
+500msactive observations, six-source/no-refit requirements and finite native/
+closure reserves remain mandatory. This admission support does not start media.
+
 `--replay-storage-host-resume <fresh-root>` supplies supervisor observations to
 an isolated paused host and checks explicit Resume intent while the previous
 durable guard is still present, later healthy buffering, an effective subsequent
