@@ -34,7 +34,7 @@ caches its current-root prefix; every live-handle allocation/EOF refresh remains
 
 The export-cadence correction preserves391prior children plus32fresh (423ceiling),
 144GB/142.5GBstop,780wall/480offline minutes,28retained roots/124GBretained,
-24576files/448directories and2GBoutside allowance. Its wrapper reserves300seconds
+24576files/448directories and2GBoutside allowance. Its wrapper reserves360seconds
 each for preflight and closure. Six new sources,three heldout,no refit,500msactive
 observations and the60GBcaller floor remain mandatory.
 
