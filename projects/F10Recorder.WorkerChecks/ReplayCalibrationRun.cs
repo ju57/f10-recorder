@@ -655,7 +655,8 @@ internal static partial class ReplayCalibrationRun
         long PeakAllocation, double RequestedEnd, double ExportSeconds, string SelectionIdentity, ReplayOutputDemand Demand,
         object Process, string[] Arguments);
 
-    static Sample Collect(CalibrationPlan plan, string label, Sampler sampler, ReplayReferenceModel model, List<object> processes)
+    static Sample Collect(CalibrationPlan plan, string label, Sampler sampler, ReplayReferenceModel model, List<object> processes,
+        Action<int, IntPtr> beforeForeground = null)
     {
         sampler.RequireTime(330);
         sampler.Check(3_100_000_000L);
@@ -691,6 +692,7 @@ internal static partial class ReplayCalibrationRun
             uint windowProcess; Native.GetWindowThreadProcessId(hwnd, out windowProcess);
             Require(windowProcess == fixture.Id && ready.RootElement.GetProperty("pid").GetInt32() == fixture.Id,
                 "Fixture window does not belong to the task-owned process; no capture admitted.");
+            beforeForeground?.Invoke(fixture.Id, hwnd);
             Native.ShowWindow(hwnd, 5); // Show only our own window; no preference or input changes.
             bool requested = SetForegroundWindow(hwnd);
             var focusClock = Stopwatch.StartNew();
@@ -732,8 +734,17 @@ internal static partial class ReplayCalibrationRun
                     captureStorage.StartSupervision();
                 }, afterLaunch: source => captureStorage?.SealProducer(source.ProducerProof)));
             var bootstrapClock = Stopwatch.StartNew();
-            while (!create.IsCompleted) { sampler.Check(); Require(GetForegroundWindow() == hwnd && !fixture.HasExited,
-                "Controlled fixture lost foreground during bootstrap."); Require(bootstrapClock.Elapsed.TotalSeconds < 35
+            while (!create.IsCompleted) { sampler.Check();
+                IntPtr actualForeground = GetForegroundWindow();
+                if (actualForeground != hwnd || fixture.HasExited)
+                {
+                    GetWindowThreadProcessId(actualForeground, out uint actualOwner);
+                    Write(Path.Combine(root, "foreground-failure.json"), new { utc = DateTime.UtcNow, label, phase = "bootstrap",
+                        expectedWindow = hwnd.ToInt64(), actualWindow = actualForeground.ToInt64(), actualOwner,
+                        fixturePid = fixture.Id, fixtureExited = fixture.HasExited });
+                    throw new IOException("Controlled fixture lost foreground during bootstrap.");
+                }
+                Require(bootstrapClock.Elapsed.TotalSeconds < 35
                 && total.Elapsed.TotalSeconds < 330, "Capture bootstrap deadline."); Thread.Sleep(100); }
             capture = create.GetAwaiter().GetResult();
             capture.ObserveOutputDemand = true; capture.OutputCalibration = model;

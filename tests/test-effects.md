@@ -14,6 +14,11 @@ preflight360/closure360 and240offline plus720verification are reserved.
 it rejects changed budgets, missing source provenance and nested output roots.
 Operator launch markers coordinate normal activation of the owned fixture;
 the existing10second foreground admission and500msactive limit remain.
+An activation-complete marker must arrive before capture bootstrap, within a
+separate10second operator handoff. No activation is performed during capture.
+One preservation-audited stopped continuation may be carried with its full8child
+charge:431prior+8new=439,30retained roots,810wall/510offline minutes. All byte,
+file,foreground,500ms,no-refit and normal-exit constraints remain unchanged.
 
 Export lifecycle work (verified lease, process creation/job assignment and
 producer callbacks) now runs as an owned, joined operation while the caller

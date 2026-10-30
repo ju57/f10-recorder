@@ -34,6 +34,9 @@ internal static class CalibrationForeground
         Check("already-foreground", () => Wait(() => true, () => false, () => { }, () => throw new IOException("Unexpected wait"), () => 0));
         Check("user-focus-before-deadline", () =>
         { int polls = 0; Wait(() => polls == 3, () => false, () => { }, () => polls++, () => polls); if (polls != 3) throw new IOException("Premature focus admission."); });
+        Check("operator-handoff-requires-both-marker-and-actual-foreground", () =>
+        { int polls = 0; Wait(() => polls >= 2 && polls >= 4, () => false, () => { }, () => polls++, () => polls);
+            if (polls != 4) throw new IOException("A marker alone admitted capture before actual foreground."); });
         Check("timeout-never-admits", () =>
         { int ticks = 0; Reject(() => Wait(() => false, () => false, () => { }, () => ticks++, () => ticks)); if (ticks != DeadlineSeconds) throw new IOException("Deadline moved."); });
         Check("exited-fixture-even-if-stale-ready", () => Reject(() => Wait(() => true, () => true, () => { }, () => { }, () => 0)));

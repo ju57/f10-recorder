@@ -5,7 +5,7 @@ using Forms = System.Windows.Forms;
 namespace F10Recorder;
 
 internal sealed record CalibrationContinuationPlan(CalibrationPlan Plan, string PriorRoot, string PriorAdmission,
-    string PriorAdmissionHash, string PriorAudit, Dictionary<string, string> SourceRoots);
+    string PriorAdmissionHash, string PriorAudit, Dictionary<string, string> SourceRoots, string[] FailedContinuations = null);
 
 internal static partial class ReplayCalibrationRun
 {
@@ -18,8 +18,8 @@ internal static partial class ReplayCalibrationRun
             c with { Plan = c.Plan with { MaximumChildren = 430 } },
             c with { Plan = c.Plan with { RetainedChildren = 422 } },
             c with { Plan = c.Plan with { RetainedElapsedSeconds = double.NaN } },
-            c with { Plan = c.Plan with { RetainedElapsedSeconds = 45000 } },
-            c with { Plan = c.Plan with { RetainedOfflineSeconds = 28500 } },
+            c with { Plan = c.Plan with { RetainedElapsedSeconds = c.Plan.DeadlineSeconds - 100 } },
+            c with { Plan = c.Plan with { RetainedOfflineSeconds = c.Plan.OfflineDeadlineSeconds - 100 } },
             c with { SourceRoots = c.SourceRoots.Where(k => k.Key != "H02").ToDictionary() },
             c with { PriorAdmissionHash = new string('0', 64) },
             c with { Plan = c.Plan with { Root = Path.Combine(c.PriorRoot, "nested") } }
@@ -36,12 +36,14 @@ internal static partial class ReplayCalibrationRun
     internal static void ValidateContinuation(CalibrationContinuationPlan continuation)
     {
         var p = continuation?.Plan;
-        Require(p != null && p.Order != null && p.Order.SequenceEqual(Order) && p.MaximumChildren == 431 && p.RetainedChildren == 423
+        int priorFailed = continuation?.FailedContinuations?.Length ?? 0;
+        Require(priorFailed is 0 or 1 && p != null && p.Order != null && p.Order.SequenceEqual(Order)
+            && p.MaximumChildren == 431 + 8 * priorFailed && p.RetainedChildren == 423 + 8 * priorFailed
             && p.BudgetBytes == 144_000_000_000 && p.StopBytes == 142_500_000_000 && p.FloorBytes == 60_000_000_000
-            && p.DeadlineSeconds == 46800 && p.OfflineDeadlineSeconds == 28800 && p.DirectoryLimit == 448 && p.FileLimit == 24576
+            && p.DeadlineSeconds == 46800 + 1800 * priorFailed && p.OfflineDeadlineSeconds == 28800 + 1800 * priorFailed && p.DirectoryLimit == 448 && p.FileLimit == 24576
             && p.RetainedBudgetBytes == 124_000_000_000 && p.OutsideBuildAllowanceBytes == 2_000_000_000
-            && p.OutputComponentBytes == 2_000_000_000 && p.RetainedRoots.Length == 29
-            && p.RetainedRoots.Distinct(StringComparer.OrdinalIgnoreCase).Count() == 29
+            && p.OutputComponentBytes == 2_000_000_000 && p.RetainedRoots.Length == 29 + priorFailed
+            && p.RetainedRoots.Distinct(StringComparer.OrdinalIgnoreCase).Count() == 29 + priorFailed
             && p.RetainedRoots.All(Directory.Exists), "Continuation resource boundary changed.");
         Require(double.IsFinite(p.RetainedElapsedSeconds) && p.RetainedElapsedSeconds >= 0
             && p.RetainedElapsedSeconds + 1800 + 720 <= p.DeadlineSeconds
@@ -64,6 +66,14 @@ internal static partial class ReplayCalibrationRun
             && !Directory.Exists(Path.Combine(continuation.PriorRoot, "H03"))
             && !File.Exists(Path.Combine(continuation.PriorRoot, "H01", "capture-arguments.json")),
             "Retained prefix must end before an unadmitted H01 capture; do not reuse a failed acquisition.");
+        foreach (string stopped in continuation.FailedContinuations ?? [])
+        {
+            using var previous = JsonDocument.Parse(File.ReadAllBytes(stopped));
+            Require(previous.RootElement.GetProperty("result").GetString() == "failed-batch-absence-and-preservation-audited"
+                && !previous.RootElement.GetProperty("batchPassed").GetBoolean()
+                && previous.RootElement.GetProperty("cumulativeChildren").GetInt32() == 431,
+                "The stopped continuation must retain its failure, full child charge and preservation audit.");
+        }
     }
 
     internal static int Continue(string path, string expectedPlanHash)
@@ -125,7 +135,17 @@ internal static partial class ReplayCalibrationRun
                 while (!File.Exists(Path.Combine(plan.Root, "operator-launch-" + label + ".json")))
                 { sampler.Check(); Require(wait.Elapsed.TotalSeconds < 60, "Operator source-launch coordination deadline; no capture admitted."); Thread.Sleep(50); }
                 sampler.RequireTime(650); sampler.BeginActive();
-                var sample = Collect(plan, label, sampler, model, processes);
+                var sample = Collect(plan, label, sampler, model, processes, (pid, hwnd) =>
+                {
+                    Write(Path.Combine(plan.Root, "operator-focus-ready-" + label + ".json"), new { label, pid, hwnd = hwnd.ToInt64(), noCaptureAdmitted = true });
+                    var activation = Stopwatch.StartNew();
+                    CalibrationForeground.Wait(() => File.Exists(Path.Combine(plan.Root, "operator-focused-" + label + ".json"))
+                            && GetForegroundWindow() == hwnd,
+                        () => { Native.GetWindowThreadProcessId(hwnd, out uint owner); return owner != pid; },
+                        () => sampler.Check(), () => Thread.Sleep(25), () => activation.Elapsed.TotalSeconds);
+                    Write(Path.Combine(plan.Root, "operator-handoff-" + label + ".json"), new { label, pid, hwnd = hwnd.ToInt64(),
+                        activationCompleteBeforeBootstrap = true, waitedMilliseconds = activation.Elapsed.TotalMilliseconds });
+                });
                 sampler.EndActive(); samples.Add(sample);
                 string cell = Path.Combine(plan.Root, label); sourceRoots.Add(label, cell);
                 sampler.BeginOffline("inspection", 32_000_000, MainInspectionSeconds);
