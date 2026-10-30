@@ -81,7 +81,14 @@ jobs:
       - name: Verify supplied replay output reservations without capture or GPU
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-output-validation artifacts/replay-output-ci
       - name: Verify sampler and atomic storage claims without capture or GPU
-        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-publication-checks artifacts/replay-publication-ci
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-publication-checks artifacts/replay-publication-ci
+          $code = $LASTEXITCODE
+          $receipt = 'artifacts/replay-publication-ci/publication-check.json'
+          if (Test-Path -LiteralPath $receipt) { Get-Content -LiteralPath $receipt -Raw }
+          exit $code
       - name: Verify frozen calibration resource admission without media
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-foreground-checks artifacts/replay-resource-ci
       - name: Verify independent capture closure evidence without media
