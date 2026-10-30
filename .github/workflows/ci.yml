@@ -113,7 +113,15 @@ jobs:
       - name: Verify capture storage supervision with controlled producers
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-storage-runtime artifacts/replay-storage-runtime-ci
       - name: Verify producer crash recovery without media
-        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-producer-recovery artifacts/replay-producer-recovery-ci
+        shell: pwsh
+        run: |
+          dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-producer-recovery artifacts/replay-producer-recovery-ci
+          $code = $LASTEXITCODE
+          if ($code) {
+            $report = Get-Content artifacts/replay-producer-recovery-ci/producer-recovery.json -Raw | ConvertFrom-Json
+            $report.checks | Where-Object { -not $_.passed } | ConvertTo-Json -Depth 8
+          }
+          exit $code
       - name: Verify capture status without capture or GPU
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --capture-status artifacts/capture-status-ci
       - name: Verify bounded profile status without native recorder or GPU
