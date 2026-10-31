@@ -14,6 +14,9 @@ capacity pass again. A missing producer identity in an existing/abandoned guard
 never supplies absence proof. Recording-blocking storage problems remain
 visible until individually dismissed; dismissal changes neither the hold nor
 recording intent.
+Newly attached UI clients reconstruct that problem from current hold state and
+reason. Status carries the durable hold identity so dismissing one hold does not
+suppress a later hold, or resurrect the same hold when another event arrives.
 An already accepted save's result has a separate transient notice beneath the
 problem. Screenshot preparation hides the problem temporarily and restores it
 when screenshot work finishes; it does not dismiss the storage condition.
@@ -65,6 +68,13 @@ caller continues the same real storage checks. A failed check still waits for
 an in-flight creation to yield its actual child handle before owned cleanup;
 it never releases the executable lease or reports absence for an orphaned launch.
 This preserves observation coverage through startup without widening500ms.
+
+Capture retirement contains metadata/diagnostic drain failures at the supervisor
+boundary. It pauses acquisition, retains the affected session, records a storage
+hold and still joins accepted saves before disposing their shared source/job.
+A save's final publication or truthful failure remains its own outcome. Unknown
+producer absence never becomes a successful closure merely because retirement
+handled an exception. Window-source error cleanup uses the same boundary.
 
 | Producer | Current integration | Outstanding obligation |
 | --- | --- | --- |

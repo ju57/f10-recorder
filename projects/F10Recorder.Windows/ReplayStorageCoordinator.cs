@@ -260,6 +260,7 @@ internal sealed class ReplayStorageCoordinator : IDisposable
         var held = Hold; var value = assessment;
         metrics.ReplayStorageSafetyKind = held.Held ? "Stop" : value?.Kind.ToString() ?? "Unmeasured";
         metrics.ReplayStorageSafetyHeld = held.Held;
+        metrics.ReplayStorageSafetyHoldId = held.Held ? held.HoldId : null;
         metrics.ReplayStorageSafetyWarning = value?.ShouldWarn == true;
         metrics.ReplayStorageSafetyReason = ReplayOutputDemand.Bounded(held.Held ? held.Reason : value?.Reason ?? "Capture poll and stop growth have not been qualified for this recording profile.", 512);
     }

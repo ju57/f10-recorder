@@ -62,17 +62,25 @@ internal static class ReplayStorageRuntimeChecks
                 try { first.RequireAdmission(profile, profile); }
                 catch (IOException error) { rejected = true; first.StopForStorageFailure(error.Message); }
                 Require(rejected && latch.Read().Held, "Preflight must reject and retain an explicit-Resume hold.");
+                var metrics = new RecorderMetrics(); first.WriteMetrics(metrics);
+                Require(metrics.ReplayStorageSafetyHoldId == latch.Read().HoldId && metrics.ReplayStorageSafetyHoldId != null,
+                    "Current-state clients need the durable hold identity, including initial rejection.");
             }
             available = Qualification(); files.Bytes = 9_000_000_000;
             using var replacement = new ReplayStorageCoordinator(new ReplayStorageStopLatch(profile, security),
                 new ReplayVolumeReservations(security), files, () => available, (_, _) => true);
             Require(replacement.Hold.Held, "Worker replacement must not automatically clear the rejection.");
+            var replacementMetrics = new RecorderMetrics(); replacement.WriteMetrics(replacementMetrics);
+            Require(replacementMetrics.ReplayStorageSafetyHoldId == latch.Read().HoldId,
+                "Worker replacement must preserve the notice's hold identity.");
             replacement.RequireAdmission(profile, profile);
             replacement.RequireResume(profile, profile);
             Require(replacement.Hold.Held, "Safe checks alone must retain the hold until explicit acquisition.");
             replacement.BeginCapture(Scope, profile, profile, () => { }, explicitResume: true);
             replacement.CompleteCapture(true);
             Require(!latch.Read().Held, "Known never-launched producer must permit explicit safe Resume after replacement.");
+            replacement.WriteMetrics(replacementMetrics);
+            Require(replacementMetrics.ReplayStorageSafetyHoldId == null, "Resolved hold identity leaked into later status.");
         });
         Check("preflight failure cannot upgrade an unknown previous producer", () =>
         {

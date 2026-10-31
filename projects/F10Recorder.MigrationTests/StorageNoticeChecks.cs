@@ -33,8 +33,10 @@ internal static class StorageNoticeChecks
             try
             {
                 stack = new StorageNoticeStack(); var notice = stack.Problem;
-                stack.Present("Replay recording paused for storage", "Storage is unavailable. Check storage, then resume recording explicitly.", NotificationKind.Warning, 0, null);
-                stack.Observe(true, false, null);
+                const string reason = "Storage is unavailable. Check storage, then resume recording explicitly.";
+                stack.Observe(true, false, null, reason, "first-hold");
+                Require(notice.IsVisible, "Attaching to an already-held worker must reconstruct its persistent problem from current state.");
+                Require(AutomationProperties.GetName(notice).Contains(reason), "Reconstructed notice lost the current hold reason.");
                 await Task.Delay(6500);
                 Require(notice.IsVisible, "Storage-stop problem auto-expired.");
                 var button = notice.GetVisualDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Dismiss notification");
@@ -52,6 +54,7 @@ internal static class StorageNoticeChecks
                 await Task.Delay(450);
                 Require(notice.IsVisible && !stack.Transient.IsVisible, "Transient expiry dismissed the independent storage problem.");
                 stack.HideForScreenshot(); stack.Observe(true, true, null);
+                stack.Present("Replay recording paused for storage", reason, NotificationKind.Warning, 0, null);
                 Require(!notice.IsVisible, "Screenshot preparation left the problem visible.");
                 stack.Observe(true, false, null);
                 Require(notice.IsVisible && notice.Heading == "Replay recording paused for storage", "Screenshot preparation permanently dismissed the storage problem.");
@@ -60,8 +63,20 @@ internal static class StorageNoticeChecks
                 stack.Present("Replay saved", "Saved-success notice keeps its finite lifetime.", NotificationKind.Success, 150, null);
                 button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 Require(!notice.IsVisible && stack.Transient.IsVisible, "Individual problem dismissal changed an unrelated accepted result.");
+                stack.Observe(true, false, null, "Updated reason for the same hold.", "first-hold");
+                stack.Present("Replay recording paused for storage", reason, NotificationKind.Warning, 0, null);
+                Require(!notice.IsVisible, "Polling or a duplicate event resurrected a dismissed hold.");
                 await Task.Delay(450);
                 Require(!stack.Transient.IsVisible, "The dismissed persistent problem made a later saved result permanent.");
+                stack.Observe(true, false, null, reason, "second-hold");
+                Require(notice.IsVisible, "A different hold was suppressed by the previous hold's dismissal.");
+                stack.HideForScreenshot(); stack.Observe(false, true, null);
+                stack.Observe(false, false, null);
+                Require(!notice.IsVisible, "Screenshot restoration resurrected a resolved hold.");
+                stack.Observe(true, true, null, reason, "third-hold");
+                Require(!notice.IsVisible, "Attaching during screenshot preparation exposed the problem window.");
+                stack.Observe(true, false, null, reason, "third-hold");
+                Require(notice.IsVisible, "Current hold did not appear after screenshot preparation.");
                 passed = true;
             }
             catch (Exception error) { failure = error.ToString(); }

@@ -29,6 +29,7 @@ namespace F10Recorder
         public string ReplayStorageSafetyKind = "Unmeasured";
         public string ReplayStorageSafetyReason = "Capture poll and stop growth have not been qualified for this recording profile.";
         public bool ReplayStorageSafetyHeld;
+        public string ReplayStorageSafetyHoldId;
         public bool ReplayStorageSafetyWarning;
         public int Recoveries;
         public double LastSaveMilliseconds;

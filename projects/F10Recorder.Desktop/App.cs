@@ -86,7 +86,9 @@ public sealed class App : Application
     internal void Update()
     {
         CaptureVisibility.Configure(Recorder.Config, Recorder.CaptureModeKnown);
-        noticeStack.Observe(Recorder.Metrics?.ReplayStorageSafetyHeld == true, Recorder.ScreenshotInProgress, SettingsWindow);
+        var metrics = Recorder.Metrics;
+        noticeStack.Observe(metrics?.ReplayStorageSafetyHeld == true, Recorder.ScreenshotInProgress, SettingsWindow,
+            metrics?.ReplayStorageSafetyReason, metrics?.ReplayStorageSafetyHoldId);
         var status = ReplayPresentation.Describe(Recorder.Phase, Recorder.State, Recorder.Paused, Recorder.Ready, Recorder.CanSave, Recorder.Applying, Recorder.Saving, Recorder.SaveRegistered, Recorder.Metrics?.BufferedSeconds ?? 0);
         SettingsWindow.UpdateState(); statusItem.Header = status.Heading;
         pauseItem.Header = Recorder.Paused ? "Resume recording" : "Pause recording";

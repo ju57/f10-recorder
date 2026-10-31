@@ -246,6 +246,17 @@ internal static class CalibrationForeground
             Reject(() => ReplayCalibrationRun.ValidateResources(reconnected with { RetainedChildren = 705 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(reconnected with { RetainedChildren = 707 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(reconnected with { FileLimit = 36865 }));
+            var closure = reviewed with { MaximumChildren = 806, RetainedChildren = 774, DeadlineSeconds = 115000,
+                OfflineDeadlineSeconds = 85000, DirectoryLimit = 768, OutsideBuildAllowanceBytes = 5_000_000_000,
+                RetainedElapsedSeconds = 102576, RetainedOfflineSeconds = 77156,
+                RetainedRoots = Enumerable.Range(0, 51).Select(i => Path.Combine(root, "closure-history-" + i)).ToArray() };
+            foreach (string path in closure.RetainedRoots) Directory.CreateDirectory(path);
+            ReplayCalibrationRun.ValidateResources(closure);
+            Reject(() => ReplayCalibrationRun.ValidateResources(closure with { RetainedChildren = 773 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(closure with { MaximumChildren = 807 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(closure with { OutsideBuildAllowanceBytes = 5_000_000_001 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(closure with { DirectoryLimit = 769 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(closure with { FloorBytes = 59_999_999_999 }));
         });
         File.WriteAllText(Path.Combine(root, "foreground-checks.json"), JsonSerializer.Serialize(new {
             result = "passed", results, effects = "Pure admission delegates and tiny receipt; no window, input injection, child, engine, sound or capture." }, new JsonSerializerOptions { WriteIndented = true }));

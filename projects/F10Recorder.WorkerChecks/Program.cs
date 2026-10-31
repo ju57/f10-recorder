@@ -44,6 +44,8 @@ internal static class WorkerChecks
             return args.Length == 3 && args[0] == "--replay-storage-initial-worker" ? ReplayStorageResumeWorkerChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), initialAdmission: true) : 2;
         if (args.Any(a => a.StartsWith("--replay-storage-prelaunch", StringComparison.OrdinalIgnoreCase)))
             return args.Length == 3 && args[0] == "--replay-storage-prelaunch" ? ReplayStorageRuntimeChecks.RunPrelaunch(Path.GetFullPath(args[1]), Path.GetFullPath(args[2])) : 2;
+        if (args.Any(a => a.StartsWith("--replay-retirement", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 2 && args[0] == "--replay-retirement" ? ReplayRetirementChecks.Run(Path.GetFullPath(args[1])) : 2;
         if (args.Any(a => a.StartsWith("--replay-storage-runtime", StringComparison.OrdinalIgnoreCase)))
             return args.Length == 2 && args[0] == "--replay-storage-runtime" ? ReplayStorageRuntimeChecks.Run(Path.GetFullPath(args[1])) : 2;
         if (args.Any(a => a.StartsWith("--replay-storage-safety", StringComparison.OrdinalIgnoreCase)))

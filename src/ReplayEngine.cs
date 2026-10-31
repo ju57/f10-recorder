@@ -576,18 +576,41 @@ namespace F10Recorder
             {
                 if (id.HasValue)
                 {
-                    storage.StopAndPreserve(replays, id.Value,
-                        () => storageSession == null || storageSession.CaptureProducerAbsent,
-                        () => Volatile.Read(ref preserveForStorage) != 0);
-                    CompleteStorageCapture();
-                    // Supervision is now joined; no late poll can change this
-                    // retention decision while cache retirement drains exports.
-                    PreserveStorageSession(id);
-                    replays.RetireSessionAsync(id.Value).GetAwaiter().GetResult();
+                    try
+                    {
+                        storage.StopAndPreserve(replays, id.Value,
+                            () => storageSession == null || storageSession.CaptureProducerAbsent,
+                            () => Volatile.Read(ref preserveForStorage) != 0);
+                        CompleteStorageCapture();
+                        PreserveStorageSession(id);
+                    }
+                    catch (Exception error) { RetirementFailed(id, error); }
+                    // Even a failed metadata/producer drain must join accepted
+                    // saves before disposing their source/job. Its faulted stop
+                    // task is retained by ReplayCache and can be reported again.
+                    try { replays.RetireSessionAsync(id.Value).GetAwaiter().GetResult(); }
+                    catch (Exception error) { RetirementFailed(id, error); }
                 }
-                else storageSession?.Dispose();
+                else
+                {
+                    try { storageSession?.Dispose(); }
+                    catch (Exception error) { RetirementFailed(id, error); }
+                }
             }
-            finally { CompleteStorageCapture(); draining = false; }
+            finally
+            {
+                try { CompleteStorageCapture(); }
+                catch (Exception error) { RetirementFailed(id, error); }
+                finally { draining = false; }
+            }
+        }
+        void RetirementFailed(ReplaySessionId? id, Exception error)
+        {
+            if (id.HasValue) replays.PreserveSession(id.Value);
+            capture.Pause(true);
+            try { storage.StopForStorageFailure("Capture retirement failed: " + error.Message); }
+            catch (Exception persistence) { Log.Write("Capture retirement hold persistence failed: " + persistence); }
+            Log.Write("Capture retirement retained its session: " + error);
         }
         internal int CaptureProcessId { get { lock (gate) return session == null ? 0 : session.ProcessId; } }
         void Run()
@@ -704,7 +727,18 @@ namespace F10Recorder
                             if (currentReplay.HasValue) replays.StopAcquisitionAsync(currentReplay.Value).GetAwaiter().GetResult();
                             else storageSession?.Dispose();
                         }
-                        finally { CompleteStorageCapture(); draining = false; }
+                        catch (Exception closure)
+                        {
+                            RetirementFailed(currentReplay, closure);
+                            RetireCapture(currentReplay);
+                            current = null; currentReplay = null;
+                        }
+                        finally
+                        {
+                            try { CompleteStorageCapture(); }
+                            catch (Exception closure) { RetirementFailed(currentReplay, closure); }
+                            finally { draining = false; }
+                        }
                         capturing = false;
                         lock (gate) recoveries++;
                         Log.Write(ex.ToString()); failures++;
@@ -748,6 +782,7 @@ namespace F10Recorder
             // completes. Export has its own timeout; elapsed join time is not cleanup.
             worker.Join();
             try { replays.CloseAsync().GetAwaiter().GetResult(); }
+            catch (Exception error) { RetirementFailed(null, error); }
             finally { storage.Warning -= ForwardStorageWarning; cacheLease.Dispose(); }
         }
     }

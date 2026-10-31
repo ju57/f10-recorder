@@ -1,5 +1,24 @@
 # Verification launch effects
 
+`F10Recorder.WorkerChecks --replay-retirement <fresh-root>` exercises the real
+supervisor retirement method with tiny nonmedia files and an isolated account
+authority. The production supervisor stays paused. A controlled export thread
+waits while source metadata/diagnostic closure fails, then verifies accepted
+work drains, failed inputs remain and a hold is reported. A healthy control
+still retires its inputs. No capture-session constructor, engine child, audio,
+GPU, account model, user profile/startup write or installation runs.
+The native notice check also starts from current held state without a preceding
+notification event; it covers initial attachment, dismissal and later holds.
+
+The shutdown/notice correction's prospective qualification retains774reserved
+children plus32fresh(806),51historical roots/16GBretained,80GBaggregatecap/
+78.5GBstop/60GBcallerfloor,36864files/768directories and5GBoutside allowance.
+Cumulative wall/offline ceilings are115000/85000seconds; all prior failed costs
+remain charged.500msactive observation and no held-out refit remain mandatory.
+This support does not start a recording or activate a model. Exact fresh plan,
+geometry/allocation controls, source review and unchanged consumer bindings
+must pass before execution; no automatic batch retry is introduced.
+
 The reviewed correction's prospective replacement carries674reserved children
 plus32fresh (706); a separately admitted14-child ordinary-worker ceiling reaches
 720. Its exact resource case uses80GBaggregate cap/78.5GBstop,60GBcaller floor,
