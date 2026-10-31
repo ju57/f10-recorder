@@ -614,9 +614,10 @@ internal sealed class ReplayCache : IDisposable
                     // The bounded manifest may no longer list inputs reserved at
                     // admission. Keep their authoritative boundaries with the pins.
                     available = available.Concat(session.Reserved.Values).DistinctBy(s => s.Path, StringComparer.OrdinalIgnoreCase).OrderBy(s => s.Start).ToList();
-                    if (available.Count > 0 && (available[^1].End >= end || session.Source.Stopped))
+                    if (session.Source.Stopped && (available.Count == 0 || available[^1].End < end))
+                        throw new OutputEvidenceInvalid("Capture stopped before the original requested replay endpoint; protected footage is retained.");
+                    if (available.Count > 0 && available[^1].End >= end)
                     {
-                        if (session.Source.Stopped) end = Math.Min(end, available[^1].End);
                         selection = ReplaySelection.Select(available, end, info.ReplaySeconds);
                         if (selection.Count == 0) throw new IOException("No replay frames are available yet.");
                         session.PendingEnd = null;

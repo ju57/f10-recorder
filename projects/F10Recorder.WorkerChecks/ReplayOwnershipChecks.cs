@@ -1267,10 +1267,14 @@ internal static class ReplayOwnershipChecks
                 await waiting.Task.WaitAsync(Deadline);
                 await f.Cache.StopAcquisitionAsync(f.Id).WaitAsync(Deadline);
                 resume.SetResult(); var result = await Finish(save);
-                Require(result.Succeeded && !f.Source.Disposed, "Source loss discarded retained footage.");
+                Require(!result.Succeeded && !f.Source.Disposed && f.Source.ExportCount == 0
+                    && result.Error.Contains("requested", StringComparison.OrdinalIgnoreCase)
+                    && File.Exists(f.Source.Chunk(0)), "Source loss must fail the incomplete original request without losing retained footage.");
+                // A later explicit request may use a completed endpoint. It is
+                // a new request, never a silent shortening of the first one.
+                Require((await Finish(f.Save(2))).Succeeded, "Stopped completed footage was no longer explicitly savable.");
                 int trim = Array.IndexOf(f.Source.Arguments, "-t");
-                Require(f.Source.Arguments[trim + 1] == "2.000000", "Save exceeded completed footage after stop.");
-                Require((await Finish(f.Save(20))).Succeeded, "Stopped completed footage was no longer savable.");
+                Require(f.Source.Arguments[trim + 1] == "2.000000", "Explicit completed-endpoint request changed its endpoint.");
             }
             finally { resume.TrySetResult(); }
         });
@@ -1283,10 +1287,13 @@ internal static class ReplayOwnershipChecks
             try
             {
                 await waiting.Task.WaitAsync(Deadline);
+                f.Source.Segments(0, 4); // Close the entire accepted endpoint before retirement.
                 var retirement = f.Cache.RetireSessionAsync(f.Id);
                 await f.Source.StopEntered.Task.WaitAsync(Deadline);
                 Require(!f.Source.Disposed && !retirement.IsCompleted, "Retirement removed waiting save inputs.");
                 resume.SetResult(); Require((await Finish(save)).Succeeded, "Accepted waiting save did not finish.");
+                int trim = Array.IndexOf(f.Source.Arguments, "-t");
+                Require(f.Source.Arguments[trim + 1] == "4.000000", "Retirement shortened the accepted request.");
                 await retirement.WaitAsync(Deadline);
             }
             finally { resume.TrySetResult(); }

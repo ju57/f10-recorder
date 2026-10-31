@@ -149,6 +149,26 @@ internal static class ReplayOutputValidationChecks
             try { await action(Path.Combine(root, name)); results.Add(new { name, result = "passed" }); }
             catch (Exception ex) { failed++; results.Add(new { name, result = "failed", error = ex.ToString() }); }
         }
+        await Check("stopped-before-accepted-tail-fails-without-shortening", async path =>
+        {
+            var waiting = Signal(); var release = Signal();
+            using var f = new Fixture(path, () => { waiting.TrySetResult(); return release.Task; });
+            var accepted = f.Save(1500); // Last closed end=1; original request end=1.5.
+            Require(accepted.Accepted, "Controlled unfinished-tail request was not accepted.");
+            try
+            {
+                await waiting.Task.WaitAsync(Deadline);
+                f.Source.StopCapture();
+            }
+            finally { release.TrySetResult(); }
+            var result = await Finish(accepted);
+            Require(!result.Succeeded && result.Error.Contains("requested", StringComparison.OrdinalIgnoreCase)
+                && f.Source.Exports == 0 && f.Files.Copies == 0 && f.Files.Publications == 0,
+                "Stopped acquisition silently shortened and published the accepted endpoint.");
+            f.Preserved();
+            await f.Cache.RetireSessionAsync(f.Id).WaitAsync(Deadline);
+            f.Preserved();
+        });
         foreach (bool same in new[] { false, true })
             foreach (bool sufficient in new[] { false, true })
                 await Check((same ? "same" : "different") + "-volume-" + (sufficient ? "exact" : "one-unit-short"), async path =>

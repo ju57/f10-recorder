@@ -223,6 +223,21 @@ internal static class CalibrationForeground
             Reject(() => ReplayCalibrationRun.ValidateResources(resumed with { FreezeRetainedAllocations = false }));
             Reject(() => ReplayCalibrationRun.ValidateResources(resumed with { RetainedChildren = 621 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(resumed with { FileLimit = 36865 }));
+            var reviewed = resumed with { MaximumChildren = 706, RetainedChildren = 674,
+                BudgetBytes = 80_000_000_000, StopBytes = 78_500_000_000, DeadlineSeconds = 100000,
+                OfflineDeadlineSeconds = 74000, RetainedBudgetBytes = 16_000_000_000,
+                RetainedElapsedSeconds = 87002, RetainedOfflineSeconds = 64008,
+                RetainedRoots = Enumerable.Range(0, 46).Select(i => Path.Combine(root, "reviewed-history-" + i)).ToArray() };
+            foreach (string path in reviewed.RetainedRoots) Directory.CreateDirectory(path);
+            ReplayCalibrationRun.ValidateResources(reviewed);
+            Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { FreezeRetainedAllocations = false }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { RetainedChildren = 673 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { BudgetBytes = 80_000_000_001 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { RetainedBudgetBytes = 16_000_000_001 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { DeadlineSeconds = 100001 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { FloorBytes = 59_999_999_999 }));
+            string extra = Path.Combine(root, "unadmitted-review-history"); Directory.CreateDirectory(extra);
+            Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { RetainedRoots = reviewed.RetainedRoots.Append(extra).ToArray() }));
         });
         File.WriteAllText(Path.Combine(root, "foreground-checks.json"), JsonSerializer.Serialize(new {
             result = "passed", results, effects = "Pure admission delegates and tiny receipt; no window, input injection, child, engine, sound or capture." }, new JsonSerializerOptions { WriteIndented = true }));

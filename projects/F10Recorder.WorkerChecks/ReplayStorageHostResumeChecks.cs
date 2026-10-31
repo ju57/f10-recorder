@@ -19,6 +19,8 @@ internal static class ReplayStorageHostResumeChecks
             using var host = new RecorderHost(root, action => action(), true, "F10Recorder.HostResume." + Guid.NewGuid().ToString("N"),
                 syntheticSource: true, setStartup: _ => startupWrites++);
             var held = new RecorderMetrics { ReplayStorageSafetyHeld = true, ReplayStorageSafetyReason = "Previous producer's durable guard awaits replacement." };
+            int problemDuration = -1;
+            host.Notification += (title, _, kind, duration) => { if (title == "Replay recording paused for storage" && kind == NotificationKind.Warning) problemDuration = duration; };
             host.PresentCaptureStatus(new(CapturePhase.Starting, false, "Explicit Resume pending"), held, true, false);
             Require(!host.Paused && !host.Ready, "A prior durable guard overwrote the explicitly resumed capture intent.");
             checks.Add("pending-explicit-resume-keeps-running-intent-without-readiness");
@@ -32,6 +34,8 @@ internal static class ReplayStorageHostResumeChecks
             host.PresentCaptureStatus(new(CapturePhase.Paused, false, "New storage stop"), held, true, true);
             Require(host.Paused && !host.Ready && !host.CanSave, "A new real storage stop lost its paused state.");
             checks.Add("new-storage-stop-remains-paused-and-not-ready");
+            Require(problemDuration == 0, "Recording-blocking storage problem must persist until individually dismissed.");
+            checks.Add("storage-stop-problem-does-not-auto-expire");
             Require(host.CaptureProcessId == 0 && startupWrites == 0, "Nonmedia host checks started capture or wrote startup state.");
         }
         catch (Exception error) { failure = error; }

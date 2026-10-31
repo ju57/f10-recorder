@@ -15,6 +15,7 @@ catch (Exception ex)
     Console.Error.WriteLine(ex); Environment.ExitCode = 1; return;
 }
 if (args.Contains("--profile-only")) return;
+PortableReplayStorageSafetyChecks.Run();
 void Require(bool condition, string message) { if (!condition) throw new Exception(message); }
 var preferences = new Settings { OutputDirectory = Path.Combine(data, "clips", "..", "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots") };
 preferences.Validate();

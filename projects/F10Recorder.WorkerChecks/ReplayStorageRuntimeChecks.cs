@@ -47,6 +47,46 @@ internal static class ReplayStorageRuntimeChecks
             try { action(); checks.Add(new { name, passed = true }); }
             catch (Exception ex) { failures++; checks.Add(new { name, passed = false, error = ex.ToString() }); }
         }
+        foreach (bool missingModel in new[] { true, false })
+        Check(missingModel ? "never-launched unmeasured hold resumes after worker replacement" : "never-launched low-space hold resumes after worker replacement", () =>
+        {
+            string name = missingModel ? "preflight-model" : "preflight-space";
+            string profile = Path.Combine(root, name), security = Path.Combine(root, name + "-security");
+            Directory.CreateDirectory(profile);
+            var files = new CapacityFiles(missingModel ? 9_000_000_000 : 2_000_000_000);
+            ReplayCalibrationAvailability available = missingModel ? new(null, "Controlled missing model.") : Qualification();
+            var latch = new ReplayStorageStopLatch(profile, security);
+            using (var first = new ReplayStorageCoordinator(latch, new ReplayVolumeReservations(security), files, () => available, (_, _) => true))
+            {
+                bool rejected = false;
+                try { first.RequireAdmission(profile, profile); }
+                catch (IOException error) { rejected = true; first.StopForStorageFailure(error.Message); }
+                Require(rejected && latch.Read().Held, "Preflight must reject and retain an explicit-Resume hold.");
+            }
+            available = Qualification(); files.Bytes = 9_000_000_000;
+            using var replacement = new ReplayStorageCoordinator(new ReplayStorageStopLatch(profile, security),
+                new ReplayVolumeReservations(security), files, () => available, (_, _) => true);
+            Require(replacement.Hold.Held, "Worker replacement must not automatically clear the rejection.");
+            replacement.RequireAdmission(profile, profile);
+            replacement.RequireResume(profile, profile);
+            Require(replacement.Hold.Held, "Safe checks alone must retain the hold until explicit acquisition.");
+            replacement.BeginCapture(Scope, profile, profile, () => { }, explicitResume: true);
+            replacement.CompleteCapture(true);
+            Require(!latch.Read().Held, "Known never-launched producer must permit explicit safe Resume after replacement.");
+        });
+        Check("preflight failure cannot upgrade an unknown previous producer", () =>
+        {
+            string profile = Path.Combine(root, "unknown-preflight"), security = Path.Combine(root, "unknown-preflight-security");
+            Directory.CreateDirectory(profile);
+            var latch = new ReplayStorageStopLatch(profile, security);
+            latch.Stop("Unconfirmed previous producer.");
+            using var coordinator = new ReplayStorageCoordinator(latch, new ReplayVolumeReservations(security),
+                new CapacityFiles(9_000_000_000), Qualification, (_, _) => true);
+            coordinator.StopForStorageFailure("Repeated preflight failure.");
+            bool rejected = false;
+            try { coordinator.RequireResume(profile, profile); } catch (IOException) { rejected = true; }
+            Require(rejected && !latch.ProducerAbsenceConfirmed(), "A missing producer identity must never imply positive absence.");
+        });
         Check("initial unmeasured capture rejects even with abundant capacity", () =>
         {
             string profile = Path.Combine(root, "unmeasured-profile"), security = Path.Combine(root, "unmeasured-security");

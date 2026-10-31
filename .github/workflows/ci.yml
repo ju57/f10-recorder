@@ -66,6 +66,8 @@ jobs:
           exit 0
       - name: Verify Storage controls without capture or GPU
         run: dotnet run --project projects/F10Recorder.MigrationTests/F10Recorder.MigrationTests.csproj -c Release --no-build -- artifacts/storage-controls-ci --storage-controls-ui
+      - name: Verify persistent storage problem dismissal without capture
+        run: dotnet run --project projects/F10Recorder.MigrationTests/F10Recorder.MigrationTests.csproj -c Release --no-build -- artifacts/storage-notice-ci --storage-notice-ui
       - name: Verify replay ownership without capture or GPU
         shell: pwsh
         run: |

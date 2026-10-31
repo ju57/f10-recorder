@@ -1,5 +1,36 @@
 # Verification launch effects
 
+The reviewed correction's prospective replacement carries674reserved children
+plus32fresh (706); a separately admitted14-child ordinary-worker ceiling reaches
+720. Its exact resource case uses80GBaggregate cap/78.5GBstop,60GBcaller floor,
+100000cumulative wall/74000offline seconds,46retained roots/16GBretained,
+36864files/640directories and2.2GBoutside allowance. Retired C: media stays
+retired; retained D: rehearsal files and small historical evidence still count.
+Old ceilings/receipts are unchanged. The500msactive observation/no-refit
+requirements are unchanged; this route does not authorize automatic batch retries.
+
+## Storage review regressions
+
+`F10Recorder.MigrationTests <fresh-root> --storage-notice-ui` shows only an owned
+non-activating notification using software rendering. It verifies persistence
+beyond six seconds, accessible individual dismissal, native interaction styles,
+centered vector geometry, simultaneous storage-problem/save-result independence,
+screenshot-preparation hiding/restoration, and a later success notice's finite
+lifetime. It writes its own rendered PNG
+and report, then closes the window within twenty seconds. No recorder/worker,
+engine, desktop/audio capture, model activation, preference/startup write or
+installation occurs. Malformed notice routes reject before UI creation.
+
+The existing `--replay-storage-runtime` route also checks never-launched
+admission holds across coordinator replacement, explicit safe Resume, and
+retention of unknown-producer holds. `--replay-output-validation` checks that
+stopping before an accepted endpoint fails without copying/export/publication
+and preserves original inputs through retirement. These use tiny nonmedia
+files and controlled sources/capacity, with no actual recording. The existing
+paused-host Resume route also verifies a zero-expiry storage problem event.
+Portable Core checks exercise the warning/stop policy's numeric boundaries,
+overflow rejection, unmeasured rejection and volume binding without Windows.
+
 The host Resume correction's exact replacement boundary carries622reserved
 children plus32fresh (654), including the independent8-child physical disk
 fixture, and allows43retained roots/160GBretained. Cumulative bounds are192GBcap/

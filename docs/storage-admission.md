@@ -7,6 +7,17 @@ engine/audio discovery or preference changes. The prepared capture arguments
 must match the scope again before process creation. A storage stop remains
 durable; restored capacity alone never clears it.
 
+A rejection before any capture guard or producer exists records positive
+never-launched evidence under the same durable hold lock. After worker
+replacement, explicit Resume can use that evidence once qualification and
+capacity pass again. A missing producer identity in an existing/abandoned guard
+never supplies absence proof. Recording-blocking storage problems remain
+visible until individually dismissed; dismissal changes neither the hold nor
+recording intent.
+An already accepted save's result has a separate transient notice beneath the
+problem. Screenshot preparation hides the problem temporarily and restores it
+when screenshot work finishes; it does not dismiss the storage condition.
+
 The current empirical cell is primary 1920x1080, H.264 NVENC, 60 fps, 20 Mbps,
 five minutes, actual 48 kHz stereo system audio, and the qualified local NTFS
 volume/unit. No model ships with the app. This candidate consequently cannot

@@ -207,7 +207,7 @@ internal sealed class ReplayStorageCoordinator : IDisposable
         reason = ReplayOutputDemand.Bounded(reason?.Replace('\r', ' ').Replace('\n', ' '), 512) ?? "Capture storage observation failed.";
         failedHold = new(true, reason, false, guard?.HoldId);
         try { requestStop?.Invoke(); }
-        finally { failedHold = guard == null ? latch.Stop(reason) : guard.Stop(reason); }
+        finally { failedHold = guard == null ? latch.Stop(reason, producerNeverLaunched: producerAbsenceConfirmed) : guard.Stop(reason); }
     }
     internal void CompleteCapture(bool producerAbsent)
     {

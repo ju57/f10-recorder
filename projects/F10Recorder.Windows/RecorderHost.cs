@@ -138,7 +138,7 @@ internal sealed class RecorderHost : IWindowsRecorder
             // otherwise a later Pause is skipped as already satisfied.
             Paused = capturePaused; Ready = false; Phase = CapturePhase.Paused;
             State = "Storage safety hold: " + metrics.ReplayStorageSafetyReason;
-            if (!storageHoldPresented) Notification?.Invoke("Replay recording paused for storage", metrics.ReplayStorageSafetyReason, NotificationKind.Warning, 6000);
+            if (!storageHoldPresented) Notification?.Invoke("Replay recording paused for storage", metrics.ReplayStorageSafetyReason, NotificationKind.Warning, 0);
             storageHoldPresented = true;
         }
         else storageHoldPresented = false;
