@@ -26,6 +26,7 @@ public sealed class App : Application
     internal IWindowsRecorder Recorder;
     internal SettingsWindow SettingsWindow;
     internal NoticeWindow Notice;
+    StorageNoticeStack noticeStack;
     TrayIcon tray;
     DispatcherTimer timer;
     IClassicDesktopStyleApplicationLifetime desktop;
@@ -48,11 +49,11 @@ public sealed class App : Application
         // Production always uses the independent worker; verification supplies its direct host here.
         Recorder = RecorderFactory?.Invoke(DataDirectory, dispatch, Arguments.Contains("--paused"), ControlTitle) ?? new WorkerRecorder(DataDirectory, dispatch, Arguments.Contains("--paused"), ControlTitle);
         CaptureVisibility.Configure(Recorder.Config, Recorder.CaptureModeKnown);
-        SettingsWindow = new SettingsWindow(Recorder); Notice = new NoticeWindow();
+        SettingsWindow = new SettingsWindow(Recorder); noticeStack = new StorageNoticeStack(); Notice = noticeStack.Transient;
         Recorder.Changed += Update; Recorder.OpenSettingsRequested += OpenSettings; Recorder.OverlayRequested += ToggleOverlay; Recorder.QuitRequested += Quit;
         Recorder.Notification += PresentNotice;
-        Recorder.PreparingScreenshot += () => { SettingsWindow.DismissOverlayForScreenshot(); Notice.Dismiss(); };
-        SettingsWindow.VisibilityChanged += () => { if (Notice.IsVisible) Notice.Reposition(SettingsWindow); Update(); };
+        Recorder.PreparingScreenshot += () => { SettingsWindow.DismissOverlayForScreenshot(); noticeStack.HideForScreenshot(); };
+        SettingsWindow.VisibilityChanged += () => { noticeStack.Reposition(SettingsWindow); Update(); };
         var menu = new NativeMenu(); statusItem = new NativeMenuItem(Recorder.Paused ? "Paused" : "Starting replay buffer…") { IsEnabled = false }; menu.Items.Add(statusItem);
         void Item(string name, Action action) { var item = new NativeMenuItem(name); item.Click += (_, _) => action(); menu.Items.Add(item); }
         Item("Save replay", Recorder.SaveReplay); Item("Take screenshot", Recorder.TakeScreenshot);
@@ -80,11 +81,14 @@ public sealed class App : Application
     internal void ToggleOverlay() { Recorder.SampleForeground(); SettingsWindow.ToggleOverlay(); Update(); }
     void PresentNotice(string title, string message, NotificationKind kind, int duration)
     {
-        Notice.Present(title, message, kind, duration, SettingsWindow); Update();
+        noticeStack.Present(title, message, kind, duration, SettingsWindow); Update();
     }
     internal void Update()
     {
         CaptureVisibility.Configure(Recorder.Config, Recorder.CaptureModeKnown);
+        var metrics = Recorder.Metrics;
+        noticeStack.Observe(metrics?.ReplayStorageSafetyHeld == true, Recorder.ScreenshotInProgress, SettingsWindow,
+            metrics?.ReplayStorageSafetyReason, metrics?.ReplayStorageSafetyHoldId);
         var status = ReplayPresentation.Describe(Recorder.Phase, Recorder.State, Recorder.Paused, Recorder.Ready, Recorder.CanSave, Recorder.Applying, Recorder.Saving, Recorder.SaveRegistered, Recorder.Metrics?.BufferedSeconds ?? 0);
         SettingsWindow.UpdateState(); statusItem.Header = status.Heading;
         pauseItem.Header = Recorder.Paused ? "Resume recording" : "Pause recording";
@@ -93,7 +97,7 @@ public sealed class App : Application
     }
     void WriteStatus()
     {
-        try { File.WriteAllText(Path.Combine(DataDirectory, "status.json"), new JavaScriptSerializer().Serialize(new { Ui = "Avalonia", UiProcessId = Environment.ProcessId, WorkerProcessId = Recorder.Metrics?.WorkerProcessId ?? 0, CaptureProcessId = Recorder.CaptureProcessId, CaptureMetrics = Recorder.Metrics, ControlTitle = ControlTitle, Paused = Recorder.Paused, CaptureState = Recorder.State, CaptureReady = Recorder.Ready, CapturePhase = Recorder.Phase.ToString(), RecordingEnabled = !Recorder.Paused, CanSaveReplay = Recorder.CanSave && !Recorder.Applying && !Recorder.Saving, SavingReplay = Recorder.Saving, SettingsVisible = SettingsWindow.IsVisible, SettingsWindow = SettingsWindow.TryGetPlatformHandle()?.Handle.ToInt64() ?? 0, OverlayVisible = SettingsWindow.OverlayVisible, OverlayWindow = SettingsWindow.OverlaySurface?.TryGetPlatformHandle()?.Handle.ToInt64() ?? 0, OverlayShortcutRegistered = Recorder.OverlayRegistered, OverlayShortcut = Recorder.Config.OverlayHotkeyText, NotificationVisible = Notice.IsVisible, NotificationTitle = Notice.Heading, ScreenshotShortcutRegistered = Recorder.ScreenshotRegistered, ScreenshotShortcut = Recorder.Config.ScreenshotHotkeyText, ScreenshotInProgress = Recorder.ScreenshotInProgress, LastScreenshot = Recorder.LastScreenshot, CurrentApplication = Recorder.ApplicationName, ApplicationFolder = ApplicationFolders.FolderName(Recorder.ApplicationName) })); } catch (IOException) { }
+        try { File.WriteAllText(Path.Combine(DataDirectory, "status.json"), new JavaScriptSerializer().Serialize(new { Ui = "Avalonia", UiProcessId = Environment.ProcessId, WorkerProcessId = Recorder.Metrics?.WorkerProcessId ?? 0, CaptureProcessId = Recorder.CaptureProcessId, CaptureMetrics = Recorder.Metrics, ControlTitle = ControlTitle, Paused = Recorder.Paused, CaptureState = Recorder.State, CaptureReady = Recorder.Ready, CapturePhase = Recorder.Phase.ToString(), RecordingEnabled = !Recorder.Paused, CanSaveReplay = Recorder.CanSave && !Recorder.Applying && !Recorder.Saving, SavingReplay = Recorder.Saving, SettingsVisible = SettingsWindow.IsVisible, SettingsWindow = SettingsWindow.TryGetPlatformHandle()?.Handle.ToInt64() ?? 0, OverlayVisible = SettingsWindow.OverlayVisible, OverlayWindow = SettingsWindow.OverlaySurface?.TryGetPlatformHandle()?.Handle.ToInt64() ?? 0, OverlayShortcutRegistered = Recorder.OverlayRegistered, OverlayShortcut = Recorder.Config.OverlayHotkeyText, NotificationVisible = Notice.IsVisible || noticeStack.Problem.IsVisible, NotificationTitle = noticeStack.Problem.IsVisible ? noticeStack.Problem.Heading : Notice.Heading, ScreenshotShortcutRegistered = Recorder.ScreenshotRegistered, ScreenshotShortcut = Recorder.Config.ScreenshotHotkeyText, ScreenshotInProgress = Recorder.ScreenshotInProgress, LastScreenshot = Recorder.LastScreenshot, CurrentApplication = Recorder.ApplicationName, ApplicationFolder = ApplicationFolders.FolderName(Recorder.ApplicationName) })); } catch (IOException) { }
     }
     void OpenFolder(string path) { try { RecorderHost.OpenFolder(path); } catch (Exception ex) { PresentNotice("Folder could not open", ex.Message, NotificationKind.Warning, 6000); } }
     internal async void Quit()
@@ -106,6 +110,6 @@ public sealed class App : Application
     }
     void DisposeRecorder()
     {
-        exiting = true; timer?.Stop(); tray?.Dispose(); Notice?.Close(); SettingsWindow?.PrepareExit(); Recorder?.Dispose();
+        exiting = true; timer?.Stop(); tray?.Dispose(); noticeStack?.Dispose(); SettingsWindow?.PrepareExit(); Recorder?.Dispose();
     }
 }

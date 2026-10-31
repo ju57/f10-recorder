@@ -1,5 +1,499 @@
 # Verification launch effects
 
+`F10Recorder.WorkerChecks --replay-retirement <fresh-root>` exercises the real
+supervisor retirement method with tiny nonmedia files and an isolated account
+authority. The production supervisor stays paused. A controlled export thread
+waits while source metadata/diagnostic closure fails, then verifies accepted
+work drains, failed inputs remain and a hold is reported. A healthy control
+still retires its inputs. No capture-session constructor, engine child, audio,
+GPU, account model, user profile/startup write or installation runs.
+The native notice check also starts from current held state without a preceding
+notification event; it covers initial attachment, dismissal and later holds.
+
+The shutdown/notice correction's prospective qualification retains774reserved
+children plus32fresh(806),51historical roots/16GBretained,80GBaggregatecap/
+78.5GBstop/60GBcallerfloor,36864files/768directories and5GBoutside allowance.
+Cumulative wall/offline ceilings are115000/85000seconds; all prior failed costs
+remain charged.500msactive observation and no held-out refit remain mandatory.
+This support does not start a recording or activate a model. Exact fresh plan,
+geometry/allocation controls, source review and unchanged consumer bindings
+must pass before execution; no automatic batch retry is introduced.
+
+The reviewed correction's prospective replacement carries674reserved children
+plus32fresh (706); a separately admitted14-child ordinary-worker ceiling reaches
+720. Its exact resource case uses80GBaggregate cap/78.5GBstop,60GBcaller floor,
+100000cumulative wall/74000offline seconds,46retained roots/16GBretained,
+36864files/640directories and3.2GBoutside allowance. Retired C: media stays
+retired; retained D: rehearsal files and small historical evidence still count.
+Old ceilings/receipts are unchanged. The500msactive observation/no-refit
+requirements are unchanged; this route does not authorize automatic batch retries.
+The user-authorized foreground-loss replacement conservatively carries706prior
+children plus32fresh (738), retains the failed source as a47th root, and keeps
+the same byte/time/observation limits. Later native14/physical8 reach760.
+
+## Storage review regressions
+
+`F10Recorder.MigrationTests <fresh-root> --storage-notice-ui` shows only an owned
+non-activating notification using software rendering. It verifies persistence
+beyond six seconds, accessible individual dismissal, native interaction styles,
+centered vector geometry, simultaneous storage-problem/save-result independence,
+screenshot-preparation hiding/restoration, and a later success notice's finite
+lifetime. It writes its own rendered PNG
+and report, then closes the window within twenty seconds. No recorder/worker,
+engine, desktop/audio capture, model activation, preference/startup write or
+installation occurs. Malformed notice routes reject before UI creation.
+
+The existing `--replay-storage-runtime` route also checks never-launched
+admission holds across coordinator replacement, explicit safe Resume, and
+retention of unknown-producer holds. `--replay-output-validation` checks that
+stopping before an accepted endpoint fails without copying/export/publication
+and preserves original inputs through retirement. These use tiny nonmedia
+files and controlled sources/capacity, with no actual recording. The existing
+paused-host Resume route also verifies a zero-expiry storage problem event.
+Portable Core checks exercise the warning/stop policy's numeric boundaries,
+overflow rejection, unmeasured rejection and volume binding without Windows.
+
+The host Resume correction's exact replacement boundary carries622reserved
+children plus32fresh (654), including the independent8-child physical disk
+fixture, and allows43retained roots/160GBretained. Cumulative bounds are192GBcap/
+190.5GBstop,60GBcaller floor,86400wall/61200offline seconds,36864files/640dirs
+and2.2GBoutside. Immutable historical leases, full pre/post hashes, unchanged
+500msactive observations, six-source/no-refit requirements and finite native/
+closure reserves remain mandatory. This admission support does not start media.
+
+`--replay-storage-host-resume <fresh-root>` supplies supervisor observations to
+an isolated paused host and checks explicit Resume intent while the previous
+durable guard is still present, later healthy buffering, an effective subsequent
+Pause command and a new storage stop. It owns only a hidden shortcut window and
+tiny profile/report files; no capture engine, child, media, audio, model, visible
+UI or startup write runs. Native acquisition/producer shutdown remain separate
+verification requirements.
+
+`--replay-calibration-frozen-history-checks <fresh-root>` uses tiny native files,
+data-read/share-read leases and synchronous kernel change notifications. It
+checks historical/current hardlink deduplication, denied historical writes and
+deletion, fresh mutable-current allocation, detected namespace changes, existing
+writer rejection and handle cleanup. No process, capture, audio, UI or model
+action runs. Seven native/protection/integration controls run; they do not make a
+media attempt eligible or qualified.
+
+A fresh exact 577-child boundary carries all 545 previous reserved children,
+39 retained roots and the same 168 GB / 166.5 GB stop, 60 GB floor, 72,000 wall /
+50,400 offline seconds, 32,768 files / 576 directories and 2.2 GB outside bounds.
+This full replacement freezes historical data with native read leases and sticky
+subtree change notifications, charges its fresh native allocation baseline on
+every live scan and checks actual caller-free space per volume. Current writes
+are still observed natively under the unchanged 500 ms rule. Pre/post full hashes
+remain required; historical mutation or monitor failure aborts qualification.
+
+`--replay-calibration-snapshot-inventory-checks <fresh-root>` uses tiny private native files,
+with no child/capture/audio/model action. It checks that acquisition files keep
+short metadata leases, sealed snapshot handles refresh real allocation/EOF,
+replacement revalidates identity, atomic metadata remains unheld and namespace
+retirement closes its handles. The native cache bounds retained handles at 4096;
+its 500 ms guard remains unchanged. A changed product DLL still needs its own exact
+calibration identity and runtime verification.
+
+The sealed-snapshot correction's full replacement boundary carries 481 previous
+children plus 32 new (513), 168 GB cap / 166.5 GB stop, 60 GB caller-free floor,
+64,800 cumulative wall seconds / 46,800 offline seconds, at most 37 retained
+roots / 144 GB, 32,768 files / 576 directories, and 2.2 GB outside builds.
+This is a finite six-source run with unchanged 500 ms observation and no-refit
+requirements. The outer admission also reserves preflight, closure and subsequent
+native verification; these limits do not themselves start a recording.
+
+After the pre-T02 operator coordination timeout, an exact replacement may carry
+513 previous reserved children plus 32 new (545), at most 38 retained roots,
+72,000 cumulative wall seconds and 50,400 offline seconds. Other storage,
+geometry, foreground and numerical limits above remain unchanged. The full
+previous one-shot ceiling stays charged even though only T01 was acquired.
+The prospective admission binds the external coordinator and its nonmedia
+controls; it waits for ready events and completes normal fixture activation
+before bootstrap, with no UI calls during capture and no automatic batch retry.
+
+An explicitly admitted continuation may retain four independently completed
+T01/T02/T03/H02 sources from a foreground-only failed attempt, then acquire H01
+and H03 against the exact unchanged frozen model and consumer. The original
+attempt stays failed. Qualification binds both raw observation traces and all
+six original source receipts; the final audit checks eight exports, decodes and
+archives across their actual roots. No sample is rewritten or refitted.
+This continuation carries423prior children plus8new (431),144GB/142.5GBstop,
+780wall/480offline minutes,29retained roots/124GBretained and unchanged24576file,
+448directory,2GBoutside and60GBcaller-floor limits. Whole controller1800seconds,
+preflight360/closure360 and240offline plus720verification are reserved.
+`--replay-calibration-continuation-checks <plan>` starts no child or media;
+it rejects changed budgets, missing source provenance and nested output roots.
+Operator launch markers coordinate normal activation of the owned fixture;
+the existing10second foreground admission and500msactive limit remain.
+An activation-complete marker must arrive before capture bootstrap, within a
+separate10second operator handoff. No activation is performed during capture.
+One preservation-audited stopped continuation may be carried with its full8child
+charge:431prior+8new=439,30retained roots,810wall/510offline minutes. All byte,
+file,foreground,500ms,no-refit and normal-exit constraints remain unchanged.
+
+Export lifecycle work (verified lease, process creation/job assignment and
+producer callbacks) now runs as an owned, joined operation while the caller
+continues real storage observations. No timestamp is refreshed without the
+existing storage check; the500ms freshness gate stays unchanged. Guard failure
+joins an in-flight launch before cleanup so its child handle cannot be orphaned.
+The CPU startup control holds a seal callback600ms while observations continue;
+the negative blocks an actual observation600ms after launch and requires failure
+with confirmed owned-child absence. Each still starts one tiny CPU/null-output
+child, no desktop/audio/GPU/model or user-state action.
+
+The bounded lifecycle correction replacement carries310conservative children
+plus32fresh (342full-batch ceiling),112GB/110.5GBstop,600wall/360offline minutes,
+24retained roots/92GBretained,20480files/320directories and2GBoutside allowance.
+The fresh wrapper additionally budgets its actual240second preflight and300second
+closure. All finite-source,500msactive,60GBcaller floor, no-refit and normal-exit
+requirements remain. Later ordinary-worker/physical checks have their own exact
+admissions; neither a prior qualified model nor a software numeric control is
+qualification for changed consumer DLLs.
+
+The foreground-loss replacement preserves the failed batch and charges all342
+prior children plus32fresh (374ceiling),128GB/126.5GBstop,660wall/420offline
+minutes,25retained roots/106GBretained,21504files/352directories and2GBoutside
+allowance. Actual wrapper preflight/closure reserves are300/300seconds.
+It still requires six new independent sources and three held-out cases without
+refitting. A foreground interruption invalidates its source; the collector now
+records the actual foreground owner/window identity before normal owned shutdown.
+These are collector/resource changes only. Exact already-frozen product DLLs may
+be referenced without rebuilding them, with every helper/source/consumer binding
+declared in the fresh admission. No failed source becomes a passing sample.
+The observer normalizes each leaf path once before retained-root matching and
+caches its current-root prefix; every live-handle allocation/EOF refresh remains.
+
+The export-cadence correction preserves391prior children plus32fresh (423ceiling),
+144GB/142.5GBstop,780wall/480offline minutes,28retained roots/124GBretained,
+24576files/448directories and2GBoutside allowance. Its wrapper reserves360seconds
+each for preflight and closure. Six new sources,three heldout,no refit,500msactive
+observations and the60GBcaller floor remain mandatory.
+
+`--replay-calibration-export-slow-checks <fresh-root> <engine-root>` runs one
+CPU-only16x16/null-output child for4.5seconds with330msactual observation work,
+250msunseal/600msseal callbacks and a12second adapter deadline. It requires at
+least four post-seal observations,successful exit and every measured evidence gap
+at most500ms. The old completion-based200mswait fails this control. The corrected
+start cadence includes scan work. The existing600msobservation sensitivity still
+must reject and confirm owned-child absence. No desktop/audio/GPU/model action.
+
+`--replay-calibration-capture-evidence-checks <fresh-root>` reproduces duplicate
+legacy success-only exit hashes and checks six distinct capture PID/start/session
+receipts plus rejection of missing/non-UTC/relative identity. Controlled values
+and tiny JSON only; no process, engine, capture/audio/GPU, UI, model or user state.
+The collector binds actual owned PID/start/session before acquisition checks,
+persists each per-source qualification (including measured poll/stop growth),
+and writes the complete source/observation inputs before final validation.
+
+The288-child closure-evidence replacement carries256spent plus32fresh,
+112GB/110.5GBstop,480wall/270offline minutes,17retained roots/72GBretained,
+16,384files/224directories and1.4GBoutside allowance. All source,500ms active,
+60GBcaller floor, no-refit and normal-closure requirements remain unchanged.
+The failed prior full batch is retained and supplies no qualified model.
+
+`--replay-calibration-engine-lease-checks <fresh-root> <approved-engine-root>`
+verifies the existing private engine read-only, including denial of a competing
+write handle without writing bytes, path mismatch and disposed-lease rejection.
+It starts no child or media. `--replay-calibration-export-startup-checks` and
+`--replay-calibration-export-stale-checks` take those same arguments and each
+start one bounded1.5second16x16 CPU color/null-output engine child. Controlled
+producer callbacks exercise the actual export adapter: ordinary lifecycle work
+must retain500ms storage continuity and a600ms delay must fail with confirmed
+owned-child absence. Neither route captures desktop/audio or uses a GPU/window.
+`--replay-calibration-export-snapshot-checks` adds300tiny nonmedia input fixtures
+and two bounded CPU children through the actual native snapshot, ledger, cache
+and guarded export. Its2KiB published stand-in is not playable or qualified media.
+`--replay-calibration-export-context-checks <fresh-root> <approved-engine-root>
+<context-plan> <sha256>` adds hash-bound retained-root storage observation,
+initializing metadata before producers, as the full calibration route does.
+These checks never provision an engine or activate a model, change preferences,
+write startup state or establish empirical recording qualification.
+
+`--replay-calibration-fixture-publication-checks <fresh-root>` reproduces the
+native legacy file-exists-before-writer-close failure, then verifies40complete
+flush/close/rename readiness publications while the actual native sampler runs.
+Pending/final readiness names use fresh anchored directory metadata without leaf
+handles that conflict with publication or rename. Complete JSON is bounded to4KiB;
+malformed/oversized data fails. Tiny JSON only, no child, window, wake request,
+engine, capture/audio, GPU, settings/startup or catalog action. The fixture's UI
+exceptions propagate to its bounded failure receipt rather than a modal dialog.
+
+`--replay-calibration-startup-checks <fresh-root>` checks immutable capture-health
+snapshots, the unchanged15second progress/segment guards, local unlocked desktop
+admission, injected wake-request acquisition/restoration and actual native
+sampler enforcement of private-source and retained-data byte caps for native and
+mixed Windows separators, plus canonical buffer-escape rejection. It writes256KiB of ordinary
+dummy data and starts no child, engine, audio, GPU, visible/hidden window or
+actual wake request. This is not evidence of live source availability.
+
+`--replay-calibration-startup-sampler <fresh-root> <plan> <sha256>` uses the
+prospective nonmedia sampler control below with the separately reviewed two-child
+startup resource boundary. It validates the original111spent/12root/90offline-minute
+contract or the proposed113spent/13root/100offline-minute correction, then uses
+the same tiny metadata fixtures and actual native sampler. It starts no media,
+child, audio, GPU, wake request or UI and grants no recording authority.
+
+`--replay-calibration-desktop-observe <fresh-root>` receives display-state
+notifications for one second through one hidden message window and reads the
+current console/input desktop and idle metadata. It does not inject input, wake
+the display, acquire audio/video, start a child or change any preferences.
+
+`--replay-calibration-startup <plan.json> <sha256>` is a separately admitted,
+hash-bound two-child diagnostic: one controlled motion fixture and one actual
+primary-monitor/system-audio/NVENC capture, no microphone. It plays the quiet
+calibration chirp. The fixture temporarily requests display/system availability
+on its owning thread and restores prior execution flags on exit; it changes no
+power scheme or display/audio/vendor preference. It requires the local unlocked
+Default desktop and an observed display-on notification before source admission.
+The75second total ceiling includes cleanup; acquisition is admitted only while
+the source remains foreground, within the existing15second health guard. Success
+requires8seconds of progress,120encoded frames,5completed segments, normal owned
+exits and empty capture diagnostics. Fresh native storage sampling retains the
+100ms nominal/500ms active gate,128MiB source cap with120MiB early stop,60GB caller
+floor plus reserves and carried-forward cumulative limits. Failures preserve
+health/audio/exit/progress ages before cleanup. No export, decoder, model fit,
+qualification, account-catalog activation or automatic retry occurs. Preview the
+task-specific launcher before authorized execution; this route is not calibration.
+
+`--replay-storage-initial-worker <fresh-root> <WorkerChecks.exe>` is the initial
+admission variant of the Resume tracer. It starts two serial task-owned paused,
+activation-held workers using an absent private engine root, current-user pipes
+and hidden Ctrl+Alt+Shift F4-F6 shortcuts. It verifies rejection before Commit or
+engine discovery without an existing storage hold. No engine/probe/capture,
+playback/GPU/visible UI, startup write or catalog activation occurs. Ordinary
+settings, retained sentinels and startup state are checked unchanged.
+
+`--replay-calibration-prospective-sampler <fresh-root> <plan> <sha256>` verifies
+the exact prospective plan's retained roots and expanded metadata envelope.
+It creates tiny files and enough empty directories to reach the prospective
+plan's file/directory envelope, including 350 mutable chunk names. The proposed
+137-child replacement covers 10,240 files and 160 directories. Initial
+dummy bytes stay below 4 MiB; subsequent writes stay below 2 MiB. It uses the
+real native inventory/sampler, preserves fixtures and retained roots, and starts
+no child, engine, capture, audio, GPU, UI or catalog action. Its 500 ms gate is
+metadata observer evidence, not full-size workflow or hardware qualification.
+Media compression/sparse checks consume the fresh attributes from that same
+anchored native directory enumeration; payload allocation/EOF is still queried
+through native leaf handles. No allocation or attribute values are cached.
+
+Fresh calibration admission also supports the256-child export-lifecycle
+correction under standing authorization:224conservatively charged plus32fresh,
+96GB/94.5GBstop,390wall/210offline minutes,16retained roots/56GBretained,
+12,288files/192directories and1.2GBoutside allowance. All source,500ms active,
+60GBcaller-floor and full preflight/closure bounds remain enforced. Each failed
+batch is retained; corrections require a fresh prospective one-shot plan.
+
+Fresh calibration admission supports the historical 108-child contract and a
+179-child readiness-publication correction under the user's standing issue13
+authorization:147conservatively charged plus32fresh,84GB/82.5GBstop,300wall/
+150offline minutes,15retained roots,44GBretained and1.2GBoutside allowance;
+10,240files/160directories and all active/source thresholds stay unchanged.
+Each replacement still needs a fresh frozen plan and verified bounds; standing
+authorization does not replay or erase a failed batch. Earlier profiles include a
+proposed147-child full replacement after the successful startup diagnostic:
+115conservatively spent plus32fresh,84GB/82.5GBstop,300wall minutes and140offline
+minutes,14retained roots,10,240files/160directories,44GBretained and1.1GBoutside.
+Its fresh150second preflight/240second closure reserve is checked with the full
+900second offline-stage ceiling and4200second wall envelope. Resource controls
+do not grant execution permission; execution needs task authorization. Other
+historical supported admission boundaries include a
+proposed replacement of 115 cumulative children, 72 GB, 195 minutes, 8,192 files,
+128 directories, 4,500 offline seconds and a 34 GB retained evidence envelope.
+The replacement reserves 900 seconds for all offline stages plus 180 seconds
+for preflight and retained-output/preservation verification before capture.
+Its outside-root build/control allowance is 1.1 GB, charged in the observer's
+aggregate on every scan; prior contracts retain their original 1 GB allowance.
+After the failed115-child batch, a proposed137-child contract carries105spent
+children plus32fresh,84GB total/82.5GB stop,240wall/90offline minutes,44GB retained,
+and the same1.1GB outside allowance. Its900offline stage seconds plus210seconds
+for90second preflight/120second closeout must fit before capture. Numerical
+safety thresholds and reference recipes are unchanged. Preparation/controls
+grant no recording authorization or automatic retry.
+Preparation, resource controls and preview grant no execution authorization.
+The three held-out sources use the production coordinator/export guard and a
+task-private shared ledger; two must exercise unfinished-tail envelope admission.
+Training remains explicitly unqualified measurement under experiment limits.
+
+`--replay-calibration-publication-checks <fresh-root>` runs the actual native
+sampler alongside production storage supervision, durable guards and 40 scalar
+ledger updates/normal closure, under a 30-second deadline. It writes under 2 MiB
+of private tiny files and uses controlled 12 KiB capture headroom. Atomically
+replaced claim metadata uses fresh anchored native directory-entry allocation,
+EOF and identity, without opening conflicting leaf handles; no bytes are omitted.
+The 500 ms active gate remains. It starts no child, engine, capture/audio, GPU,
+window/shortcut, startup or account-catalog action. It does not qualify media.
+
+`tests/replay-manifest.ps1 -AssemblyPath <reviewed-helper> -DataDirectory <fresh-root>`
+previews the completed-segment publication checks. Add `-Run` and the exact
+`-ExpectedAssemblySha256` to execute tiny CSV fixtures, native replacement
+conflict sensitivity, concurrent managed publication/read/storage observation,
+malformed/failed publication, bounded shutdown drain and a30-minute metadata
+window. Under2MiB remains; cumulative ordinary writes are about128MB. It starts
+no engine, worker, child, GPU, capture/audio, window/shortcut or settings/startup
+action. This is not proof of the corrected real-engine stdout or live media path.
+
+`tests/replay-manifest-software.ps1` previews a hash-bound two-child software
+verification plan; `-Run` is separate execution. It uses the actual CaptureSession
+with a verification-only argument probe: generated640x360/30fps video and a
+generated440Hz tone, CPU MPEG2/AAC, one natural EOF and one graceful stdin-q stop.
+It plays no audio, acquires no desktop/device input, opens no window, uses no GPU,
+changes no profile/startup/vendor preference and activates no model. Limits are
+two media children,60seconds/32MiB under a65second outer controller, with no retry.
+It checks real stdout progress/CSV dispatch, concurrent readers/inventory, final
+segment metadata, normal producer absence and absence of rename diagnostics.
+It must receive its own resource authorization when earlier child ceilings have
+already been consumed; it does not replay or relabel an earlier failed batch.
+
+`--replay-calibration-audit-receipt <fresh-root> <historical-receipt> <sha256>`
+reads a hash-bound historical qualification and copies it into a private fixture
+catalog solely to confirm loader rejection after a binary change. It reads live
+host metadata, verifies the default catalog is unchanged and starts no worker,
+engine, GPU, capture/audio or UI. It does not activate the historical model.
+
+`tests/replay-rehearsal.ps1` previews its caller-named hashed plan by default.
+Explicit `-Run` launches one hidden bounded nonmedia controller, with no nested
+child or engine/GPU/capture/audio/UI/profile/startup/vendor route. It writes six
+310-file930MB ordinary dummy sources, full real fallback copies, eight growing
+dummy outputs and verified TAR snapshots. It uses the collection sampler with
+the approved64GB/46-child/9000-second contract (no new media child),60GB caller
+floor,100ms nominal/500ms active gate and1800-second offline allowance. It
+performs full-size capacity, offline650ms acceptance and active650ms rejection
+controls, then archives/readbacks new dummy data before retiring only verified
+dummy duplicates. Outer controller deadline1805seconds, diagnostics128KiB.
+Historical data is read-only; failures remain retained. Preview before running.
+
+`WorkerChecks --replay-producer-recovery <fresh-root>` uses four bounded nonmedia
+fixture children (two leaders and two waiting children), current-user protected
+tiny files and native named process jobs. It terminates only its exact owned
+leaders, deliberately retains a job handle to keep a child alive for the negative
+control, then closes it and observes that exact child exit. Each child self-bounds
+at 15 seconds; startup/exit waits are bounded. Reports and failure files remain.
+There is no recorder/engine/probe, GPU, capture/audio, visible UI, shortcut,
+startup, installed-recorder or vendor action. Native job and hard-link routes
+need an ordinary Windows token when a restricted sandbox denies those operations.
+
+## Replay storage delivery checks
+
+`--replay-storage-contention <fresh-root>` exercises actual native reservations,
+capture supervision and accepted snapshot/export ownership using 300 tiny text
+segments and a 2 KiB stand-in output. An 80 ms supervisor-held lock must recover;
+persistent accepted-work contention must fail boundedly before export, preserving
+inputs; persistent capture contention must stop under the unchanged 500 ms
+freshness rule. It uses private fixture profiles/ledgers, native hardlinks/copy
+fallback and background threads, under 16 MiB and a 30-second save deadline.
+Two empty named native-job fixtures check accepted producer sealing and claim
+release under transient contention; no process is assigned or started.
+New admission/polling remain nonblocking; accepted mutations may retry for at
+most 200 ms. A busy capture poll retries after 5 ms without refreshing evidence.
+No child, engine, playable media, recording/audio, GPU, window/shortcut, startup,
+installed-profile, vendor or account-catalog action occurs. All reports/failures
+remain; ordinary successful fixture cleanup removes only its own tiny inputs.
+
+`tests/storage-admission.ps1 -Plan -DataDirectory <fresh-root>
+-WorkerExecutable <built-WorkerChecks.exe> -EngineRoot <existing-private-engine>`
+previews the exact isolated paused-worker command/effects without building,
+creating profiles or launching processes. Omit `-Plan` only for the admitted
+status/client tracer: one held worker, current-user pipe, hidden Ctrl+Alt+Shift
+F4-F6 shortcuts, tiny preservation sentinels and read-only engine hashing.
+No engine/probe/capture/GPU workload/audio/visible UI/startup write/install occurs.
+
+`--replay-calibration-catalog-checks` uses bounded controlled receipts and private
+ACL/file fixtures with controlled host metadata and read-only native volume observation. This does not qualify hardware or media.
+`--replay-volume-reservations` uses tiny files, controlled capacities, native
+hardlinks and short owned nonmedia children for cross-process serialization.
+`--replay-calibration-phase-checks` writes a bounded 1 MiB dummy file and injects
+650 ms active/offline observer delays plus an offline deadline failure. These
+are enforcement controls, not full-size rehearsal or calibration.
+
+`--replay-calibration-inventory-checks` writes under4MiB of dummy payload and
+1000 empty files. It checks fresh allocation through reused native metadata
+handles, replacement, removal, volatile lists, disposal and root admission,
+then compares ten paired metadata scans. It launches no engine or child and
+does not establish full-workflow timing reliability. Only explicitly declared
+retained roots may reuse handles. A hash-bound plan can also enable current-tree
+metadata handles with read/write/delete sharing. Every scan enumerates names and
+matches their identities to the same established open native handles; allocation
+and EOF are queried afresh. Volatile segment lists never retain handles. Verified
+directory retirement releases observer handles while holding the inventory
+mutation gate before deletion. Capacity and500ms checks remain in force.
+Current `chunk-*` capture files and MP4s deliberately use short-lived handles:
+retaining the observer through producer close can delay allocation trimming.
+Only fully closed cases may retain those payload handles. A focused native
+last-close experiment records allocation before/after releasing its own handle;
+the policy checks preserve fresh EOF/allocation reads and producer-close behavior.
+
+`--replay-calibration-foreground-checks` uses injected readiness/clock/health
+delegates and tiny metadata directories. It checks bounded focus admission,
+fixture exit, clock/health rejection and historical/proposed resource exact-fit
+boundaries, including 115 children, full wall/offline/verification time and the
+outside allocation allowance. One-byte/time/count overruns and integer overflow
+reject before execution.
+It opens no window, injects no input and starts no child, sound, engine or capture.
+Actual capture still requires the task-owned visible window to be foreground.
+Its10-second wait permits a user click and remains within source setup's330seconds.
+The51-child replacement and later57-child/56-directory replacement are proposals
+requiring separate resource approval. The latter retains the new failed media
+root, caps old retained data at24GB and provisions2GB per-case output allocation
+inside the same64GB aggregate. Source remains1GB and active sampling remains500ms.
+The previously approved46-child plan/runtime is preserved unchanged.
+
+`--replay-calibration-inspect-existing <plan> <sha256>` is a separate offline
+correction check of exactly two hash-bound retained T02 short MP4s. It creates
+fresh owned raw/JSON evidence, never overwrites the original failed evidence,
+and runs at most two20-second CPU decode children inside60seconds. It checks
+three ascending frame positions within the actual rounded duration, full decode,
+barcodes/complements, pictures and non-silent stereo audio. It plays no audio,
+shows no window, captures nothing and activates no model. The original failed
+batch stays failed. Preview exact engine/input/runtime/root hashes before launch;
+the route requires the remaining57-child/9000wall/1800offline allowance to fit.
+
+Positive tiny dummy payloads explicitly reserve an ordinary data cluster,
+avoiding NTFS resident-file allocation without weakening allocation checks.
+The final nonmedia archive uses lossless Brotli-compressed TAR, full decompressed
+member/hash/native-identity readback and the same duplicate-retirement checks.
+Raw dummy source/copy/output byte sizes remain unchanged. Compression occurs
+only after producers stop, inside the admitted offline phase; failed attempts
+stay failed and are retained. Small controls cover the tiny allocation and a
+repeated1MiB block's compressed full readback before originals are retired.
+
+`--replay-calibration-close-dummy-checks` uses tiny owned dummy archives to check
+readback, historical-media rejection, charged-root admission and collision-safe
+appending to existing owned evidence. The separate hash-bound closure route
+archives only one or two explicitly named stopped nonmedia roots, verifies full
+readback/native identities before retiring their duplicates, and preserves prior
+receipts. It cannot accept historical media receipts. It has no recording path.
+An explicit compressed-closure plan uses the same full decompressed member and
+native-identity checks and retains the original failed receipts byte-for-byte.
+
+
+`--replay-storage-safety <fresh-root>` uses controlled byte/headroom data and
+bounded private hold/guard files, with task-owned ACL/failure/junction fixtures.
+`--replay-storage-runtime <fresh-root>` uses the actual coordinator and controlled
+capacity, catalog and stop callbacks; it includes intentional late observations
+and a shared-lock Busy sensitivity. Both start no engine, capture or audio.
+
+`--replay-storage-prelaunch <fresh-root> <existing-private-engine>` reads and
+verifies an existing approved engine but rejects in the actual CaptureSession
+constructor callback before StartProcess. Synthetic settings avoid WASAPI metadata
+and acquisition. It creates native process-job handles and tiny task-owned
+profiles/guards, hashes the engine before/after, and starts no media producer.
+
+`--replay-storage-resume-worker <fresh-root> <WorkerChecks.exe>` uses two serial
+isolated paused/held worker incarnations, hidden Ctrl+Alt+Shift F4-F6 shortcuts
+and the current-user pipe/client. It sends status, Resume, environment restart
+and Quit using a nonexistent engine root; missing-model Resume must reject before
+Commit/discovery/probe/acquisition. It compares profile/media sentinels, hold ID,
+startup value and normal owned exits. Preview its exact argv/profile/effects in
+the task's prospective plan before running. It opens no visible or excluded UI,
+captures no pixels/audio, changes no startup setting and installs nothing.
+
+WorkerChecks `--replay-output-validation <fresh-root>` runs tiny file/source
+fixtures through ReplayCache with controlled allocation/capacity and export
+outcomes. It starts no recorder/worker, engine/probe, GPU, window/shortcut,
+capture/audio, startup or installation route. Reports and failed fixtures are
+retained locally. Unknown owned-producer outcomes are controlled observations,
+not actual leaked processes. See [supplied output demand](replay-output-demand.md).
+
 `MigrationTests <fresh-root> --storage-controls-ui` runs the focused Storage
 editor checks using controlled transport and real profile persistence. It renders
 software-only controls through a never-shown ordinary Window, with no capture

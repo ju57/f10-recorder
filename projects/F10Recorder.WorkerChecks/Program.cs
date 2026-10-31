@@ -22,6 +22,89 @@ internal static class WorkerChecks
     [STAThread]
     internal static int Main(string[] args)
     {
+        if (args.Any(a => a.StartsWith("--replay-storage-host-resume", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 2 && args[0] == "--replay-storage-host-resume"
+                ? ReplayStorageHostResumeChecks.Run(Path.GetFullPath(args[1])) : 2;
+        if (args.Any(a => a.StartsWith("--replay-storage-contention", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 2 && args[0] == "--replay-storage-contention" ? ReplayOwnershipChecks.RunContention(Path.GetFullPath(args[1])) : 2;
+        if (args.Any(a => a.StartsWith("--replay-manifest", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (args.Length == 2 && args[0] == "--replay-manifest-stream") return ReplayManifestStreamChecks.Run(Path.GetFullPath(args[1]));
+            if (args.Length == 3 && args[0] == "--replay-manifest-software") return ReplayManifestSoftwareChecks.Run(Path.GetFullPath(args[1]), args[2]);
+            return 2;
+        }
+        if (args.Length == 1 && args[0] == "--replay-producer-wait") { Thread.Sleep(15000); return 0; }
+        if (args.Length == 3 && args[0] == "--replay-producer-proof-child" && args[2] is "sealed" or "unsealed")
+            return ReplayProducerRecoveryChecks.Child(Path.GetFullPath(args[1]), args[2] == "sealed");
+        if (args.Any(a => a.StartsWith("--replay-producer", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 2 && args[0] == "--replay-producer-recovery" ? ReplayProducerRecoveryChecks.Run(Path.GetFullPath(args[1])) : 2;
+        if (args.Any(a => a.StartsWith("--replay-storage-resume-worker", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 3 && args[0] == "--replay-storage-resume-worker" ? ReplayStorageResumeWorkerChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2])) : 2;
+        if (args.Any(a => a.StartsWith("--replay-storage-initial-worker", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 3 && args[0] == "--replay-storage-initial-worker" ? ReplayStorageResumeWorkerChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), initialAdmission: true) : 2;
+        if (args.Any(a => a.StartsWith("--replay-storage-prelaunch", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 3 && args[0] == "--replay-storage-prelaunch" ? ReplayStorageRuntimeChecks.RunPrelaunch(Path.GetFullPath(args[1]), Path.GetFullPath(args[2])) : 2;
+        if (args.Any(a => a.StartsWith("--replay-retirement", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 2 && args[0] == "--replay-retirement" ? ReplayRetirementChecks.Run(Path.GetFullPath(args[1])) : 2;
+        if (args.Any(a => a.StartsWith("--replay-storage-runtime", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 2 && args[0] == "--replay-storage-runtime" ? ReplayStorageRuntimeChecks.Run(Path.GetFullPath(args[1])) : 2;
+        if (args.Any(a => a.StartsWith("--replay-storage-safety", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 2 && args[0] == "--replay-storage-safety" ? ReplayStorageSafetyChecks.Run(Path.GetFullPath(args[1])) : 2;
+        if (args.Any(a => a.StartsWith("--replay-volume-reservation", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (args.Length == 2 && args[0] == "--replay-volume-reservations") return ReplayVolumeReservationChecks.Run(Path.GetFullPath(args[1]));
+            return ReplayVolumeReservationChecks.Dispatch(args);
+        }
+        if (args.Any(a => a.StartsWith("--replay-storage-worker", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 4 && args[0] == "--replay-storage-worker"
+                ? ReplayStorageWorkerChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3])) : 2;
+        if (args.Any(a => a.StartsWith("--replay-storage-races", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 2 && args[0] == "--replay-storage-races" ? ReplayStorageRaceChecks.Run(Path.GetFullPath(args[1])) : 2;
+        if (args.Any(a => a.StartsWith("--replay-calibration", StringComparison.OrdinalIgnoreCase) || a.StartsWith("--calibration-fixture", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (args.Length == 2 && args[0] == "--replay-calibration-capture-evidence-checks") return CalibrationCaptureEvidence.Checks(Path.GetFullPath(args[1]));
+            if (args.Length == 2 && args[0] == "--replay-calibration-desktop-observe") return CalibrationDesktop.Observe(Path.GetFullPath(args[1]));
+            if (args.Length == 2 && args[0] == "--replay-calibration-startup-checks") return CalibrationStartupChecks.Run(Path.GetFullPath(args[1]));
+            if (args.Length == 2 && args[0] == "--replay-calibration-fixture-publication-checks") return CalibrationFixturePublicationChecks.Run(Path.GetFullPath(args[1]));
+            if (args.Length == 3 && args[0] == "--replay-calibration-export-startup-checks") return ReplayExportStartupChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
+            if (args.Length == 3 && args[0] == "--replay-calibration-continue") return ReplayCalibrationRun.Continue(Path.GetFullPath(args[1]), args[2]);
+            if (args.Length == 2 && args[0] == "--replay-calibration-snapshot-inventory-checks") return ReplaySnapshotInventoryChecks.Run(Path.GetFullPath(args[1]));
+            if (args.Length == 2 && args[0] == "--replay-calibration-frozen-history-checks") return FrozenCalibrationHistoryChecks.Run(Path.GetFullPath(args[1]));
+            if (args.Length == 2 && args[0] == "--replay-calibration-continuation-checks") return ReplayCalibrationRun.ContinuationChecks(Path.GetFullPath(args[1]));
+            if (args.Length == 3 && args[0] == "--replay-calibration-export-slow-checks") return ReplayExportStartupChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), slowObservation: true);
+            if (args.Length == 3 && args[0] == "--replay-calibration-export-snapshot-checks") return ReplayExportSnapshotChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
+            if (args.Length == 3 && args[0] == "--replay-calibration-export-stale-checks") return ReplayExportStartupChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), stale: true);
+            if (args.Length == 3 && args[0] == "--replay-calibration-engine-lease-checks") return ReplayExecutableLeaseChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
+            if (args.Length == 5 && args[0] == "--replay-calibration-export-context-checks") return ReplayExportSnapshotChecks.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]), args[4]);
+            if (args.Length == 3 && args[0] == "--replay-calibration-startup") return ReplayCalibrationStartup.Run(Path.GetFullPath(args[1]), args[2]);
+            if (args.Length == 4 && args[0] == "--replay-calibration-startup-sampler") return ReplayCalibrationTimingChecks.ProspectiveSampler(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), args[3], startup: true);
+            if (args.Length == 2 && args[0] == "--replay-calibration-publication-checks") return ReplaySamplerPublicationChecks.Run(Path.GetFullPath(args[1]));
+            if (args.Length == 4 && args[0] == "--replay-calibration-audit-receipt") return ReplayCalibrationCatalogChecks.AuditHistoricalReceipt(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), args[3]);
+            if (args.Length == 2 && args[0] == "--replay-calibration-foreground-checks") return CalibrationForeground.Checks(Path.GetFullPath(args[1]));
+            if (args.Length == 2 && args[0] == "--replay-calibration-inventory-checks") return ReplayInventoryReaderChecks.Run(Path.GetFullPath(args[1]));
+            if (args.Length == 2 && args[0] == "--replay-calibration-close-dummy-checks") return ReplayCalibrationDummyClosure.Checks(Path.GetFullPath(args[1]));
+            if (args.Length == 3 && args[0] == "--replay-calibration-close-dummy-evidence") return ReplayCalibrationDummyClosure.Run(Path.GetFullPath(args[1]), args[2]);
+            if (args.Length == 5 && args[0] == "--replay-calibration-write-diagnostic") return ReplayCalibrationWriteDiagnostic.Run(Path.GetFullPath(args[1]), args[2], Path.GetFullPath(args[3]), double.Parse(args[4], System.Globalization.CultureInfo.InvariantCulture));
+            if (args.Length == 2 && args[0] == "--replay-calibration-rehearsal-checks") return ReplayCalibrationRehearsal.Checks(Path.GetFullPath(args[1]));
+            if (args.Length == 3 && args[0] == "--replay-calibration-rehearsal") return ReplayCalibrationRehearsal.Run(Path.GetFullPath(args[1]), args[2]);
+            if (args.Length == 5 && args[0] == "--replay-calibration-pause-check") return ReplayCalibrationTimingChecks.PauseRun(Path.GetFullPath(args[1]), args.Skip(2).Select(Path.GetFullPath).ToArray());
+            if (args.Length == 2 && args[0] == "--replay-calibration-archive-checks") return ReplayCalibrationArchiveChecks.Run(Path.GetFullPath(args[1]));
+            if (args.Length == 2 && args[0] == "--replay-calibration-timing-checks") return ReplayCalibrationTimingChecks.Run(Path.GetFullPath(args[1]));
+            if (args.Length == 4 && args[0] == "--replay-calibration-prospective-sampler") return ReplayCalibrationTimingChecks.ProspectiveSampler(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), args[3]);
+            if (args.Length == 4 && args[0] == "--replay-calibration-sampler-check") return ReplayCalibrationTimingChecks.SamplerRun(Path.GetFullPath(args[1]), args.Skip(2).Select(Path.GetFullPath).ToArray());
+            if (args.Length == 2 && args[0] == "--replay-calibration-phase-checks") return ReplayCalibrationPhaseChecks.Run(Path.GetFullPath(args[1]));
+            if (args.Length == 2 && args[0] == "--replay-calibration-catalog-checks") return ReplayCalibrationCatalogChecks.Run(Path.GetFullPath(args[1]));
+            if (args.Length == 2 && args[0] == "--replay-calibration-model-checks") return ReplayCalibrationModelChecks.Run(Path.GetFullPath(args[1]));
+            if (args.Length == 3 && args[0] == "--replay-calibration-prepare") return ReplayCalibrationRun.Prepare(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
+            if (args.Length == 3 && args[0] == "--replay-calibration-controls") return ReplayCalibrationRun.Controls(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
+            if (args.Length == 3 && args[0] == "--replay-calibration-run") return ReplayCalibrationRun.Run(Path.GetFullPath(args[1]), args[2]);
+            if (args.Length == 3 && args[0] == "--replay-calibration-inspect-existing") return ReplayCalibrationRun.InspectExisting(Path.GetFullPath(args[1]), args[2]);
+            if (args.Length == 3 && args[0] == "--calibration-fixture") return CalibrationPattern.Run(Path.GetFullPath(args[1]), args[2]);
+            return 2;
+        }
+        if (args.Any(value => value.StartsWith("--replay-output-validation", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 2 && args[0] == "--replay-output-validation"
+                ? ReplayOutputValidationChecks.Run(Path.GetFullPath(args[1])) : 2;
         if (args.Any(value => value.StartsWith("--pilot-stage", StringComparison.OrdinalIgnoreCase))) return PilotStageRunner.Dispatch(args);
         if (args.Any(value => value.StartsWith("--pilot-storage", StringComparison.OrdinalIgnoreCase))) return PilotStorageObservation.Dispatch(args);
         if (args.Length == 2 && args[0] == "--replay-ownership") return ReplayOwnershipChecks.Run(Path.GetFullPath(args[1]));

@@ -71,7 +71,7 @@ namespace F10Recorder
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern IntPtr FindWindow(string className, string title);
         [DllImport("user32.dll")] internal static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] internal static extern bool CreateHardLink(string link, string existing, IntPtr reserved);
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateJobObject(IntPtr attributes, string name);
         [DllImport("kernel32.dll")] static extern bool SetInformationJobObject(IntPtr job, int infoClass, IntPtr info, uint size);
         [DllImport("kernel32.dll")] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
         [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
@@ -145,13 +145,18 @@ namespace F10Recorder
         internal sealed class ProcessJob : IDisposable
         {
             IntPtr handle;
-            public ProcessJob()
+            internal string Name { get; }
+            public ProcessJob(bool recoverable = false)
             {
-                handle = CreateJobObject(IntPtr.Zero, null);
+                Name = recoverable ? ReplayProducerProof.JobPrefix + Guid.NewGuid().ToString("N") : null;
+                handle = CreateJobObject(IntPtr.Zero, Name);
                 if (handle == IntPtr.Zero) throw new System.ComponentModel.Win32Exception();
+                if (Name != null && Marshal.GetLastWin32Error() == 183)
+                { CloseHandle(handle); handle = IntPtr.Zero; throw new System.IO.IOException("Producer job name already exists."); }
                 var info = new ExtendedLimit(); info.Basic.Flags = 0x2000;
                 IntPtr p = Marshal.AllocHGlobal(Marshal.SizeOf(info));
                 try { Marshal.StructureToPtr(info, p, false); if (!SetInformationJobObject(handle, 9, p, (uint)Marshal.SizeOf(info))) throw new System.ComponentModel.Win32Exception(); }
+                catch { CloseHandle(handle); handle = IntPtr.Zero; throw; }
                 finally { Marshal.FreeHGlobal(p); }
             }
             public void Add(Process process) { if (!AssignProcessToJobObject(handle, process.Handle)) throw new System.ComponentModel.Win32Exception(); }

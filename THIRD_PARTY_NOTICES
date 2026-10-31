@@ -65,7 +65,8 @@ the MIT wrapper license must not be treated as their only applicable license.
 The public binary release review above also covers these exact dependencies.
 
 Phosphor Icons
-The Storage folder controls use the Phosphor folder-open fill icon.
+The Storage folder controls use the Phosphor folder-open fill icon. Notification
+dismiss controls use the Phosphor X bold vector.
 Source: https://github.com/phosphor-icons/core
 
 MIT License

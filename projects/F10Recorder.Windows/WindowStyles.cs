@@ -16,9 +16,10 @@ internal static class WindowStyles
         Log.Write("UI capture exclusion could not be applied; Win32 error " + Marshal.GetLastWin32Error());
         return false;
     }
-    public static void Passive(nint window)
+    public static void Passive(nint window, bool interactive = false)
     {
-        Set(window, -20, Get(window, -20) | 0x08000000 | 0x00000080 | 0x00000020 | 0x00080000);
+        nint styles = Get(window, -20) | 0x08000000 | 0x00000080 | 0x00080000;
+        Set(window, -20, interactive ? styles & ~0x00000020 : styles | 0x00000020);
         Native.SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x73);
     }
 }

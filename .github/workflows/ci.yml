@@ -66,8 +66,77 @@ jobs:
           exit 0
       - name: Verify Storage controls without capture or GPU
         run: dotnet run --project projects/F10Recorder.MigrationTests/F10Recorder.MigrationTests.csproj -c Release --no-build -- artifacts/storage-controls-ci --storage-controls-ui
+      - name: Verify persistent storage problem dismissal without capture
+        run: dotnet run --project projects/F10Recorder.MigrationTests/F10Recorder.MigrationTests.csproj -c Release --no-build -- artifacts/storage-notice-ci --storage-notice-ui
       - name: Verify replay ownership without capture or GPU
-        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-ownership artifacts/replay-ownership-ci
+        shell: pwsh
+        run: |
+          dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-ownership artifacts/replay-ownership-ci
+          $code = $LASTEXITCODE
+          if ($code) {
+            $report = Get-Content artifacts/replay-ownership-ci/verification.json -Raw | ConvertFrom-Json
+            $report.checks | Where-Object result -ne 'passed' | ConvertTo-Json -Depth 8
+          }
+          exit $code
+      - name: Verify coordinated completed-segment publication without media
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-manifest-stream artifacts/replay-manifest-ci
+      - name: Verify supplied replay output reservations without capture or GPU
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-output-validation artifacts/replay-output-ci
+      - name: Verify sampler and atomic storage claims without capture or GPU
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-publication-checks artifacts/replay-publication-ci
+          $code = $LASTEXITCODE
+          $receipt = 'artifacts/replay-publication-ci/publication-check.json'
+          if (Test-Path -LiteralPath $receipt) { Get-Content -LiteralPath $receipt -Raw }
+          exit $code
+      - name: Verify frozen calibration resource admission without media
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-foreground-checks artifacts/replay-resource-ci
+      - name: Verify independent capture closure evidence without media
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-capture-evidence-checks artifacts/replay-capture-evidence-ci
+      - name: Verify calibration startup diagnostics without media or power effects
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-startup-checks artifacts/replay-startup-ci
+      - name: Verify cross-process fixture readiness publication without media
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-fixture-publication-checks artifacts/replay-fixture-publication-ci
+      - name: Verify manifest observation races without capture or GPU
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-storage-races artifacts/replay-storage-races-ci
+      - name: Verify sealed snapshot metadata without capture or GPU
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-snapshot-inventory-checks artifacts/replay-snapshot-inventory-ci
+      - name: Verify read-only calibration history without capture or GPU
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-frozen-history-checks artifacts/replay-frozen-history-ci
+      - name: Verify snapshot evidence archive without capture or GPU
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-archive-checks artifacts/replay-archive-ci
+      - name: Verify sampler timing without capture or GPU
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-timing-checks artifacts/replay-sampler-timing-ci
+      - name: Verify reference output estimate arithmetic without capture or GPU
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-model-checks artifacts/replay-model-ci
+      - name: Verify qualified reference catalog with controlled host metadata
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-catalog-checks artifacts/replay-catalog-ci
+      - name: Verify shared volume reservations without capture or GPU
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-volume-reservations artifacts/replay-volume-ci
+      - name: Verify accepted replay and capture ledger contention without media
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-storage-contention artifacts/replay-contention-ci
+      - name: Verify active and offline storage phases without media
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-phase-checks artifacts/replay-phases-ci
+      - name: Verify durable storage holds and explicit Resume without media
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-storage-safety artifacts/replay-storage-safety-ci
+      - name: Verify capture storage supervision with controlled producers
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-storage-runtime artifacts/replay-storage-runtime-ci
+      - name: Verify supervisor containment and accepted-save retirement without media
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-retirement artifacts/replay-retirement-ci
+      - name: Verify host Pause after explicit storage Resume without media
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-storage-host-resume artifacts/replay-storage-host-resume-ci
+      - name: Verify producer crash recovery without media
+        shell: pwsh
+        run: |
+          dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-producer-recovery artifacts/replay-producer-recovery-ci
+          $code = $LASTEXITCODE
+          if ($code) {
+            $report = Get-Content artifacts/replay-producer-recovery-ci/producer-recovery.json -Raw | ConvertFrom-Json
+            $report.checks | Where-Object { -not $_.passed } | ConvertTo-Json -Depth 8
+          }
+          exit $code
       - name: Verify capture status without capture or GPU
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --capture-status artifacts/capture-status-ci
       - name: Verify bounded profile status without native recorder or GPU

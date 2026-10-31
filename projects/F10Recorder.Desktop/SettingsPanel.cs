@@ -22,7 +22,7 @@ internal sealed class SettingsPanel : UserControl
     readonly CheckBox audio = new() { Name = "SystemAudio", Content = "Capture system audio" }, startup = new() { Name = "StartWithWindows", Content = "Start buffering at Windows sign-in" };
     readonly TextBox clips = new() { Name = "OutputDirectory" }, screenshots = new() { Name = "ScreenshotDirectory" };
     readonly TextBox cacheFolder = new() { Name = "ReplayCacheDirectory" }, cacheBudget = new() { Name = "ReplayCacheBudgetGB" };
-    readonly TextBlock budgetError = Ui.Label("", 12, Ui.Warning), cacheUsage = Ui.Label("", 12, Ui.Muted);
+    readonly TextBlock budgetError = Ui.Label("", 12, Ui.Warning), cacheUsage = Ui.Label("", 12, Ui.Muted), outputDemandStatus = Ui.Label("", 12, Ui.Muted);
     readonly Dictionary<TextBox, TextBlock> folderErrors = [];
     readonly Func<string, string, Task<string>> selectFolder;
     readonly Button reset;
@@ -191,6 +191,9 @@ internal sealed class SettingsPanel : UserControl
         cacheBudget.Padding = new Thickness(12, 8); cacheBudget.MinHeight = 40; cacheBudget.CornerRadius = new CornerRadius(8); cacheBudget.Background = new SolidColorBrush(Color.Parse("#262626")); cacheBudget.BorderBrush = new SolidColorBrush(Color.Parse("#686868")); budgetRow.Children.Add(cacheBudget);
         var unit = Ui.Label("GB", 14, Ui.Muted); unit.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(unit, 1); budgetRow.Children.Add(unit); body.Children.Add(budgetRow);
         budgetError.Name = "ReplayCacheBudgetError"; body.Children.Add(budgetError); cacheUsage.Name = "ReplayCacheUsage"; cacheUsage.Margin = new Thickness(0, 8, 0, 0); body.Children.Add(cacheUsage);
+        outputDemandStatus.Name = "ReplayOutputDemandStatus"; outputDemandStatus.Margin = new Thickness(0, 6, 0, 0);
+        outputDemandStatus.TextWrapping = TextWrapping.Wrap; AutomationProperties.SetName(outputDemandStatus, "Replay storage status");
+        body.Children.Add(outputDemandStatus);
         body.Children.Add(Ui.Label("Changing folders affects future work. Existing recordings, screenshots and retained cache files stay where they are.", 12, Ui.Muted));
         var engine = Ui.Label("Recording engine", 15, null, FontWeight.SemiBold); engine.Margin = new Thickness(0, 26, 0, 6); body.Children.Add(engine);
         body.Children.Add(Ui.Label("F10 uses only its approved, verified recording engine. Repair replaces missing or rejected engine files and preserves your preferences and saved media. An internet connection may be needed.", 12, Ui.Muted));
@@ -324,6 +327,25 @@ internal sealed class SettingsPanel : UserControl
         apply.Content = recorder.Applying ? "Applying…" : "Apply changes"; recording.IsEnabled = entry.CanEdit && !recorder.Applying && recorder.ProfileStatus?.RequiresCorrection == false;
         if (reset != null) reset.IsEnabled = entry.CanEdit && !recorder.Applying;
         if (cacheUsage != null) cacheUsage.Text = recorder.Metrics?.CacheBytes >= 0 && !string.IsNullOrEmpty(recorder.Metrics.SampledUtc) ? "Cache used: " + (recorder.Metrics.CacheBytes / 1_000_000_000m).ToString("0.###", CultureInfo.CurrentCulture) + " GB" : "Cache used: unavailable";
+        var metrics = recorder.Metrics;
+        bool known = metrics != null && recorder.Phase is not (CapturePhase.Unknown or CapturePhase.Reconnecting);
+        outputDemandStatus.Text = !known ? "Replay output estimate: unavailable." : metrics.ReplayOutputDemandKind switch
+        {
+            "CalibratedEstimate" => "Replay output estimate: calibrated for the last replay selection.",
+            "SourceBound" => "Replay output estimate: verified for the last replay selection.",
+            _ => "Replay output estimate: unmeasured. " + (metrics.ReplayOutputDemandReason ?? "No qualified estimate is available.")
+        };
+        if (known && !string.IsNullOrEmpty(metrics.ReplayStorageError))
+            outputDemandStatus.Text += Environment.NewLine + metrics.ReplayStorageError;
+        if (known && metrics.ReplayStorageSafetyHeld)
+            outputDemandStatus.Text += Environment.NewLine + "Recording stopped for storage. " + metrics.ReplayStorageSafetyReason
+                + " Use Resume after the storage checks pass.";
+        else if (known && metrics.ReplayStorageSafetyWarning)
+            outputDemandStatus.Text += Environment.NewLine + "Low storage. " + metrics.ReplayStorageSafetyReason;
+        else if (known && metrics.ReplayStorageSafetyKind == "Unmeasured")
+            outputDemandStatus.Text += Environment.NewLine + "Capture growth: unmeasured.";
+        outputDemandStatus.Foreground = known && (!string.IsNullOrEmpty(metrics.ReplayStorageError)
+            || metrics.ReplayStorageSafetyHeld || metrics.ReplayStorageSafetyWarning) ? Ui.Warning : Ui.Muted;
     }
     void RefreshWindows()
     {

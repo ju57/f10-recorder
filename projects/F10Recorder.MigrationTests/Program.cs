@@ -26,7 +26,10 @@ internal static class MigrationChecks
     [STAThread]
     static int Main(string[] args)
     {
-        data = args[0]; Directory.CreateDirectory(data);
+        data = args[0];
+        if (args.Any(a => a.StartsWith("--storage-notice-ui", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 2 && args[1] == "--storage-notice-ui" ? StorageNoticeChecks.Run(Path.GetFullPath(data)) : 2;
+        Directory.CreateDirectory(data);
         if (args.Length == 2 && args[1] == "--storage-controls-ui") return StorageControlsChecks.Run(Path.GetFullPath(data));
         if (args.Length == 4 && args[1] == "--storage-controls-ui") return StorageControlsChecks.Run(Path.GetFullPath(data), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]));
         if (args.Contains("--profile-entry-ui")) return ProfileEntryChecks.Run(Path.GetFullPath(data), args.Contains("--sensitivity-control"));
