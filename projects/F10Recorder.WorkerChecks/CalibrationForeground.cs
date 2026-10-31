@@ -240,6 +240,12 @@ internal static class CalibrationForeground
             Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { FloorBytes = 59_999_999_999 }));
             string extra = Path.Combine(root, "unadmitted-review-history"); Directory.CreateDirectory(extra);
             Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { RetainedRoots = reviewed.RetainedRoots.Append(extra).ToArray() }));
+            var reconnected = reviewed with { MaximumChildren = 738, RetainedChildren = 706,
+                RetainedRoots = reviewed.RetainedRoots.Append(extra).ToArray(), RetainedElapsedSeconds = 88771, RetainedOfflineSeconds = 65539 };
+            ReplayCalibrationRun.ValidateResources(reconnected);
+            Reject(() => ReplayCalibrationRun.ValidateResources(reconnected with { RetainedChildren = 705 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(reconnected with { RetainedChildren = 707 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(reconnected with { FileLimit = 36865 }));
         });
         File.WriteAllText(Path.Combine(root, "foreground-checks.json"), JsonSerializer.Serialize(new {
             result = "passed", results, effects = "Pure admission delegates and tiny receipt; no window, input injection, child, engine, sound or capture." }, new JsonSerializerOptions { WriteIndented = true }));

@@ -107,7 +107,8 @@ internal static partial class ReplayCalibrationRun
         hardBytes = plan.BudgetBytes, minimumFreeBytes = plan.FloorBytes, deadlineSeconds = plan.DeadlineSeconds };
     internal static void ValidateResources(CalibrationPlan plan)
     {
-        bool reviewedCorrectionReplacement = plan != null && plan.MaximumChildren == 706 && plan.RetainedChildren == 674
+        bool reviewedCorrectionReplacement = plan != null
+            && (plan.MaximumChildren == 706 && plan.RetainedChildren == 674 || plan.MaximumChildren == 738 && plan.RetainedChildren == 706)
             && plan.BudgetBytes == 80_000_000_000 && plan.StopBytes == 78_500_000_000
             && plan.DeadlineSeconds == 100000 && plan.DirectoryLimit == 640 && plan.FileLimit == 36864 && plan.OfflineDeadlineSeconds == 74000
             && plan.OutputComponentBytes == 2_000_000_000 && plan.RetainedBudgetBytes == 16_000_000_000
@@ -184,7 +185,7 @@ internal static partial class ReplayCalibrationRun
                     && plan.OutputComponentBytes == 2_000_000_000 && plan.RetainedBudgetBytes == 24_000_000_000)),
             "Calibration limits or frozen six-source order differ from an admitted historical or lifecycle replacement boundary.");
         Require(!plan.FreezeRetainedAllocations || frozenHistoryReplacement, "Read-only history requires its exact prospective admission.");
-        Require(plan.RetainedRoots != null && plan.RetainedRoots.Length >= 4 && plan.RetainedRoots.Length <= (reviewedCorrectionReplacement ? 46 : resumedHostReplacement ? 43 : frozenHistoryReplacement ? 39 : coordinatedReplacement ? 38 : snapshotReplacement ? 37 : cadenceReplacement ? 28 : foregroundReplacement ? 25 : lifecycleReplacement ? 24 : evidenceReplacement ? 17 : exportReplacement ? 16 : readinessReplacement ? 15 : startupReplacement ? 14 : contentionReplacement ? 11 : fresh ? 10 : 8)
+        Require(plan.RetainedRoots != null && plan.RetainedRoots.Length >= 4 && plan.RetainedRoots.Length <= (reviewedCorrectionReplacement ? plan.MaximumChildren == 738 ? 47 : 46 : resumedHostReplacement ? 43 : frozenHistoryReplacement ? 39 : coordinatedReplacement ? 38 : snapshotReplacement ? 37 : cadenceReplacement ? 28 : foregroundReplacement ? 25 : lifecycleReplacement ? 24 : evidenceReplacement ? 17 : exportReplacement ? 16 : readinessReplacement ? 15 : startupReplacement ? 14 : contentionReplacement ? 11 : fresh ? 10 : 8)
             && plan.RetainedRoots.Distinct(StringComparer.OrdinalIgnoreCase).Count() == plan.RetainedRoots.Length
             && plan.RetainedRoots.All(r => Directory.Exists(r) && !Path.GetFullPath(r).Equals(Path.GetFullPath(plan.Root), StringComparison.OrdinalIgnoreCase))
             && double.IsFinite(plan.RetainedElapsedSeconds) && plan.RetainedElapsedSeconds >= 0 && plan.RetainedElapsedSeconds < plan.DeadlineSeconds
@@ -205,7 +206,7 @@ internal static partial class ReplayCalibrationRun
         sampleIntervalMs = 100, maximumActiveGapMs = 500, observationContract = "active-offline-v1", expectedBytes = 18_000_000_000L,
         fileLimit = plan.FileLimit, directoryLimit = plan.DirectoryLimit, offlineDeadlineSeconds = plan.OfflineDeadlineSeconds,
         completeOfflineBatchCeilingSeconds = CompleteOfflineBatchSeconds,
-        additionalReplacementVerificationSeconds = plan.MaximumChildren is 147 or 179 or 256 or 288 or 342 or 374 or 423 or 513 or 545 or 577 or 654 or 706 ? FullReplacementVerificationSeconds : plan.MaximumChildren == 137 ? 210 : plan.MaximumChildren == 115 ? ReplacementVerificationSeconds : 0,
+        additionalReplacementVerificationSeconds = plan.MaximumChildren is 147 or 179 or 256 or 288 or 342 or 374 or 423 or 513 or 545 or 577 or 654 or 706 or 738 ? FullReplacementVerificationSeconds : plan.MaximumChildren == 137 ? 210 : plan.MaximumChildren == 115 ? ReplacementVerificationSeconds : 0,
         historicalAllocation = plan.FreezeRetainedAllocations ? "fresh native baseline; GENERIC_READ/share-read leases deny data writes and unlink through aliases; sticky synchronous subtree change handles; per-volume caller-free; full pre/post hashes" : "native allocation refreshed each scan",
         phaseLimitsSeconds = new { captureSetup = 330, exportController = 130, exportChild = 120,
             foregroundAdmission = CalibrationForeground.DeadlineSeconds, mainInspection = MainInspectionSeconds, mainDecodeChild = MainInspectionSeconds - InspectionCleanupSeconds,
@@ -1148,7 +1149,7 @@ internal static partial class ReplayCalibrationRun
             foreach (string label in Order)
             {
                 Action<int, IntPtr> focus = null;
-                if (plan.MaximumChildren is 513 or 545 or 577 or 654 or 706)
+                if (plan.MaximumChildren is 513 or 545 or 577 or 654 or 706 or 738)
                 {
                     // Normal desktop activation completes before capture/bootstrap.
                     // Keep the same bounded handshake already used by continuation.

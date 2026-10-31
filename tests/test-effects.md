@@ -8,6 +8,9 @@ plus32fresh (706); a separately admitted14-child ordinary-worker ceiling reaches
 retired; retained D: rehearsal files and small historical evidence still count.
 Old ceilings/receipts are unchanged. The500msactive observation/no-refit
 requirements are unchanged; this route does not authorize automatic batch retries.
+The user-authorized foreground-loss replacement conservatively carries706prior
+children plus32fresh (738), retains the failed source as a47th root, and keeps
+the same byte/time/observation limits. Later native14/physical8 reach760.
 
 ## Storage review regressions
 
