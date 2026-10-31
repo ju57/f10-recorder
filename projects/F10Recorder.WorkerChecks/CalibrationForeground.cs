@@ -226,6 +226,7 @@ internal static class CalibrationForeground
             var reviewed = resumed with { MaximumChildren = 706, RetainedChildren = 674,
                 BudgetBytes = 80_000_000_000, StopBytes = 78_500_000_000, DeadlineSeconds = 100000,
                 OfflineDeadlineSeconds = 74000, RetainedBudgetBytes = 16_000_000_000,
+                OutsideBuildAllowanceBytes = 3_200_000_000,
                 RetainedElapsedSeconds = 87002, RetainedOfflineSeconds = 64008,
                 RetainedRoots = Enumerable.Range(0, 46).Select(i => Path.Combine(root, "reviewed-history-" + i)).ToArray() };
             foreach (string path in reviewed.RetainedRoots) Directory.CreateDirectory(path);
@@ -233,6 +234,7 @@ internal static class CalibrationForeground
             Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { FreezeRetainedAllocations = false }));
             Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { RetainedChildren = 673 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { BudgetBytes = 80_000_000_001 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { OutsideBuildAllowanceBytes = 3_200_000_001 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { RetainedBudgetBytes = 16_000_000_001 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { DeadlineSeconds = 100001 }));
             Reject(() => ReplayCalibrationRun.ValidateResources(reviewed with { FloorBytes = 59_999_999_999 }));

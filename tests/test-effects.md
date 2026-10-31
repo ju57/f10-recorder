@@ -4,7 +4,7 @@ The reviewed correction's prospective replacement carries674reserved children
 plus32fresh (706); a separately admitted14-child ordinary-worker ceiling reaches
 720. Its exact resource case uses80GBaggregate cap/78.5GBstop,60GBcaller floor,
 100000cumulative wall/74000offline seconds,46retained roots/16GBretained,
-36864files/640directories and2.2GBoutside allowance. Retired C: media stays
+36864files/640directories and3.2GBoutside allowance. Retired C: media stays
 retired; retained D: rehearsal files and small historical evidence still count.
 Old ceilings/receipts are unchanged. The500msactive observation/no-refit
 requirements are unchanged; this route does not authorize automatic batch retries.

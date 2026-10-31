@@ -111,7 +111,7 @@ internal static partial class ReplayCalibrationRun
             && plan.BudgetBytes == 80_000_000_000 && plan.StopBytes == 78_500_000_000
             && plan.DeadlineSeconds == 100000 && plan.DirectoryLimit == 640 && plan.FileLimit == 36864 && plan.OfflineDeadlineSeconds == 74000
             && plan.OutputComponentBytes == 2_000_000_000 && plan.RetainedBudgetBytes == 16_000_000_000
-            && plan.OutsideBuildAllowanceBytes == 2_200_000_000 && plan.FreezeRetainedAllocations;
+            && plan.OutsideBuildAllowanceBytes == 3_200_000_000 && plan.FreezeRetainedAllocations;
         bool resumedHostReplacement = reviewedCorrectionReplacement || plan != null && plan.MaximumChildren == 654 && plan.RetainedChildren == 622
             && plan.BudgetBytes == 192_000_000_000 && plan.StopBytes == 190_500_000_000
             && plan.DeadlineSeconds == 86400 && plan.DirectoryLimit == 640 && plan.FileLimit == 36864 && plan.OfflineDeadlineSeconds == 61200
