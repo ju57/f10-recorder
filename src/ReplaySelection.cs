@@ -37,9 +37,39 @@ namespace F10Recorder
         }
         public static List<Segment> Select(List<Segment> segments, double end, double seconds)
         {
-            // Begin on a keyframe at/after the requested start; copy saves are at most one GOP short.
+            // Decode the preceding independently decodable head as well. Export
+            // trims its unwanted pictures; skipping it loses up to a whole GOP.
             double start = Math.Max(0, end - seconds);
-            return segments.Where(s => s.Start + 0.001 >= start && s.Start < end).OrderBy(s => s.Start).ToList();
+            return segments.Where(s => s.End > start && s.Start < end).OrderBy(s => s.Start).ToList();
+        }
+    }
+
+    internal sealed record ReplayInterval(double Start, double End, double RequestedSeconds)
+    {
+        internal double Seconds => End - Start;
+        internal bool LimitedHistory => Seconds < RequestedSeconds - 0.000001;
+        internal static ReplayInterval AtRequest(List<Segment> available, double end, double seconds)
+        {
+            if (!double.IsFinite(end) || !double.IsFinite(seconds) || seconds <= 0 || available.Count == 0)
+                throw new IOException("At least one second of replay footage is required.");
+            var interval = new ReplayInterval(Math.Max(Math.Max(0, end - seconds), available.Min(s => s.Start)), end, seconds);
+            if (interval.Seconds < 1 - 0.000000001) throw new IOException("At least one second of replay footage is required.");
+            return interval;
+        }
+        internal void RequireCoverage(IReadOnlyList<Segment> segments)
+        {
+            double covered = Start;
+            double? previousEnd = null;
+            foreach (var segment in segments)
+            {
+                if (!double.IsFinite(segment.Start) || !double.IsFinite(segment.End) || segment.End <= segment.Start
+                    || segment.Start > covered + 0.000001 || previousEnd.HasValue && segment.Start < previousEnd.Value - 0.000001)
+                    throw new IOException("Requested replay history is unavailable or contains a gap; no padded replay was saved.");
+                covered = Math.Max(covered, segment.End);
+                previousEnd = segment.End;
+            }
+            if (covered < End - 0.000001)
+                throw new IOException("Requested replay endpoint is unavailable; no shortened replay was saved.");
         }
     }
 }

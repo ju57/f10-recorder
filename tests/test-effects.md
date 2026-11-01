@@ -1,5 +1,154 @@
 # Verification launch effects
 
+The issue14 native continuation can reuse the three independently completed
+training samples and their unchanged frozen model, then acquire only H02/H01/H03.
+Its separate reviewed admission retains all prior failures, acquisition/process
+charges and elapsed phase time; an explicit user pause is recorded separately
+from one new bounded phase. The prospective plan binds original/pause receipts,
+consumer/engine hashes, current environment and an absolute launch/deadline.
+Preparation runs tiny completed-file/archive/snapshot-identity/alias controls and
+resource/time rejection checks, with no media children or acquisition. Execution
+still needs current-task approval for the complete cumulative bounds.
+
+The continuation uses the ordinary native snapshot reader and keeps the500ms
+active observation rule through full runtime validation. Completed raw inputs
+are archived by hardlink before pruning. A copied snapshot aborts before encoding
+and prevents the next acquisition. MP4 aliases are charged by physical identity
+and all output metadata handles close before final allocation is measured. The
+ordinary worker's validation hook preserves a failed validation partial; an
+encoder failure before that hook can still remove its temporary partial during
+ordinary cleanup. This limitation must be disclosed in its reviewed plan and
+approval; sources, receipts and prior evidence remain retained. No account model
+activation or installed-state change occurs.
+
+A final-worker continuation may retain the three training and two complete
+held-out sources, then acquire only H03. Its preparer also reproduces an exclusive
+storage-latch read conflict with tiny private files and checks ordinary
+coordinator status observations and normal claim retirement. During live work
+the observer uses worker protocol metrics; an independent durable-latch read is
+deferred until the worker and host have joined. The final guard must be clear
+before qualification. The failed attempts remain failed and retained.
+
+`tests/replay-calibrated-validation.ps1 -Plan` previews an A/B of the retention
+adapter and ordinary native snapshot reader with the actual frozen calibrated
+model and a private durable ledger. It uses existing captured TS/MP4 only:
+one helper and two CPU decoders in210seconds,32GB family cap/30GB stop/60GB floor.
+No acquisition, encoder, UI, playback, settings/startup or catalog activation
+occurs. Product guard/estimator timings stay in bounded memory receipts. Owned
+MP4 evidence aliases are identity-deduplicated; metadata handles close before
+exit. Publication is suppressed and prior failures remain failed.
+
+The same script's `-Reencode -Plan` route previews a combined retained-source
+transition: one helper, one NVENC encoder and one CPU full decoder in210seconds,
+38GB retained-family cap/36GB stop/60GB free-space floor. It uses actual completed
+TS inputs, the frozen calibrated provider/applicability, private durable claims,
+the ordinary native snapshot reader and the collector's evidence wrapper. All
+500ms guards remain active through encoding and validation. Output preservation
+creates a hardlink during that transition; identity/length queries and metadata
+release occur after producer absence. Bounded guard/estimate telemetry is retained
+in128-row files, alongside producer-callback/hardlink timing and terminal alias
+proof. A sentinel suppresses publication. No acquisition, window, audio playback,
+installed-state change or account calibration activation occurs. Passing this
+diagnostic does not qualify a failed live source or prove capture retirement.
+
+Existing-source encode/validation and bounded trace-writer fault effects are
+listed in [exact replay checks](replay-precision.md#production-acceptance-still-required).
+Preview `tests/replay-captured-transition.ps1 -Plan` before its separately
+reviewed three-child diagnostic; it performs no new acquisition.
+
+`tests/replay-output-metadata.ps1 -Plan` previews a bounded nonmedia comparison;
+`-Prepare` freezes SDK/consumer/harness/source-byte identities, and `-Run` requires
+the reviewed plan hash. One180s helper writes two800MB dummy outputs with850MB
+preallocation under20GB retained-family/60GB caller-floor bounds. It uses real
+replay snapshots/capacity callbacks, native allocation queries, rewrite/close/
+rename/replacement and atomic release observations. No engine, media children,
+GPU, devices, window, capture, startup/preferences or model activation runs.
+See [output metadata checks](replay-output-metadata.md). Failed cases remain failed.
+
+The issue14 exact native route requires current-task authorization and an
+independently reviewed hash-bound admission. Preparation reads current formats
+and filesystem allocation without acquisition. Live execution also requires a
+cumulative phase receipt and passed nonmedia rehearsal. The explicit rehearsal
+route `--replay-calibration-issue14-rehearse` uses real cache snapshots and the
+storage sampler with dummy payloads, no devices, media children or window.
+Retained dummy inputs may be linked read-only; a new output grows under the
+actual export storage callback. Shared payload geometry is recorded explicitly.
+
+`tests/replay-calibration.ps1` without `-Run` previews the live launch; its `-Run`
+is **not** the nonmedia rehearsal. The issue14 route captures primary-display
+pixels/default WASAPI playback audio, displays owned fullscreen fixtures and
+plays quiet chirps. Bounds: six acquisitions under six minutes each,48 total
+media/helper processes including preparatory helpers,20GB retained allocation,
+18GB stop,60GB caller floor and90minutes including charged preparation. Three
+training cases precede three held-out cases; exceedance fails without refitting.
+H03 uses the actual worker/host/protocol with private authority and a candidate
+catalog override. It never activates the account-default catalog. Accepted-source
+snapshots, outputs and failure receipts remain. Failed-case cleanup closes the
+owned process job before joining accepted work; the outer launcher enforces an
+absolute deadline with cleanup reserve. No microphone, installed-profile/startup,
+display/audio preference, game/NVIDIA change, installation or release is admitted.
+The separately reviewed correction boundary charges two prior acquisitions and
+24 prior media/helper processes, then permits six fresh acquisitions under an
+eight-acquisition/68-process cumulative ceiling. It keeps the20GB/18GBstop/60GB
+floor/90minute bounds, with stricter850MB source and800MB output components.
+The old binary's qualification is never transferred to the corrected binary;
+all six sources are collected again only after explicit task authorization.
+`--replay-calibration-issue14-checks` tests both exact numeric/path boundaries
+with tiny files and no device/child/media work, and runs in Windows CI.
+The separately admitted output-lease boundary uses nine cumulative acquisitions,
+80 media/helper processes,26GB cap/24GB stop,60GB floor and120minutes including
+prior attempts. It requires the full-size nonmedia metadata comparison, retains
+output metadata handles through active work, and measures every declared final
+after a30s bounded offline release. Pre-release peaks remain in the evidence;
+final allocation is recorded after release. The scope requires explicit current
+task approval; a plan alone does not authorize expanded effects. All three exact
+resource boundaries have positive and one-over nonmedia checks.
+
+Precision `integration` mode starts exactly three media children: a bounded
+24-second synthetic `CaptureSession`, its real export and full validator. It
+requires 45 s whole-run/35 s active+cleanup reserve and 256 MiB local storage, under
+the 8 GB family/20 GB caller-floor bounds. It checks separate actual child receipts
+and advancing generated capture across publication; no device or desktop/audio
+capture, visible UI, profile/startup/vendor change or model activation runs.
+The same three-child `corrupt` sensitivity replaces only a closed owned partial
+with invalid bytes and requires actual decoder rejection without publication.
+Precision `drift` mode admits two generated-media children in45s: create a small
+60-frame file with gradual timestamp drift and run the actual validator. Full
+decoding must succeed while cumulative timing validation rejects; no devices,
+UI or user state are involved. The same family/free-space bounds apply.
+
+`F10Recorder.MigrationTests <fresh-root> --replay-notice-ui` shows one owned
+passive notice for under 10 s and renders only that notice to PNG. It verifies
+available/requested duration and unavailable-history copy fit the actual card.
+The isolated process disables capture exclusion before constructing the window;
+no recording/engine, desktop/device/audio capture, preference/startup/vendor
+change or capture-affinity request runs.
+
+`F10Recorder.MigrationTests <fresh-root> --replay-action-checks` exercises the
+actual offscreen Settings Save button and worker-client event policy with
+controlled replies. It checks admission, busy clicks, validated publication,
+warm-up disclosure, explicit rejection and validation failure separately. It
+creates no native Window/worker/engine, capture, input or preference/startup write.
+Media validity and real worker publication are separate checks.
+
+`tests/replay-precision.ps1 -Plan` previews a finite generated-media route.
+`-Prepare` freezes the built consumer/SDK/managed-engine/harness hashes in an
+ignored plan, without launching media. `-Run` requires that unchanged plan and
+a fresh ignored output root. Short mode admits at most45 owned children in 600 s;
+windows mode admits 19 in 1800 s; clock mode admits 26 in 600 s for a nonzero
+epoch, excluded startup and audio-on/video-only exports; rates mode admits 117 in 600 s for 30/60/120 FPS
+across all three codecs. Each retains an 8 GB evidence cap across retained
+sibling attempts and 20 GB
+caller-free floor, bounded child output/deadlines and owned-process receipts.
+It generates 320x192/24 FPS absolute picture IDs with complementary rows and a
+synthetic tone, then exercises real replay snapshots, exact export, runtime
+full decode, final publication and independent whole-file pixel-ID decoding
+with MP4 edits ignored. No devices, desktop/system-audio/microphone capture,
+audio playback, UI, shortcut, user profile/startup, NVIDIA preference, engine
+installation/download or calibration activation runs. Failed attempts remain;
+no automatic retries. These generated checks do not qualify live acquisition,
+storage calibration, ordinary-worker latency or the supported hardware matrix.
+
 `F10Recorder.WorkerChecks --replay-retirement <fresh-root>` exercises the real
 supervisor retirement method with tiny nonmedia files and an isolated account
 authority. The production supervisor stays paused. A controlled export thread

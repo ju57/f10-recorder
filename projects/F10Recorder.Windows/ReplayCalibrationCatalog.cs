@@ -35,7 +35,9 @@ internal sealed record ReplayCalibrationSourceReceipt(string Label, string Acqui
     bool ReferenceAudioFormat, bool NonSilentAudio, bool SourceLineageVerified,
     double MaximumActiveGapMs, int[] SourcePictureIds, string[] SourcePictureHashes, double AudioRmsDb,
     int VideoWidth, int VideoHeight, int AudioSampleRate, int AudioChannels,
-    long? CapturePollGrowthBytes = null, long? CaptureStopGrowthBytes = null, string CaptureVolume = null);
+    long? CapturePollGrowthBytes = null, long? CaptureStopGrowthBytes = null, string CaptureVolume = null,
+    ReplayCalibrationProcessReceipt RuntimeValidation = null, string RuntimeValidationArgumentsHash = null,
+    double OutputStart = 0, double OutputEnd = 0);
 internal sealed record ReplayCalibrationReceipt(string Revision, string RecipeHash, string ExporterIdentity, string HostIdentity,
     ReplayReferenceModel Model, ReplayCalibrationSourceReceipt[] Sources, double MaximumActiveGapMs,
     string ObservationHash, string AdmissionHash, string ReceiptHash);
@@ -44,13 +46,14 @@ internal sealed record ReplayCalibrationReceipt(string Revision, string RecipeHa
 // loaded. No coefficient, empirical result or qualified receipt ships here.
 internal static class ReplayCalibrationCatalog
 {
+    internal static Func<ReplayCalibrationAvailability> CandidateForChecks;
     internal const string ReceiptRevision = "reference-qualification-v1";
     internal const string FileName = "reference-v1.json";
     internal const int MaximumBytes = 128 * 1024;
     // Versioned canonical numeric recipe. Changing any requirement invalidates
     // both model and qualification revisions. Capture/audio arguments additionally
     // belong to Scope; current managed-engine/Windows/Core hashes bind Exporter.
-    const string Recipe = "reference-bytes-v1|baseline=sum-selected-TS-EOF|residual=max(0,max(training-finalEOF-inputEOF))|guard=max(16MiB,ceil(base/20))|peakExtra=max(0,max(training-sampledPeak-round(finalEOF)))|peak=round(finalBytes)+peakExtra+round(max(16MiB,ceil(finalBytes/20)))|unit=actual-local-NTFS|duration=298..300.1|segments=298..305|inputBytes=1..1000000000|order=T01,T02,T03,H02,H01,H03|independent-acquisitions=6|sampleIntervalMs=100|maximumActiveGapMs=500|all-track-full-decode+source-lineage+non-silent-48kHz-stereo-audio+1920x1080-video|normal-producer-exits|heldout=zero-final-or-observed-peak-exceedances,no-refit|capture-poll=rolling500ms-positive-native-cache-growth|capture-stop=positive-native-cache-growth-through-confirmed-absence|capture-margin=training-max+max16MiB-or5percent-rounded-to-unit|open-tail=reserve-output-at-maximum-input-1000000000-and-snapshot-round1000000000-plus305units-plus64KiB-concat|close-and-rebind-before-copy-export|finite-empirical-reference-not-universal-bound";
+    const string Recipe = "reference-exact-bytes-v2|runtime-full-decode-index-clock-check|baseline=sum-selected-TS-EOF|residual=max(0,max(training-finalEOF-inputEOF))|guard=max(16MiB,ceil(base/20))|peakExtra=max(0,max(training-sampledPeak-round(finalEOF)))|peak=round(finalBytes)+peakExtra+round(max(16MiB,ceil(finalBytes/20)))|unit=actual-local-NTFS|output-duration=1..300|main-output=300|head-inclusive-input-span=output..output+1.1|segments=1..305|inputBytes=1..1000000000|order=T01,T02,T03,H02,H01,H03|independent-acquisitions=6|sampleIntervalMs=100|maximumActiveGapMs=500|all-track-full-decode+source-lineage+non-silent-48kHz-stereo-audio+1920x1080-video|normal-producer-exits|heldout=zero-final-or-observed-peak-exceedances,no-refit|capture-poll=rolling500ms-positive-native-cache-growth|capture-stop=positive-native-cache-growth-through-confirmed-absence|capture-margin=training-max+max16MiB-or5percent-rounded-to-unit|open-tail=reserve-output-at-maximum-input-1000000000-and-snapshot-round1000000000-plus305units-plus64KiB-concat|close-and-rebind-before-exact-reencode-and-validation|finite-empirical-reference-not-universal-bound";
     internal static readonly string RecipeHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Recipe)));
     // Native metadata only: no device context, probe, renderer or encoder starts.
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -104,7 +107,7 @@ internal static class ReplayCalibrationCatalog
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     static extern uint GetDriveType(string root);
 
-    internal static ReplayCalibrationAvailability Load() => LoadFrom(Path.Combine(TrustedStorage.DefaultRoot, "storage-calibration"));
+    internal static ReplayCalibrationAvailability Load() => CandidateForChecks?.Invoke() ?? LoadFrom(Path.Combine(TrustedStorage.DefaultRoot, "storage-calibration"));
 
     internal static ReplayCalibrationAvailability LoadFrom(string protectedDirectory, string hostIdentity = null)
     {
@@ -213,10 +216,13 @@ internal static class ReplayCalibrationCatalog
                 && source.InputBytes is >= 1 and <= 1_000_000_000 && source.FinalBytes > 0
                 && source.FinalAllocation >= source.FinalBytes && source.FinalAllocation % model.AllocationUnit == 0
                 && source.PeakAllocation >= source.FinalAllocation && source.PeakAllocation % model.AllocationUnit == 0
-                && double.IsFinite(source.ExportSeconds) && source.ExportSeconds is >= 298 and <= 300.1
+                && double.IsFinite(source.ExportSeconds) && Math.Abs(source.ExportSeconds - 300) <= 0.000001
+                && double.IsFinite(source.OutputStart) && double.IsFinite(source.OutputEnd) && source.OutputStart >= 0
+                && Math.Abs(source.OutputEnd - source.OutputStart - source.ExportSeconds) <= 0.000001
                 && source.SegmentCount is >= 298 and <= 305 && source.Closed && Gap(source.MaximumActiveGapMs)
                 && source.MaximumActiveGapMs <= receipt.MaximumActiveGapMs
                 && Process(source.Capture) && Process(source.Source) && Process(source.Export) && Process(source.Decode)
+                && Process(source.RuntimeValidation) && Hash(source.RuntimeValidationArgumentsHash)
                 && source.AllTracksDecoded && source.ReferenceVideoFormat && source.ReferenceAudioFormat
                 && source.NonSilentAudio && source.SourceLineageVerified
                 && source.VideoWidth == 1920 && source.VideoHeight == 1080 && source.AudioSampleRate == 48000 && source.AudioChannels == 2

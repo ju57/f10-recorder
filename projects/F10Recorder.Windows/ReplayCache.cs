@@ -6,12 +6,13 @@ namespace F10Recorder;
 
 internal readonly record struct ReplaySessionId(Guid Value);
 internal sealed record ReplaySessionInfo(string Directory, string Manifest, int ReplaySeconds,
-    int BitrateMbps, int FramesPerSecond, string Codec, string Extension, bool TimestampedAudio, bool RecordAudio);
+    int BitrateMbps, int FramesPerSecond, string Codec, string Extension, bool ExcludeInitialSegment, bool RecordAudio);
 
 // This seam supplies capture state and process lifetime, not save ordering.
 internal interface IReplaySessionSource : IDisposable
 {
     ReplaySessionInfo ReplayInfo { get; }
+    bool PreserveEvidence => false;
     bool Stopped { get; }
     string Diagnostics { get; }
     double SaveCutoffAt(long triggerTimestamp);
@@ -26,6 +27,8 @@ internal interface IReplaySessionSource : IDisposable
     bool OutputProducerStopped => false;
     ReplayProducerProof ProducerProof => null;
     ReplayOutputDemand EstimateOutput(ReplayOutputSelection selection) => ReplayOutputDemand.Unmeasured("Output/finalization calibration is not available for this source.");
+    ReplayValidation ValidateOutput(string path, ReplayInterval interval, Action<ReplayProducerProof> producerChanged, Action checkStorage)
+        => throw new IOException("Replay source does not support final MP4 validation.");
     void Export(IReadOnlyList<string> arguments, string snapshot);
     void Export(IReadOnlyList<string> arguments, string snapshot, Action<ReplayProducerProof> producerChanged) => Export(arguments, snapshot);
     void Export(IReadOnlyList<string> arguments, string snapshot, Action<ReplayProducerProof> producerChanged, Action checkStorage)
@@ -36,8 +39,9 @@ internal interface IReplaySessionSource : IDisposable
     }
 }
 
-internal sealed record ReplaySaveResult(bool Succeeded, string File, string Error, long Bytes, double Milliseconds);
-internal sealed record SaveSubmission(string Rejection, Task<ReplaySaveResult> Completion, ReplayOutputDemand AdmissionDemand = null)
+internal sealed record ReplaySaveResult(bool Succeeded, string File, string Error, long Bytes, double Milliseconds,
+    ReplayInterval Interval = null, ReplayValidation Validation = null);
+internal sealed record SaveSubmission(string Rejection, Task<ReplaySaveResult> Completion, ReplayOutputDemand AdmissionDemand = null, ReplayInterval Interval = null)
 {
     internal bool Accepted => Completion != null;
 }
@@ -136,7 +140,7 @@ internal sealed class ReplayCache : IDisposable
             if (closing) throw new InvalidOperationException("Replay cache is closing.");
             if (sessions.Values.Any(s => ReferenceEquals(s.Source, source))) throw new InvalidOperationException("Session already registered.");
             var id = new ReplaySessionId(Guid.NewGuid());
-            sessions.Add(id, new Session(source));
+            sessions.Add(id, new Session(source) { PreserveEvidence = source.PreserveEvidence });
             if (!saving && pendingOutput == null) outputDemand = source.OutputDemandStatus;
             return id;
         }
@@ -184,7 +188,8 @@ internal sealed class ReplayCache : IDisposable
     }
 
     string ConcatText(IReadOnlyList<Segment> selection, string extension) => string.Concat(selection.Select((s, i) =>
-        "file '" + i.ToString("D6") + extension + "'" + Environment.NewLine + "duration " + (s.End - s.Start).ToString("0.000000", CultureInfo.InvariantCulture) + Environment.NewLine));
+        "file '" + i.ToString("D6") + extension + "'" + Environment.NewLine + "duration " + (s.End - s.Start).ToString("0.000000", CultureInfo.InvariantCulture)
+            + Environment.NewLine + "inpoint " + s.Start.ToString("0.000000", CultureInfo.InvariantCulture) + Environment.NewLine));
 
     static long AllocationBytes(long length, long unit) => checked((length / unit + (length % unit == 0 ? 0 : 1)) * unit);
 
@@ -393,7 +398,7 @@ internal sealed class ReplayCache : IDisposable
         {
             var info = session.Info;
             var segments = session.Source.ReadSegments();
-            if (info.TimestampedAudio) segments.RemoveAll(s => Path.GetFileName(s.Path) == "chunk-000000000" + info.Extension);
+            if (info.ExcludeInitialSegment) segments.RemoveAll(s => Path.GetFileName(s.Path) == "chunk-000000000" + info.Extension);
             return segments;
         }
         catch (IOException) { return []; }
@@ -478,9 +483,11 @@ internal sealed class ReplayCache : IDisposable
             string partial = final + ".partial.mp4";
             var available = ReadSegments(session);
             string snapshot = Path.Combine(session.Info.Directory, "save-" + Guid.NewGuid().ToString("N"));
+            ReplayInterval intervalAtAdmission;
             try
             {
-                var selection = ReplaySelection.Select(available, end, session.Info.ReplaySeconds);
+                intervalAtAdmission = ReplayInterval.AtRequest(available, end, session.Info.ReplaySeconds);
+                var selection = ReplaySelection.Select(available, end, intervalAtAdmission.Seconds);
                 var plan = PlanSnapshot(selection, session.Info.Extension, snapshot, out var target);
                 var output = PlanOutput(session, selection, end, root, partial, available.Count > 0 && available[^1].End >= end, out var demand);
                 ReserveOpenSnapshot(plan, snapshot, target, output);
@@ -505,10 +512,10 @@ internal sealed class ReplayCache : IDisposable
                 ReplaySaveResult result;
                 try
                 {
-                    var saved = await SaveAsync(session, end, root, snapshot, final, partial).ConfigureAwait(false);
-                    result = new(true, saved.File, null, saved.Bytes, elapsed.Elapsed.TotalMilliseconds);
+                    var saved = await SaveAsync(session, intervalAtAdmission, root, snapshot, final, partial).ConfigureAwait(false);
+                    result = new(true, saved.File, null, saved.Bytes, elapsed.Elapsed.TotalMilliseconds, intervalAtAdmission, saved.Validation);
                 }
-                catch (Exception ex) { Report(ex.ToString()); result = new(false, null, ex.Message, 0, elapsed.Elapsed.TotalMilliseconds); }
+                catch (Exception ex) { Report(ex.ToString()); result = new(false, null, ex.Message, 0, elapsed.Elapsed.TotalMilliseconds, intervalAtAdmission); }
                 lock (gate)
                 {
                     lastSave = result;
@@ -520,7 +527,7 @@ internal sealed class ReplayCache : IDisposable
                     completion.SetResult(result);
                 }
             });
-            return new(null, completion.Task, outputDemand);
+            return new(null, completion.Task, outputDemand, intervalAtAdmission);
         }
     }
 
@@ -596,9 +603,10 @@ internal sealed class ReplayCache : IDisposable
         lock (gate) snapshotInventory?.Dispose();
     }
 
-    async Task<(string File, long Bytes)> SaveAsync(Session session, double end, string root, string snapshot, string final, string partial)
+    async Task<(string File, long Bytes, ReplayValidation Validation)> SaveAsync(Session session, ReplayInterval interval, string root, string snapshot, string final, string partial)
     {
         var info = session.Info;
+        double end = interval.End;
         bool retainEvidence = false;
         try
         {
@@ -618,8 +626,9 @@ internal sealed class ReplayCache : IDisposable
                         throw new OutputEvidenceInvalid("Capture stopped before the original requested replay endpoint; protected footage is retained.");
                     if (available.Count > 0 && available[^1].End >= end)
                     {
-                        selection = ReplaySelection.Select(available, end, info.ReplaySeconds);
+                        selection = ReplaySelection.Select(available, end, interval.Seconds);
                         if (selection.Count == 0) throw new IOException("No replay frames are available yet.");
+                        interval.RequireCoverage(selection);
                         session.PendingEnd = null;
                         selection = selection.Select(s => new Segment { Path = s.Path, Start = s.Start, End = s.End }).ToList();
                         foreach (var segment in selection) session.Pins.Add(segment.Path);
@@ -644,14 +653,22 @@ internal sealed class ReplayCache : IDisposable
             try
             {
                 // Slow copies never hold the cache lock. Pruning honors every pin.
+                long snapshotObserved = Stopwatch.GetTimestamp();
                 for (int i = 0; i < selection.Count; i++)
                 {
                     string copy = Path.Combine(snapshot, i.ToString("D6") + info.Extension);
-                    lock (gate) RequireKnownInputCapacity(pendingAllocations, snapshot, pendingTarget);
+                    if (i == 0 || Stopwatch.GetElapsedTime(snapshotObserved).TotalMilliseconds >= 200)
+                    {
+                        lock (gate) RequireKnownInputCapacity(pendingAllocations, snapshot, pendingTarget);
+                        snapshotObserved = Stopwatch.GetTimestamp();
+                    }
                     if (!files.TryHardLink(copy, originals[i]))
                     {
                         lock (gate)
                         {
+                            // Copy growth still needs a fresh observation before
+                            // every copy, including a failed hard-link fallback.
+                            RequireKnownInputCapacity(pendingAllocations, snapshot, pendingTarget);
                             var plan = new Dictionary<string, long>(pendingAllocations, StringComparer.OrdinalIgnoreCase);
                             plan[copy] = AllocationBytes(ReplayStorage.Validate(files.Observe(originals[i])).Length, pendingTarget.AllocationUnit);
                             var inventory = Inventory();
@@ -660,10 +677,14 @@ internal sealed class ReplayCache : IDisposable
                             pendingAllocations = plan;
                         }
                         files.Copy(originals[i], copy);
+                        lock (gate) RequireKnownInputCapacity(pendingAllocations, snapshot, pendingTarget);
+                        snapshotObserved = Stopwatch.GetTimestamp();
                     }
                     lock (gate)
                     {
-                        RequireKnownInputCapacity(pendingAllocations, snapshot, pendingTarget);
+                        // A successful hard link allocates no second payload.
+                        // Discharge its copy claim; periodic/final observations
+                        // still account real inventory and concurrent disk use.
                         pendingAllocations.Remove(copy);
                     }
                     selection[i].Path = copy;
@@ -682,15 +703,7 @@ internal sealed class ReplayCache : IDisposable
                 throw new OutputEvidenceInvalid("Replay concat metadata exceeds its reserved reference envelope.");
             File.WriteAllText(concat, concatText, new UTF8Encoding(false));
             lock (gate) pendingAllocations.Remove(concat);
-            var arguments = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-f", "concat", "-safe", "1", "-i", concat, "-t", (end - selection[0].Start).ToString("0.000000", CultureInfo.InvariantCulture), "-c", "copy", "-avoid_negative_ts", "make_zero", "-movflags", "+faststart", "-map", "0:v:0" };
-            if (info.RecordAudio) arguments.AddRange(["-map", "0:a:0"]);
-            if (info.Codec == "hevc_nvenc") arguments.AddRange(["-tag:v", "hvc1"]);
-            if (info.Codec == "av1_nvenc")
-            {
-                string interval = "1/(" + info.FramesPerSecond + "*TB)";
-                arguments.AddRange(["-bsf:v", "setts=time_base=1/48000:prescale=1:pts=STARTPTS+N*" + interval + ":dts=STARTDTS+N*" + interval + ":duration=" + interval, "-video_track_timescale", "48000"]);
-            }
-            arguments.Add(partial);
+            var arguments = ReplayExactExport.Arguments(info, interval, selection[0].Start, concat, partial);
             try
             {
                 lock (gate)
@@ -721,16 +734,20 @@ internal sealed class ReplayCache : IDisposable
                         lastStorageCheck = Stopwatch.GetTimestamp();
                     }
                 }
-                session.Source.Export(arguments, snapshot, proof =>
+                void ProducerChanged(ReplayProducerProof proof)
                 {
                     lock (gate)
                         if (volumeReservationHeld) volumeReservations.SetProducer(volumeReservationOwner, proof, acceptedWork: true);
-                }, CheckExportStorage);
+                }
+                session.Source.Export(arguments, snapshot, ProducerChanged, CheckExportStorage);
 
                 CheckExportStorage();
                 if (!PendingProducerStopped()) throw new IOException("Replay exporter cleanup is unconfirmed; output and inputs are retained.");
                 if (pendingOutput != null) lock (gate) RequireKnownInputCapacity(pendingAllocations, snapshot, pendingTarget);
                 if (!File.Exists(partial) || new FileInfo(partial).Length < 1000) throw new IOException("Replay save failed: output is missing or incomplete.");
+                var validation = session.Source.ValidateOutput(partial, interval, ProducerChanged, CheckExportStorage);
+                CheckExportStorage();
+                if (!PendingProducerStopped()) throw new IOException("Replay validator cleanup is unconfirmed; output and inputs are retained.");
                 long bytes = new FileInfo(partial).Length;
                 // Export/finalization is over. End durable growth ownership before
                 // rename/cleanup can remove paths another profile still validates.
@@ -742,7 +759,7 @@ internal sealed class ReplayCache : IDisposable
                 files.Publish(partial, final);
                 // Publication is the success point. Logging/cleanup must not reverse it.
                 Report("Saved " + final + "; requested end=" + end.ToString(CultureInfo.InvariantCulture));
-                return (final, bytes);
+                return (final, bytes, validation);
             }
             catch (Exception ex) when (ex is OutputEvidenceInvalid || volumeReservationHeld && StorageFailure(ex))
             { retainEvidence = true; throw; }
@@ -758,7 +775,7 @@ internal sealed class ReplayCache : IDisposable
         }
         // Inventory and removal own the same namespace. Export and copying have
         // already finished; no task/resource wait occurs while holding the gate.
-        finally { lock (gate) if (!retainEvidence && PendingProducerStopped()) Cleanup(() => files.DeleteDirectory(snapshot), snapshot); }
+        finally { lock (gate) if (!retainEvidence && !session.PreserveEvidence && PendingProducerStopped()) Cleanup(() => files.DeleteDirectory(snapshot), snapshot); }
     }
 
     void Cleanup(Action action, string path)

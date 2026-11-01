@@ -46,7 +46,10 @@ internal static class ReplayManifestStreamChecks
             Require(segments.Select(s => s.Start).SequenceEqual(new[] { 2d, 3d, 4d }) && segments[^1].End == 5,
                 "Completed list did not retain the newest bounded entries.");
             Require(!File.Exists(Path.Combine(path, "segments.csv.tmp")), "Published list left a temporary file.");
-            Require(ReplaySelection.Select(segments, 4.5, 2).All(s => s.Start >= 2.5), "Production keyframe selection changed.");
+            var selected = ReplaySelection.Select(segments, 4.5, 2);
+            Require(selected.Select(s => s.Start).SequenceEqual(new[] { 2d, 3d, 4d })
+                && selected[0].Start <= 2.5 && selected[^1].End >= 4.5,
+                "Exact export lost the partial head segment or requested endpoint.");
         });
         Check("publisher-waits-for-named-reader", path =>
         {

@@ -120,7 +120,17 @@ internal sealed class RecorderHost : IWindowsRecorder
         current.CaptureStatusChanged += () => Dispatch(() => PresentCaptureStatus(current.ReadCaptureStatus()));
         PresentCaptureStatus(current.ReadCaptureStatus());
         engine.SaveStarted += () => Dispatch(notices.SaveStarted);
-        engine.SaveFinished += (message, success) => Dispatch(() => { notices.SaveFinished(message, success); Saved?.Invoke(message, success); Changed?.Invoke(); });
+        engine.SaveRejected += (message, success) =>
+        {
+            Dispatch(() => { notices.SaveFinished(message, success); Saved?.Invoke(message, success); Changed?.Invoke(); });
+        };
+        engine.SaveCompleted += result =>
+        {
+            var savedMetrics = new RecorderMetrics { LastSaveAvailableSeconds = result.Interval?.Seconds ?? 0,
+                LastSaveRequestedSeconds = result.Interval?.RequestedSeconds ?? 0, LastSaveLimitedHistory = result.Interval?.LimitedHistory ?? false };
+            string message = result.Succeeded ? result.File : result.Error;
+            Dispatch(() => { notices.SaveFinished(message, result.Succeeded, savedMetrics); Saved?.Invoke(message, result.Succeeded); Changed?.Invoke(); });
+        };
     }
     void PresentCaptureStatus(CaptureStatus status)
         => PresentCaptureStatus(status, Metrics, engine?.StorageHeld == true, engine?.Paused ?? Paused);
@@ -146,7 +156,19 @@ internal sealed class RecorderHost : IWindowsRecorder
         Changed?.Invoke();
     }
     public void SampleForeground() => foreground.Sample();
-    public void SaveReplay() { if (!Applying && !disposed) { if (engine == null) throw new InvalidOperationException(ProfileStatus.Message); engine.Save(Config.CaptureMode == "window" ? ApplicationName : foreground.Sample()); } }
+    public void SaveReplay()
+    {
+        // Local shortcuts use ShortcutAction's visible rejection handling.
+        // RPC callers receive the explicit admission result instead.
+        if (!Applying && !disposed && engine == null) throw new InvalidOperationException(ProfileStatus.Message);
+        SubmitReplay();
+    }
+    internal SaveSubmission SubmitReplay()
+    {
+        if (Applying || disposed) return new("Wait for the current recorder operation.", null);
+        if (engine == null) return new(ProfileStatus.Message, null);
+        return engine.SubmitSave(Config.CaptureMode == "window" ? ApplicationName : foreground.Sample());
+    }
     public void Pause(bool value)
     {
         if (Applying || disposed) return;

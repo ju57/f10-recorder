@@ -35,5 +35,11 @@ namespace F10Recorder
         public double LastSaveMilliseconds;
         public long LastSaveBytes;
         public bool LastSaveSucceeded;
+        public string ReplaySaveState = "None";
+        public double LastSaveRequestedSeconds, LastSaveAvailableSeconds, LastSaveStart, LastSaveEnd;
+        public bool LastSaveLimitedHistory;
+        public string LastSaveValidation;
+        public long LastSaveDecodedFrames;
+        public double LastSaveValidationMilliseconds;
     }
 }

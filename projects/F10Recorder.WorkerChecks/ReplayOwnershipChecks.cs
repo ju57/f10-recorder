@@ -44,6 +44,8 @@ internal static class ReplayOwnershipChecks
         public string OutputDemandIdentity => ExporterIdentity;
         internal bool ProducerAbsent = true;
         public bool OutputProducerStopped => ProducerAbsent; // Controlled ownership observation; no actual media process.
+        public ReplayValidation ValidateOutput(string path, ReplayInterval interval, Action<ReplayProducerProof> changed, Action check)
+            => new("ControlledNonmedia", (long)Math.Round(interval.Seconds * ReplayInfo.FramesPerSecond), 0);
         public ReplayOutputDemand EstimateOutput(ReplayOutputSelection selection) => OutputEstimate?.Invoke(selection)
             ?? ReplayOutputDemand.Unmeasured("Controlled source has no qualified estimate.");
 
@@ -699,9 +701,9 @@ internal static class ReplayOwnershipChecks
         {
             foreach (bool enough in new[] { true, false })
             {
-                using var f = new Fixture(Path.Combine(path, enough ? "equal637" : "short636"));
+                using var f = new Fixture(Path.Combine(path, enough ? "equal655" : "short654"));
                 f.Source.Segments(0, 1);
-                long available = 1037;
+                long available = 1055;
                 bool copying = false;
                 f.Files.CapacityObservation = _ => new("volume-V", 1, available);
                 f.Files.BeforeCopy = (_, _) => copying = true;
@@ -710,16 +712,16 @@ internal static class ReplayOwnershipChecks
                     if (Path.GetFileName(p) == "000000.ts")
                     {
                         Require(copying, "Snapshot was observed before copy setup.");
-                        available = enough ? 637 : 636; // Post-materialization free, set by inventory BEFORE capacity.
+                        available = enough ? 655 : 654; // Post-materialization free, set by inventory BEFORE capacity.
                         return new("volume-V", p, 400, 1000, 1);
                     }
                     return new("volume-V", p, 0, Path.GetFileName(p).StartsWith("chunk-") ? 1000 : new FileInfo(p).Length, 1);
                 };
                 var result = await Finish(f.Save(1));
                 Require(result.Succeeded == enough && f.Files.Copies == 1 && f.Source.ExportCount == (enough ? 1 : 0),
-                    "Remaining600 + exact concat37 must fit637, reject636, without crediting materialization against pre-write free.");
-                if (enough) Require(Encoding.UTF8.GetByteCount(string.Join(Environment.NewLine, f.Source.Concat) + Environment.NewLine) == 37,
-                    "The prospectively specified Windows one-input concat fixture must be37 bytes.");
+                    "Remaining600 + exact concat55 must fit655, reject654, without crediting materialization against pre-write free.");
+                if (enough) Require(Encoding.UTF8.GetByteCount(string.Join(Environment.NewLine, f.Source.Concat) + Environment.NewLine) == 55,
+                    "The Windows one-input concat including its explicit inpoint must be55 bytes.");
             }
         });
 
@@ -1273,8 +1275,8 @@ internal static class ReplayOwnershipChecks
                 // A later explicit request may use a completed endpoint. It is
                 // a new request, never a silent shortening of the first one.
                 Require((await Finish(f.Save(2))).Succeeded, "Stopped completed footage was no longer explicitly savable.");
-                int trim = Array.IndexOf(f.Source.Arguments, "-t");
-                Require(f.Source.Arguments[trim + 1] == "2.000000", "Explicit completed-endpoint request changed its endpoint.");
+                int trim = Array.IndexOf(f.Source.Arguments, "-vf");
+                Require(f.Source.Arguments[trim + 1].Contains("trim=start=0:end=2,"), "Explicit completed-endpoint request changed its endpoint.");
             }
             finally { resume.TrySetResult(); }
         });
@@ -1292,8 +1294,8 @@ internal static class ReplayOwnershipChecks
                 await f.Source.StopEntered.Task.WaitAsync(Deadline);
                 Require(!f.Source.Disposed && !retirement.IsCompleted, "Retirement removed waiting save inputs.");
                 resume.SetResult(); Require((await Finish(save)).Succeeded, "Accepted waiting save did not finish.");
-                int trim = Array.IndexOf(f.Source.Arguments, "-t");
-                Require(f.Source.Arguments[trim + 1] == "4.000000", "Retirement shortened the accepted request.");
+                int trim = Array.IndexOf(f.Source.Arguments, "-vf");
+                Require(f.Source.Arguments[trim + 1].Contains("trim=start=0:end=4,"), "Retirement shortened the accepted request.");
                 await retirement.WaitAsync(Deadline);
             }
             finally { resume.TrySetResult(); }
@@ -1375,8 +1377,8 @@ internal static class ReplayOwnershipChecks
             Require(f.Source.SaveCutoffAt(f.Source.Trigger(50)) == 1.5, "A later stop moved the first cutoff.");
             Require(f.Source.SaveCutoffAt(f.Source.Trigger(1)) == 1, "Stop changed an earlier trigger.");
             Require((await Finish(f.Save(20))).Succeeded, "First-stop save failed.");
-            int trim = Array.IndexOf(f.Source.Arguments, "-t");
-            Require(f.Source.Arguments[trim + 1] == "1.500000", "First-stop cutoff did not reach export.");
+            int trim = Array.IndexOf(f.Source.Arguments, "-vf");
+            Require(f.Source.Arguments[trim + 1].Contains("trim=start=0:end=1.5,"), "First-stop cutoff did not reach export.");
         });
 
         await Check("monitor-application-sequence", async path =>
@@ -1403,7 +1405,7 @@ internal static class ReplayOwnershipChecks
                 Require(File.Exists(f.Source.Chunk(999999999)), "Pruning removed a newer unlisted chunk.");
                 Require(f.Source.Arguments.Contains("0:a:0") && f.Source.Arguments.Contains("+faststart"), "Audio map or MP4 finalization missing.");
                 Require(f.Source.Arguments.Contains("hvc1") == (codec == "hevc_nvenc"), "HEVC tag changed.");
-                Require(f.Source.Arguments.Any(s => s.Contains("setts=time_base=1/48000")) == (codec == "av1_nvenc"), "AV1 clock restoration changed.");
+                Require(f.Source.Arguments.Contains(codec) && f.Source.Arguments.Contains("passthrough") && !f.Source.Arguments.Contains("copy"), "Precise export must encode actual trimmed frames without CFR padding.");
                 Require(!Directory.GetFiles(f.Destination, "*.partial.mp4").Any(), "Successful save left a partial output.");
             });
 
@@ -1443,18 +1445,18 @@ internal static class ReplayOwnershipChecks
             File.WriteAllText(f.Source.ReplayInfo.Manifest,
                 Path.GetFileName(f.Source.Chunk(0)) + ",0.25,1.5\n" + Path.GetFileName(f.Source.Chunk(1)) + ",1.5,2.75\n");
             Require((await Finish(f.Save(2.5))).Succeeded, "Fractional-boundary export failed.");
-            Require(f.Source.Concat[1] == "duration 1.250000" && f.Source.Concat[3] == "duration 1.250000", "Concat used container probes instead of manifest boundaries.");
-            int trim = Array.IndexOf(f.Source.Arguments, "-t");
-            Require(f.Source.Arguments[trim + 1] == "2.250000", "Trigger trim ignored the selected keyframe start.");
+            Require(f.Source.Concat[1] == "duration 1.250000" && f.Source.Concat[4] == "duration 1.250000", "Concat used container probes instead of manifest boundaries.");
+            int trim = Array.IndexOf(f.Source.Arguments, "-vf");
+            Require(f.Source.Arguments[trim + 1].Contains("trim=start=0.25:end=2.5,"), "Trigger trim ignored the selected keyframe start.");
         });
 
-        await Check("keyframe-start-and-window", async path =>
+        await Check("exact-head-and-window", async path =>
         {
             using var f = new Fixture(path); f.Source.Segments(0, 64);
             Require((await Finish(f.Save(62.5))).Succeeded, "Keyframe selection failed.");
-            Require(f.Source.Contents.StartsWith("picture-3|") && f.Source.Contents.EndsWith("|picture-62"), "Replay did not start on the first keyframe after the window start.");
-            int trim = Array.IndexOf(f.Source.Arguments, "-t");
-            Require(f.Source.Arguments[trim + 1] == "59.500000", "Replay length or frozen fractional end changed.");
+            Require(f.Source.Contents.StartsWith("picture-2|") && f.Source.Contents.EndsWith("|picture-62"), "Replay did not retain the preceding head for exact trimming.");
+            int trim = Array.IndexOf(f.Source.Arguments, "-vf");
+            Require(f.Source.Arguments[trim + 1].Contains("trim=start=2.5:end=62.5,"), "Replay length or frozen fractional end changed.");
         });
 
         await Check("throwing-notification-observers", async path =>

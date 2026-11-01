@@ -8,6 +8,8 @@ internal static class ReplayExportSnapshotChecks
 {
     sealed class Source : IReplaySessionSource
     {
+        public ReplayValidation ValidateOutput(string path, ReplayInterval interval, Action<ReplayProducerProof> changed, Action check)
+            => new("ControlledNonmedia", 0, 0);
         readonly IReplaySessionSource backend;
         readonly ReplayReferenceModel model;
         readonly List<Segment> segments = [];

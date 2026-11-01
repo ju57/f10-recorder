@@ -16,6 +16,7 @@ catch (Exception ex)
 }
 if (args.Contains("--profile-only")) return;
 PortableReplayStorageSafetyChecks.Run();
+ReplayPrecisionSelectionChecks.Run();
 void Require(bool condition, string message) { if (!condition) throw new Exception(message); }
 var preferences = new Settings { OutputDirectory = Path.Combine(data, "clips", "..", "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots") };
 preferences.Validate();
@@ -35,7 +36,7 @@ foreach (var invalid in new[] {
 Console.WriteLine("Passed: direct portable preference validation and path normalization without a recording engine.");
 var segments = Enumerable.Range(0, 12).Select(i => new Segment { Path = i + ".ts", Start = i, End = i + 1 }).ToList();
 var selected = ReplaySelection.Select(segments, 9.4, 5);
-Require(selected.Select(s => s.Start).SequenceEqual(new double[] { 5, 6, 7, 8, 9 }), "Replay selection must start on a full keyframe interval and exclude future footage.");
+Require(selected.Select(s => s.Start).SequenceEqual(new double[] { 4, 5, 6, 7, 8, 9 }), "Replay selection must retain the partial head for exact trimming and exclude future footage.");
 string manifest = Path.Combine(data, "segments.csv"); File.WriteAllText(manifest, "\"chunk,quoted.ts\",0,1\nchunk-2.ts,1,2");
 Require(ReplaySelection.Read(manifest, data).Count == 1, "An unfinished manifest line must not be saved.");
 File.WriteAllText(manifest, "../outside.ts,0,1\n"); bool traversalRejected = false;
@@ -100,7 +101,7 @@ Require(utcStep.PositionAt(triggerQpc) == cutoff, "A later UTC clock step must n
 var fullSegments = Enumerable.Range(0, 352).Select(i => new Segment { Path = i + ".ts", Start = i, End = i + 1 }).ToList();
 double fullEnd = saveClock.PositionAt(saveEpoch.QpcEpoch + 3_503_000_000);
 var fullSelection = ReplaySelection.Select(fullSegments, fullEnd, 300);
-Require(fullSelection.First().Start == 51 && fullSelection.Last().Start == 350 && fullEnd - fullSelection.First().Start > 299 && fullEnd - fullSelection.First().Start <= 300, "A five-minute cutoff must preserve the one-keyframe start policy and the requested media endpoint.");
+Require(fullSelection.First().Start == 50 && fullSelection.Last().Start == 350 && fullEnd - fullSelection.First().Start >= 300 && fullEnd - fullSelection.First().Start < 301, "A five-minute cutoff must retain the preceding head and the requested media endpoint.");
 saveClock.StopAt(triggerQpc);
 Parallel.For(1, 20, i => saveClock.StopAt(triggerQpc + i * 10_000_000));
 Require(saveClock.PositionAt(triggerQpc + 9_000_000_000) == cutoff, "Retained stopped footage must freeze at the first stop request.");

@@ -30,13 +30,28 @@ $nonce = [guid]::NewGuid().ToString('N')
 $stdout = Join-Path $directory ("controller-$nonce.stdout.txt")
 $stderr = Join-Path $directory ("controller-$nonce.stderr.txt")
 $timer = [Diagnostics.Stopwatch]::StartNew()
+$absoluteDeadline = if ($plan.nativePhase.resumeStartedUtc) {
+    $resume = ([datetime]$plan.nativePhase.resumeStartedUtc).ToUniversalTime()
+    $deadline = ([datetime]$plan.nativePhase.absoluteDeadlineUtc).ToUniversalTime()
+    $freshSeconds = if ($plan.plan.MaximumChildren -eq 151) { 7200 } elseif ($plan.plan.MaximumChildren -eq 147) { 6300 } elseif ($plan.plan.MaximumChildren -in @(137,141,145)) { 5400 } else { 3600 }
+    if ($deadline -ne $resume.AddSeconds($freshSeconds) -or $plan.nativePhase.priorElapsedSeconds -ne 10120 -or $plan.plan.DeadlineSeconds -ne (10120+$freshSeconds)) {
+        throw 'Resumed phase must preserve prior time, original resume instant and declared absolute deadline'
+    }
+    $deadline
+} elseif ($plan.nativePhase) { ([datetime]$plan.nativePhase.startedUtc).ToUniversalTime().AddSeconds($plan.plan.DeadlineSeconds) } else { [datetime]::UtcNow.AddSeconds($plan.plan.DeadlineSeconds - $plan.plan.RetainedElapsedSeconds) }
+if ($plan.nativePhase.resumeStartedUtc) {
+    $remaining = if ($plan.plan.MaximumChildren -in @(145,147,151) -and $plan.plan.ExactHeldoutContinuationRoot) { 960 } elseif ($plan.plan.MaximumChildren -eq 141 -and $plan.plan.ExactHeldoutContinuationRoot) { 1200 } elseif ($plan.plan.UserForegroundHandoff -and $plan.plan.MaximumChildren -in @(125,129,137)) { 2340 } else { 2160 }
+    if ($plan.nativePhase.conservativeRemainingSeconds -ne $remaining -or [datetime]::UtcNow -ge $absoluteDeadline.AddSeconds(-$remaining)) {
+        throw 'Complete resumed native schedule no longer fits; no controller launched'
+    }
+}
 $owned = $null
 try {
     $quoted = $arguments | ForEach-Object { if ($_ -match '"') { throw 'Quotes unsupported in reviewed launcher arguments' }; '"' + $_ + '"' }
     $owned = Start-Process -FilePath $Sdk -ArgumentList $quoted -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     $pidOwned = $owned.Id; $started = $owned.StartTime.ToUniversalTime()
     while (-not $owned.WaitForExit(1000)) {
-        if ($timer.Elapsed.TotalSeconds -gt ($plan.plan.DeadlineSeconds - $plan.plan.RetainedElapsedSeconds + 10)) { throw 'Outer calibration deadline exceeded' }
+        if ([datetime]::UtcNow -gt $absoluteDeadline.AddSeconds(-5)) { throw 'Outer calibration deadline reached; five-second owned cleanup reserve remains' }
         $bytes = (Get-Item -LiteralPath $stdout).Length + (Get-Item -LiteralPath $stderr).Length
         if ($bytes -gt 131072) { throw 'Controller diagnostics exceeded128KiB' }
     }

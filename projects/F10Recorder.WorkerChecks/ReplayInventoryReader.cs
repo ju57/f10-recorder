@@ -9,8 +9,20 @@ internal class ReplayInventoryReader : ReplayFiles, IDisposable
 {
     readonly List<string> roots;
     readonly Func<string, bool> mayRetain;
-    internal ReplayInventoryReader(IEnumerable<string> metadataHandleRoots, Func<string, bool> mayRetain = null)
-    { roots = metadataHandleRoots.Select(r => Path.GetFullPath(r).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar).ToList(); this.mayRetain = mayRetain; }
+    readonly bool reuseRenamedOutputs;
+    internal Action<string, string, double> OperationTimed;
+    internal Action<string, ReplayFileExtent> OutputObserved;
+    internal ReplayInventoryReader(IEnumerable<string> metadataHandleRoots, Func<string, bool> mayRetain = null, bool reuseRenamedOutputs = false)
+    { roots = metadataHandleRoots.Select(r => Path.GetFullPath(r).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar).ToList(); this.mayRetain = mayRetain; this.reuseRenamedOutputs = reuseRenamedOutputs; }
+    T Timed<T>(string path, string operation, Func<T> action)
+    {
+        long at = System.Diagnostics.Stopwatch.GetTimestamp();
+        try { return action(); }
+        finally { if (path.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)) OperationTimed?.Invoke(path, operation, System.Diagnostics.Stopwatch.GetElapsedTime(at).TotalMilliseconds); }
+    }
+    void Close(string path, Entry entry) => Timed(path, "close", () => { entry.Handle.Dispose(); return true; });
+    ReplayFileExtent Report(string path, ReplayFileExtent extent)
+    { if (path.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)) OutputObserved?.Invoke(path, extent); return extent; }
     internal bool Retains(string path) => handles.ContainsKey(path);
     internal void RetainHandlesUnder(string root)
     {
@@ -27,37 +39,51 @@ internal class ReplayInventoryReader : ReplayFiles, IDisposable
     internal void EndScan()
     {
         foreach (string path in handles.Keys.Where(p => !seen.Contains(p)).ToArray())
-        { handles[path].Handle.Dispose(); handles.Remove(path); }
+        { Close(path, handles[path]); handles.Remove(path); }
     }
     internal override ReplayFileExtent ObserveInventory(string path, ReplayFileExtent enumerated)
     {
         string full = Path.GetFullPath(path);
         if (!roots.Any(r => full.StartsWith(r, StringComparison.OrdinalIgnoreCase)) || mayRetain?.Invoke(path) == false)
         {
-            if (handles.Remove(path, out var old)) old.Handle.Dispose();
-            OpenCount++; return base.ObserveInventory(path, enumerated);
+            if (handles.Remove(path, out var old)) Close(path, old);
+            var handle = Timed(path, "open", () => ReplayStorage.OpenInventory(path)); OpenCount++;
+            try { return Report(path, Timed(path, "observe", () => ReplayStorage.ObserveInventory(handle, enumerated))); }
+            finally { Timed(path, "close", () => { handle.Dispose(); return true; }); }
         }
         if (handles.TryGetValue(path, out var previous)
             && (!previous.Established.Volume.Equals(enumerated.Volume, StringComparison.OrdinalIgnoreCase)
                 || previous.Established.Identity != enumerated.Identity || previous.Established.AllocationUnit != enumerated.AllocationUnit))
-        { previous.Handle.Dispose(); handles.Remove(path); }
+        { Close(path, previous); handles.Remove(path); }
+        if (!handles.ContainsKey(path) && reuseRenamedOutputs && path.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase))
+        {
+            var alias = handles.FirstOrDefault(item => !seen.Contains(item.Key) && item.Key.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)
+                && item.Value.Established.Volume == enumerated.Volume && item.Value.Established.Identity == enumerated.Identity
+                && item.Value.Established.AllocationUnit == enumerated.AllocationUnit);
+            if (alias.Key != null) { handles.Remove(alias.Key); handles.Add(path, alias.Value); }
+        }
         if (!handles.TryGetValue(path, out var entry))
         {
-            var handle = ReplayStorage.OpenInventory(path); OpenCount++;
+            var handle = Timed(path, "open", () => ReplayStorage.OpenInventory(path)); OpenCount++;
             try
             {
-                var observed = ReplayStorage.ObserveInventory(handle, enumerated);
-                handles.Add(path, new(handle, observed)); seen.Add(path); return observed;
+                var observed = Timed(path, "observe", () => ReplayStorage.ObserveInventory(handle, enumerated));
+                handles.Add(path, new(handle, observed)); seen.Add(path); return Report(path, observed);
             }
-            catch { handle.Dispose(); throw; }
+            catch { Timed(path, "close", () => { handle.Dispose(); return true; }); throw; }
         }
         seen.Add(path);
-        return ReplayStorage.RefreshInventoryAllocation(entry.Handle, entry.Established);
+        return Report(path, Timed(path, "refresh", () => ReplayStorage.RefreshInventoryAllocation(entry.Handle, entry.Established)));
     }
     internal void ReleaseHandles()
     {
-        foreach (var entry in handles.Values) entry.Handle.Dispose();
+        foreach (var entry in handles) Close(entry.Key, entry.Value);
         handles.Clear(); seen.Clear();
+    }
+    internal void ReleaseOutputHandles()
+    {
+        foreach (string path in handles.Keys.Where(p => p.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)).ToArray())
+        { Close(path, handles[path]); handles.Remove(path); }
     }
     public void Dispose() => ReleaseHandles();
 }

@@ -87,12 +87,18 @@ internal sealed class WorkerReply
     public string Error;
     public WorkerStatus Status;
     public RecordingEngineCapabilities Capabilities;
+    // Admission only. Saved is reported later, after validation and rename.
+    public bool? ReplayAccepted;
+    public string ReplayRejection;
+    public bool? ReplayAdmissionCoversOpenTail;
+    public long? ReplayAdmissionSnapshotPeakBytes;
+    public double? ReplayRequestStart, ReplayRequestEnd, ReplayRequestedSeconds;
 }
 internal sealed class WorkerProtocolMismatchException(string message) : IOException(message);
 
 internal static class WorkerProtocol
 {
-    internal const int Version = 6;
+    internal const int Version = 7;
     internal static bool WasStopped(string data)
     {
         try { var profile = RecordingProfile.Load(data); return profile.State.UserStopped || !profile.Status.CanWrite; }

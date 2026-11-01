@@ -30,6 +30,8 @@ internal static class ReplayCalibrationRehearsal
     }
     sealed class DummySource(string session, int seconds, double cutoff, Action<IReadOnlyList<string>, string> export, int bitrate = 20) : IReplaySessionSource
     {
+        public ReplayValidation ValidateOutput(string path, ReplayInterval interval, Action<ReplayProducerProof> changed, Action check)
+            => new("ControlledNonmedia", 0, 0);
         public ReplaySessionInfo ReplayInfo => new(session, Path.Combine(session, "segments.csv"), seconds, bitrate, 60, "h264_nvenc", ".ts", false, true);
         public bool Stopped { get; private set; }
         public string Diagnostics => "Nonmedia fixed-length producer; not encoded video.";

@@ -62,7 +62,8 @@ internal static class ReplayCalibrationCatalogChecks
                 true, true, true, true, true, 100,
                 label.EndsWith('1') ? Enumerable.Repeat((label.StartsWith('T') ? 13579 : 24680) * 256, 3).ToArray()
                     : new[] { 1, 2, 3 }.Select(n => (label.StartsWith('T') ? 13579 : 24680) * 256 + n).ToArray(),
-                [Hash(label + "-picture-1"), Hash(label + "-picture-2"), Hash(label + "-picture-3")], -20, 1920, 1080, 48000, 2)).ToArray();
+                [Hash(label + "-picture-1"), Hash(label + "-picture-2"), Hash(label + "-picture-3")], -20, 1920, 1080, 48000, 2,
+                RuntimeValidation: Process(label + "-runtime-validation"), RuntimeValidationArgumentsHash: Hash("runtime-validator-args"), OutputStart: 0, OutputEnd: 300)).ToArray();
         string[] training = sources.Take(3).Select(s => s.SampleHash).ToArray();
         var model = new ReplayReferenceModel(Revision(scope, volume.Volume, 4096, 1234, 8192, training),
             scope, volume.Volume, 4096, 1234, 8192, training);
@@ -213,7 +214,7 @@ internal static class ReplayCalibrationCatalogChecks
             "Loaded model must reach real Estimate seam with literal rounded estimate."); cases.Add("loaded-model-real-estimate");
         Require(admitted.Estimate(selection with { Closed = false }, admitted.Scope, inputs).Kind == ReplayOutputEvidenceKind.Unmeasured,
             "An open flag without an unfinished tail must not receive envelope evidence."); cases.Add("loaded-model-invalid-open-tail-unmeasured");
-        var open = selection with { End = 300.5, Closed = false, Inputs = selectionInputs.Skip(1).ToArray() };
+        var open = selection with { Start = .5, End = 300.5, Closed = false, Inputs = selectionInputs.ToArray() };
         var openDemand = admitted.Estimate(open, admitted.Scope, inputs);
         Require(openDemand.CoversOpenTail && openDemand.Kind == ReplayOutputEvidenceKind.CalibratedEstimate
             && openDemand.PeakAllocatedBytes == admitted.PeakBytes(1_000_000_000)

@@ -27,6 +27,9 @@ internal static class MigrationChecks
     static int Main(string[] args)
     {
         data = args[0];
+        if (args.Length == 2 && args[1] == "--replay-action-checks") return ReplayActionChecks.Run(Path.GetFullPath(data));
+        if (args.Any(a => a.StartsWith("--replay-notice-ui", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 2 && args[1] == "--replay-notice-ui" ? ReplayNoticeChecks.Run(Path.GetFullPath(data)) : 2;
         if (args.Any(a => a.StartsWith("--storage-notice-ui", StringComparison.OrdinalIgnoreCase)))
             return args.Length == 2 && args[1] == "--storage-notice-ui" ? StorageNoticeChecks.Run(Path.GetFullPath(data)) : 2;
         Directory.CreateDirectory(data);

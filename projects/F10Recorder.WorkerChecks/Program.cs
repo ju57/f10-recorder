@@ -22,6 +22,8 @@ internal static class WorkerChecks
     [STAThread]
     internal static int Main(string[] args)
     {
+        if (args.Any(a => a.StartsWith("--replay-precision", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 3 && args[0] == "--replay-precision" ? ReplayPrecisionChecks.Run(Path.GetFullPath(args[1]), args[2]) : 2;
         if (args.Any(a => a.StartsWith("--replay-storage-host-resume", StringComparison.OrdinalIgnoreCase)))
             return args.Length == 2 && args[0] == "--replay-storage-host-resume"
                 ? ReplayStorageHostResumeChecks.Run(Path.GetFullPath(args[1])) : 2;
@@ -62,6 +64,20 @@ internal static class WorkerChecks
             return args.Length == 2 && args[0] == "--replay-storage-races" ? ReplayStorageRaceChecks.Run(Path.GetFullPath(args[1])) : 2;
         if (args.Any(a => a.StartsWith("--replay-calibration", StringComparison.OrdinalIgnoreCase) || a.StartsWith("--calibration-fixture", StringComparison.OrdinalIgnoreCase)))
         {
+            if (args.Length == 3 && args[0] == "--replay-calibration-output-metadata") return ReplayCalibrationRun.OutputMetadataChecks(Path.GetFullPath(args[1]), args[2]);
+            if (args.Length == 3 && args[0] == "--replay-calibration-closed-validation") return ReplayCalibrationRun.ClosedValidationChecks(Path.GetFullPath(args[1]), args[2]);
+            if (args.Length == 3 && args[0] == "--replay-calibration-captured-transition") return ReplayCalibrationRun.CapturedTransitionChecks(Path.GetFullPath(args[1]), args[2]);
+            if (args.Length == 4 && args[0] == "--replay-calibration-issue14-prepare") return ReplayCalibrationRun.PrepareIssue14(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]));
+            if (args.Length == 5 && args[0] == "--replay-calibration-issue14-prepare") return ReplayCalibrationRun.PrepareIssue14(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]), Path.GetFullPath(args[4]));
+            if (args.Length == 5 && args[0] == "--replay-calibration-issue14-correction-prepare") return ReplayCalibrationRun.PrepareIssue14(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]), Path.GetFullPath(args[4]), corrected: true);
+            if (args.Length == 5 && args[0] == "--replay-calibration-issue14-lease-prepare") return ReplayCalibrationRun.PrepareIssue14(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]), Path.GetFullPath(args[4]), corrected: true, leased: true);
+            if (args.Length == 5 && args[0] == "--replay-calibration-issue14-readonly-prepare") return ReplayCalibrationRun.PrepareIssue14(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]), Path.GetFullPath(args[4]), corrected: true, leased: true, readonlyRuntime: true);
+            if (args.Length == 5 && args[0] == "--replay-calibration-issue14-trace-prepare") return ReplayCalibrationRun.PrepareIssue14(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]), Path.GetFullPath(args[4]), corrected: true, leased: true, readonlyRuntime: true, queuedTrace: true);
+            if (args.Length == 5 && args[0] == "--replay-calibration-issue14-native-continue-prepare") return ReplayCalibrationRun.PrepareNativeContinuation14(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]), Path.GetFullPath(args[4]));
+            if (args.Length == 5 && args[0] == "--replay-calibration-issue14-rehearsal-prepare") return ReplayCalibrationRun.PrepareIssue14(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]), retainedDummyRoot: Path.GetFullPath(args[4]));
+            if (args.Length == 2 && args[0] == "--replay-calibration-issue14-checks") return ReplayCalibrationRun.Issue14AdmissionChecks(Path.GetFullPath(args[1]));
+            if (args.Length == 3 && args[0] == "--replay-calibration-calibrated-validation") return ReplayCalibrationRun.CalibratedValidationChecks(Path.GetFullPath(args[1]), args[2]);
+            if (args.Length == 3 && args[0] == "--replay-calibration-issue14-rehearse") return ReplayCalibrationRun.RehearseIssue14(Path.GetFullPath(args[1]), args[2]);
             if (args.Length == 2 && args[0] == "--replay-calibration-capture-evidence-checks") return CalibrationCaptureEvidence.Checks(Path.GetFullPath(args[1]));
             if (args.Length == 2 && args[0] == "--replay-calibration-desktop-observe") return CalibrationDesktop.Observe(Path.GetFullPath(args[1]));
             if (args.Length == 2 && args[0] == "--replay-calibration-startup-checks") return CalibrationStartupChecks.Run(Path.GetFullPath(args[1]));
@@ -100,6 +116,8 @@ internal static class WorkerChecks
             if (args.Length == 3 && args[0] == "--replay-calibration-run") return ReplayCalibrationRun.Run(Path.GetFullPath(args[1]), args[2]);
             if (args.Length == 3 && args[0] == "--replay-calibration-inspect-existing") return ReplayCalibrationRun.InspectExisting(Path.GetFullPath(args[1]), args[2]);
             if (args.Length == 3 && args[0] == "--calibration-fixture") return CalibrationPattern.Run(Path.GetFullPath(args[1]), args[2]);
+            if (args.Length == 4 && args[0] == "--calibration-fixture" && args[3] == "manual-handoff" && args[2] is "H02" or "H01" or "H03")
+                return CalibrationPattern.Run(Path.GetFullPath(args[1]), args[2], manualHandoff: true);
             return 2;
         }
         if (args.Any(value => value.StartsWith("--replay-output-validation", StringComparison.OrdinalIgnoreCase)))
@@ -182,6 +200,7 @@ internal static class WorkerChecks
             };
             return RecorderWorker.Run(args[1], false, args[2], true, _ => { }, (_, folder) => ScreenshotCapture.CaptureSource("testsrc2=size=640x360:rate=1", folder, false));
         }
+        if (args[0].StartsWith("--", StringComparison.Ordinal)) return 2;
         data = Path.GetFullPath(args[0]); desktop = Path.GetFullPath(args[1]);
         live = args.Contains("--live");
         gpuFixture = args.Contains("--gpu-fixture");
