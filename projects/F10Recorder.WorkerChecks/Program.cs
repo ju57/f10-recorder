@@ -135,6 +135,8 @@ internal static class WorkerChecks
         if (args.Any(value => value.StartsWith("--pilot-stage", StringComparison.OrdinalIgnoreCase))) return PilotStageRunner.Dispatch(args);
         if (args.Any(value => value.StartsWith("--pilot-storage", StringComparison.OrdinalIgnoreCase))) return PilotStorageObservation.Dispatch(args);
         if (args.Length == 2 && args[0] == "--replay-ownership") return ReplayOwnershipChecks.Run(Path.GetFullPath(args[1]));
+        if (args.Any(a => a.StartsWith("--replay-export-cadence", StringComparison.OrdinalIgnoreCase)))
+            return args.Length == 2 && args[0] == "--replay-export-cadence" ? ReplayOwnershipChecks.RunExportCadence(Path.GetFullPath(args[1])) : 2;
         if (args.Length == 2 && args[0] == "--capture-status") return CaptureStatusChecks.Run(Path.GetFullPath(args[1]));
         if (args.Length == 2 && args[0] == "--profile-migration") return ProfileWorkerChecks.Run(Path.GetFullPath(args[1]));
         if (args.Length == 5 && args[0] == "--profile-correction-real" && args[4] == "--budget-apply-only") return ProfileCorrectionChecks.RunBudget(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]));

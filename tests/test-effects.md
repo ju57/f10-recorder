@@ -1,5 +1,14 @@
 # Verification launch effects
 
+WorkerChecks `--replay-export-cadence <fresh-root>` drives the real replay cache
+with tiny nonmedia inputs, a controlled output estimate and synthetic read delays.
+It compares six cooperative 110ms reads with an uninterrupted650ms read using the
+unchanged500ms production storage guard. The ordinary ownership suite also runs
+these two cases. Bounded in-memory stage/guard counters are written after each
+case; the suite launches no child, recorder, media engine, GPU, capture/audio,
+window/shortcut, startup or installation action. It writes only task-owned tiny
+files/links and reports and requires ordinary Windows filesystem access.
+
 `--replay-calibration-production-prepare <plan> <engine-root> <fresh-root> <phase>`
 freezes a coherent self-contained production package and its exact Windows/Core
 libraries. Preparation reads display/audio endpoint metadata and runs tiny
