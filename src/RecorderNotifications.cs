@@ -41,6 +41,15 @@ namespace F10Recorder
             StateChanged(phase, message, ready, paused, settings, saveShortcutAvailable);
         }
         internal void SaveStarted() { show("Saving replay…", "Saving the available completed footage.", NotificationKind.Info, 0); }
-        internal void SaveFinished(string message, bool success) { show(success ? "Replay saved" : "Replay not saved", success ? System.IO.Path.GetFileName(message) : message, success ? NotificationKind.Success : NotificationKind.Warning, success ? 4000 : 6000); }
+        internal void SaveFinished(string message, bool success) => SaveFinished(message, success, null);
+        internal void SaveFinished(string message, bool success, RecorderMetrics metrics)
+        {
+            string detail = success ? System.IO.Path.GetFileName(message) : message;
+            if (success && metrics?.LastSaveLimitedHistory == true)
+                detail = "Saved " + metrics.LastSaveAvailableSeconds.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+                    + " s of " + metrics.LastSaveRequestedSeconds.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+                    + " s. Earlier history unavailable.";
+            show(success ? "Replay saved" : "Replay not saved", detail, success ? NotificationKind.Success : NotificationKind.Warning, success ? 4000 : 6000);
+        }
     }
 }

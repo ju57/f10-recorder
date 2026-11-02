@@ -18,7 +18,7 @@ internal sealed record ReplayReferenceModel(string Revision, string Scope, strin
     internal static string Hash<T>(T value) => Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(value)));
     internal static readonly string AssemblyHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(CaptureSession).Assembly.Location)));
     internal static readonly string CoreHash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(Settings).Assembly.Location)));
-    internal static string ExporterIdentity => MediaDependency.ExecutableSha256 + "/" + AssemblyHash + "/" + CoreHash + "/replay-copy-mp4-v1";
+    internal static string ExporterIdentity => MediaDependency.ExecutableSha256 + "/" + AssemblyHash + "/" + CoreHash + "/" + ReplayExactExport.Recipe;
     internal static long Round(long value, long unit) => checked((value / unit + (value % unit == 0 ? 0 : 1)) * unit);
     internal static long CaptureAllowance(long observed, long unit) => Round(checked(observed + Math.Max(Guard, (observed + 19) / 20)), unit);
     internal long FinalBytes(long inputBytes) => checked(inputBytes + FinalResidual + Math.Max(Guard, (inputBytes + 19) / 20));
@@ -32,8 +32,11 @@ internal sealed record ReplayReferenceModel(string Revision, string Scope, strin
     {
         if (actualScope != Scope || selection.ExporterIdentity != ExporterIdentity)
             return ReplayOutputDemand.Unmeasured("Reference recipe or exporter changed.");
-        double duration = selection.Inputs.Count == 0 ? 0 : selection.End - selection.Inputs[0].Start;
-        if (duration < 298 || duration > 300.1 || selection.Inputs.Count < (selection.Closed ? 298 : 297) || selection.Inputs.Count > 305
+        double duration = selection.End - selection.Start;
+        double inputSpan = selection.Inputs.Count == 0 ? 0 : selection.End - selection.Inputs[0].Start;
+        if (!double.IsFinite(duration) || duration < 1 - 0.000000001 || duration > 300.000001
+            || inputSpan < duration - 0.000001 || inputSpan > duration + 1.1
+            || selection.Inputs.Count < 1 || selection.Inputs.Count > 305
             || !selection.Closed && (selection.End <= selection.Inputs[^1].End || selection.End - selection.Inputs[^1].End > 1.25))
             return ReplayOutputDemand.Unmeasured("Selection is outside the requested-five-minute reference envelope.");
         if (FinalResidual < 0 || SampledFinalizationExtra < 0 || AllocationUnit <= 0 || TrainingReceipts?.Length != 3 || string.IsNullOrWhiteSpace(Revision))

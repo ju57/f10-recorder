@@ -116,6 +116,8 @@ internal sealed class WorkerRecorder : IWindowsRecorder
         var reply = await (send == null ? WorkerProtocol.CallAsync(DataDirectory, request, lifetime.Token) : send(request));
         Update(reply.Status);
         if (reply.Error != null) throw new InvalidOperationException(reply.Error);
+        if (request.Command == "save" && reply.ReplayAccepted == false)
+            throw new InvalidOperationException(reply.ReplayRejection ?? "Replay request was not accepted.");
     }
     async void Fire(string command, bool value = false)
     {

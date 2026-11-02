@@ -6,7 +6,7 @@ internal sealed class ReplaySaveNotifications
     readonly object gate = new();
     Task tail = Task.CompletedTask;
 
-    internal Task Observe(Task<ReplaySaveResult> completion, Action started, Action<string, bool> finished)
+    internal Task Observe(Task<ReplaySaveResult> completion, Action started, Action<string, bool> finished, Action<ReplaySaveResult> completed = null)
     {
         lock (gate)
         {
@@ -18,6 +18,9 @@ internal sealed class ReplaySaveNotifications
                 await previous.ConfigureAwait(false);
                 Start(started);
                 var result = await completion.ConfigureAwait(false);
+                if (completed != null)
+                    foreach (Action<ReplaySaveResult> observer in completed.GetInvocationList())
+                        try { observer(result); } catch (Exception ex) { Report(ex); }
                 Finish(finished, result.Succeeded ? result.File : result.Error, result.Succeeded);
             });
         }

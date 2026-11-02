@@ -6,15 +6,16 @@ namespace F10Recorder;
 internal enum ReplayOutputEvidenceKind { Unmeasured, CalibratedEstimate, SourceBound }
 internal sealed record ReplayOutputInput(string Path, double Start, double End, ReplayFileExtent Extent);
 internal sealed record ReplayOutputSelection(string Identity, string ExporterIdentity, string Destination,
-    double End, bool Closed, IReadOnlyList<ReplayOutputInput> Inputs)
+    double End, bool Closed, IReadOnlyList<ReplayOutputInput> Inputs, double Start = 0)
 {
     internal static ReplayOutputSelection Create(ReplaySessionInfo info, string exporterIdentity, string destination,
         double end, bool closed, IReadOnlyList<Segment> selection, ReplayFiles files)
     {
         var inputs = Array.AsReadOnly(selection.Select(s => new ReplayOutputInput(s.Path, s.Start, s.End,
             ReplayStorage.Validate(files.Observe(s.Path)))).ToArray());
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(new { info, exporterIdentity, destination, end, closed, inputs });
-        return new(Convert.ToHexString(SHA256.HashData(bytes)), exporterIdentity, destination, end, closed, inputs);
+        double start = Math.Max(Math.Max(0, end - info.ReplaySeconds), inputs.Count == 0 ? end : inputs[0].Start);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(new { info, exporterIdentity, destination, start, end, closed, inputs });
+        return new(Convert.ToHexString(SHA256.HashData(bytes)), exporterIdentity, destination, end, closed, inputs, start);
     }
 }
 

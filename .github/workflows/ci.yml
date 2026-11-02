@@ -68,6 +68,8 @@ jobs:
         run: dotnet run --project projects/F10Recorder.MigrationTests/F10Recorder.MigrationTests.csproj -c Release --no-build -- artifacts/storage-controls-ci --storage-controls-ui
       - name: Verify persistent storage problem dismissal without capture
         run: dotnet run --project projects/F10Recorder.MigrationTests/F10Recorder.MigrationTests.csproj -c Release --no-build -- artifacts/storage-notice-ci --storage-notice-ui
+      - name: Verify replay desktop admission and publication without capture
+        run: dotnet run --project projects/F10Recorder.MigrationTests/F10Recorder.MigrationTests.csproj -c Release --no-build -- artifacts/replay-actions-ci --replay-action-checks
       - name: Verify replay ownership without capture or GPU
         shell: pwsh
         run: |
@@ -82,6 +84,8 @@ jobs:
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-manifest-stream artifacts/replay-manifest-ci
       - name: Verify supplied replay output reservations without capture or GPU
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-output-validation artifacts/replay-output-ci
+      - name: Verify exact replay native admission limits without media
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-issue14-checks artifacts/replay-exact-admission-ci
       - name: Verify sampler and atomic storage claims without capture or GPU
         shell: pwsh
         run: |

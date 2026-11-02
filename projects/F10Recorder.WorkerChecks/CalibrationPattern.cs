@@ -8,9 +8,10 @@ namespace F10Recorder;
 
 internal static class CalibrationPattern
 {
-    internal static int Run(string root, string label)
+    internal static bool ValidLabel(string label) => label is "T01" or "T02" or "T03" or "H02" or "H01" or "H03";
+    internal static int Run(string root, string label, bool manualHandoff = false)
     {
-        if (!new[] { "T01", "T02", "T03", "H02", "H01", "H03" }.Contains(label)) return 2;
+        if (!ValidLabel(label)) return 2;
         Forms.Application.SetUnhandledExceptionMode(Forms.UnhandledExceptionMode.ThrowException);
         CalibrationWakeLease wake = null;
         using var display = new CalibrationDesktop();
@@ -21,7 +22,7 @@ internal static class CalibrationPattern
             wake = new CalibrationWakeLease();
             display.AwaitDisplayOn();
             File.WriteAllText(Path.Combine(root, "fixture-desktop-admitted.json"), JsonSerializer.Serialize(display.Snapshot()));
-            using var form = new Pattern(root, label);
+            using var form = new Pattern(root, label, manualHandoff ? 420 : 350, activate: !manualHandoff);
             Forms.Application.Run(form);
             return 0;
         }
@@ -48,7 +49,7 @@ internal static class CalibrationPattern
         readonly SoundPlayer sound;
         readonly MemoryStream wave;
         int frame;
-        internal Pattern(string root, string label)
+        internal Pattern(string root, string label, int lifetimeSeconds, bool activate)
         {
             this.root = root; this.label = label;
             FormBorderStyle = Forms.FormBorderStyle.None; StartPosition = Forms.FormStartPosition.Manual;
@@ -74,10 +75,11 @@ internal static class CalibrationPattern
                 }
             }
             wave.Position = 0; sound = new SoundPlayer(wave);
-            timer.Tick += (_, _) => { if (clock.Elapsed.TotalSeconds > 350) Close(); else { frame++; Invalidate(); } };
+            timer.Tick += (_, _) => { if (clock.Elapsed.TotalSeconds > lifetimeSeconds) Close(); else { frame++; Invalidate(); } };
             Shown += (_, _) =>
             {
-                Activate(); sound.PlayLooping(); timer.Start();
+                if (activate) Activate();
+                sound.PlayLooping(); timer.Start();
                 CalibrationFixturePublication.Publish(root, new
                 { pid = Environment.ProcessId, hwnd = Handle.ToInt64(), width = Bounds.Width, height = Bounds.Height, label, seed,
                     recipe = "GDI texture320x180-nearest-scale; static/translation/cut-every15frames; chirp48k-stereo16bit-1200peak", startedUtc = DateTime.UtcNow });

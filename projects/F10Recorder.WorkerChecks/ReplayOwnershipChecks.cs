@@ -30,6 +30,15 @@ internal static class ReplayOwnershipChecks
         internal int ExportCount;
         internal Action ExportAction;
         internal Action<string> OutputWritten;
+        internal Action BeforeContentRead;
+        internal int ContentReads, StorageChecks;
+        internal double ConcatReadMilliseconds, ContentReadMilliseconds, MaximumContentReadMilliseconds,
+            ExportWaitMilliseconds, ExportHookMilliseconds, OutputWriteMilliseconds, MaximumStorageIdleMilliseconds, MaximumStorageWorkMilliseconds;
+        internal string ExportStage = "not-started";
+        long storageObserved;
+        internal object ExportObservation => new { ExportStage, ContentReads, StorageChecks, ConcatReadMilliseconds,
+            ContentReadMilliseconds, MaximumContentReadMilliseconds, ExportWaitMilliseconds, ExportHookMilliseconds,
+            OutputWriteMilliseconds, MaximumStorageIdleMilliseconds, MaximumStorageWorkMilliseconds };
         internal readonly TaskCompletionSource ExportEntered = Signal();
         internal readonly TaskCompletionSource StopEntered = Signal();
         internal readonly TaskCompletionSource DisposeEntered = Signal();
@@ -44,6 +53,8 @@ internal static class ReplayOwnershipChecks
         public string OutputDemandIdentity => ExporterIdentity;
         internal bool ProducerAbsent = true;
         public bool OutputProducerStopped => ProducerAbsent; // Controlled ownership observation; no actual media process.
+        public ReplayValidation ValidateOutput(string path, ReplayInterval interval, Action<ReplayProducerProof> changed, Action check)
+            => new("ControlledNonmedia", (long)Math.Round(interval.Seconds * ReplayInfo.FramesPerSecond), 0);
         public ReplayOutputDemand EstimateOutput(ReplayOutputSelection selection) => OutputEstimate?.Invoke(selection)
             ?? ReplayOutputDemand.Unmeasured("Controlled source has no qualified estimate.");
 
@@ -72,10 +83,37 @@ internal static class ReplayOwnershipChecks
         public void FreezeAt(long timestamp) => clock.StopAt(timestamp);
         public void StopCapture() { Stopped = true; StopEntered.TrySetResult(); }
         public void CheckCaptureHealth(double end) { Require(!Disposed, "Maintenance reached a disposed source."); }
+        void ObserveExportStorage()
+        {
+            if (storageCheck == null) return;
+            long started = Stopwatch.GetTimestamp(); StorageChecks++;
+            MaximumStorageIdleMilliseconds = Math.Max(MaximumStorageIdleMilliseconds, Stopwatch.GetElapsedTime(storageObserved, started).TotalMilliseconds);
+            try { storageCheck(); }
+            finally
+            {
+                long completed = Stopwatch.GetTimestamp();
+                MaximumStorageWorkMilliseconds = Math.Max(MaximumStorageWorkMilliseconds, Stopwatch.GetElapsedTime(started, completed).TotalMilliseconds);
+                storageObserved = completed;
+            }
+        }
+        string ReadContent(string path)
+        {
+            ExportStage = "content-read"; long started = Stopwatch.GetTimestamp();
+            try { BeforeContentRead?.Invoke(); return File.ReadAllText(path); }
+            finally
+            {
+                ContentReads++; double elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                ContentReadMilliseconds += elapsed; MaximumContentReadMilliseconds = Math.Max(MaximumContentReadMilliseconds, elapsed);
+            }
+        }
         public void Export(IReadOnlyList<string> arguments, string snapshot, Action<ReplayProducerProof> producerChanged, Action checkStorage)
         {
             storageCheck = checkStorage;
-            try { storageCheck?.Invoke(); Export(arguments, snapshot); storageCheck?.Invoke(); }
+            storageObserved = Stopwatch.GetTimestamp(); ExportStage = "entry";
+            ContentReads = StorageChecks = 0;
+            ConcatReadMilliseconds = ContentReadMilliseconds = MaximumContentReadMilliseconds = ExportWaitMilliseconds
+                = ExportHookMilliseconds = OutputWriteMilliseconds = MaximumStorageIdleMilliseconds = MaximumStorageWorkMilliseconds = 0;
+            try { ObserveExportStorage(); Export(arguments, snapshot); ObserveExportStorage(); }
             finally { storageCheck = null; }
         }
         public void Export(IReadOnlyList<string> arguments, string snapshot)
@@ -83,21 +121,41 @@ internal static class ReplayOwnershipChecks
             Require(!Disposed, "Export reached a disposed source.");
             ExportCount++;
             Arguments = arguments.ToArray();
+            ExportStage = "concat-read"; long started = Stopwatch.GetTimestamp();
             Concat = File.ReadAllLines(Path.Combine(snapshot, "concat.txt"));
-            Contents = string.Join("|", Concat.Where(s => s.StartsWith("file '")).Select(s => File.ReadAllText(Path.Combine(snapshot, s[6..^1]))));
+            ConcatReadMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            var contents = new List<string>(); long contentObserved = Stopwatch.GetTimestamp();
+            foreach (string entry in Concat.Where(s => s.StartsWith("file '")))
+            {
+                contents.Add(ReadContent(Path.Combine(snapshot, entry[6..^1])));
+                // This synchronous stand-in must cooperate like the real process
+                // runner while reading a full replay. A single >500ms read still
+                // fails the unchanged guard; aggregate small reads need not.
+                if (Stopwatch.GetElapsedTime(contentObserved).TotalMilliseconds >= 100)
+                {
+                    ObserveExportStorage(); contentObserved = Stopwatch.GetTimestamp();
+                }
+            }
+            Contents = string.Join("|", contents);
             ExportEntered.TrySetResult();
+            ExportStage = "wait"; started = Stopwatch.GetTimestamp();
             if (ExportRelease != null)
             {
                 var waiting = Stopwatch.StartNew();
                 while (!ExportRelease.Task.Wait(100))
                 {
                     Require(waiting.Elapsed < Deadline, "Controlled export wait expired.");
-                    storageCheck?.Invoke();
+                    ObserveExportStorage();
                 }
             }
+            ExportWaitMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             Require(!Disposed && Directory.Exists(snapshot), "Retirement removed export resources.");
+            ExportStage = "hook"; started = Stopwatch.GetTimestamp();
             ExportAction?.Invoke();
+            ExportHookMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            ExportStage = "output"; started = Stopwatch.GetTimestamp();
             if (!MissingOutput) { File.WriteAllBytes(arguments[^1], new byte[OutputBytes]); OutputWritten?.Invoke(arguments[^1]); }
+            OutputWriteMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         }
         public void Dispose() { Require(Stopped, "Resources released before acquisition stopped."); Disposed = true; DisposeEntered.TrySetResult(); }
     }
@@ -187,6 +245,39 @@ internal static class ReplayOwnershipChecks
     }
 
     internal static int Run(string root) => RunAsync(root).GetAwaiter().GetResult();
+    static async Task CheckExportReadCadence(string path, bool stalled)
+    {
+        using var f = new Fixture(path, reservations: new ReplayVolumeReservations(Path.Combine(path, "authority")));
+        f.Source.Segments(0, 6);
+        var capacity = ReplayStorage.ObserveCapacity(path);
+        f.Source.OutputEstimate = selection => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-read-cadence",
+            selection.Identity, selection.ExporterIdentity, capacity.Volume, capacity.AllocationUnit,
+            ReplayReferenceModel.Round(16384, capacity.AllocationUnit), false, null);
+        f.Source.BeforeContentRead = () => Thread.Sleep(stalled ? 650 : 110);
+        var accepted = f.Save(6); Require(accepted.Accepted, accepted.Rejection);
+        var saved = await accepted.Completion.WaitAsync(Deadline);
+        File.WriteAllText(Path.Combine(path, "read-cadence.json"), JsonSerializer.Serialize(new { stalled, saved, f.Source.ExportObservation }));
+        if (stalled)
+            Require(!saved.Succeeded && saved.Error.Contains("500 ms")
+                && !Directory.GetFiles(f.Destination, "Replay-*.mp4").Any(file => !file.EndsWith(".partial.mp4", StringComparison.Ordinal)),
+                "One uninterrupted stale read must retain the unchanged 500ms rejection before publication.");
+        else
+            Require(saved.Succeeded && f.Source.ContentReads == 6 && f.Source.ContentReadMilliseconds >= 600
+                && f.Source.StorageChecks >= 3 && f.Source.Contents == "picture-0|picture-1|picture-2|picture-3|picture-4|picture-5",
+                "Aggregate slow reads must preserve contents and real storage freshness: " + saved.Error);
+    }
+    internal static int RunExportCadence(string root)
+    {
+        if (Directory.Exists(root)) throw new IOException("Export cadence checks require fresh evidence.");
+        Directory.CreateDirectory(root); Log.DirectoryPath = root;
+        int failed = 0;
+        foreach (bool stalled in new[] { false, true })
+        {
+            try { CheckExportReadCadence(Path.Combine(root, stalled ? "uninterrupted-stall" : "cooperative-reads"), stalled).GetAwaiter().GetResult(); }
+            catch (Exception error) { failed++; Console.Error.WriteLine(error); }
+        }
+        Console.WriteLine($"Export read cadence: {2 - failed}/2 passed"); return failed == 0 ? 0 : 1;
+    }
     internal static int RunContention(string root)
     {
         if (Directory.Exists(root)) throw new IOException("Contention checks require fresh evidence.");
@@ -353,9 +444,9 @@ internal static class ReplayOwnershipChecks
             var elapsed = Stopwatch.StartNew();
             var accepted = f.Save(300); Require(accepted.Accepted, accepted.Rejection);
             var saved = await accepted.Completion.WaitAsync(TimeSpan.FromSeconds(60));
-            if (!saved.Succeeded) File.WriteAllText(Path.Combine(path, "failed-save-diagnostics.json"), JsonSerializer.Serialize(new { saved, diagnostics = f.Diagnostics.TakeLast(8).ToArray() }));
+            if (!saved.Succeeded) File.WriteAllText(Path.Combine(path, "failed-save-diagnostics.json"), JsonSerializer.Serialize(new { saved, diagnostics = f.Diagnostics.TakeLast(8).ToArray(), f.Source.ExportObservation }));
             Require(saved.Succeeded, saved.Error);
-            File.WriteAllText(Path.Combine(path, "full-selection-cost.json"), JsonSerializer.Serialize(new { elapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds, f.Files.InventoryLeafReads, f.Files.Copies }));
+            File.WriteAllText(Path.Combine(path, "full-selection-cost.json"), JsonSerializer.Serialize(new { elapsedMilliseconds = elapsed.Elapsed.TotalMilliseconds, f.Files.InventoryLeafReads, f.Files.Copies, f.Source.ExportObservation }));
             var metrics = new RecorderMetrics(); f.Cache.Status.OutputDemand.WriteMetrics(metrics);
             Require(metrics.ReplayOutputDemandKind == "CalibratedEstimate" && metrics.ReplayOutputDemandRevision == controlledReceipt.Model.Revision
                 && metrics.ReplayOutputDemandReason == null, "Loaded evidence must reach actual replay admission and ordinary metrics projection.");
@@ -366,6 +457,9 @@ internal static class ReplayOwnershipChecks
                 && !string.IsNullOrWhiteSpace(metrics.ReplayOutputDemandReason),
                 "Withdrawal must remain explicit after rejection.");
         });
+
+        await Check("aggregate-content-reads-keep-storage-fresh", path => CheckExportReadCadence(path, stalled: false));
+        await Check("uninterrupted-content-read-rejects-stale-storage", path => CheckExportReadCadence(path, stalled: true));
 
         await Check("shared-volume-ordinary-replay-admission", async path =>
         {
@@ -699,9 +793,9 @@ internal static class ReplayOwnershipChecks
         {
             foreach (bool enough in new[] { true, false })
             {
-                using var f = new Fixture(Path.Combine(path, enough ? "equal637" : "short636"));
+                using var f = new Fixture(Path.Combine(path, enough ? "equal655" : "short654"));
                 f.Source.Segments(0, 1);
-                long available = 1037;
+                long available = 1055;
                 bool copying = false;
                 f.Files.CapacityObservation = _ => new("volume-V", 1, available);
                 f.Files.BeforeCopy = (_, _) => copying = true;
@@ -710,16 +804,16 @@ internal static class ReplayOwnershipChecks
                     if (Path.GetFileName(p) == "000000.ts")
                     {
                         Require(copying, "Snapshot was observed before copy setup.");
-                        available = enough ? 637 : 636; // Post-materialization free, set by inventory BEFORE capacity.
+                        available = enough ? 655 : 654; // Post-materialization free, set by inventory BEFORE capacity.
                         return new("volume-V", p, 400, 1000, 1);
                     }
                     return new("volume-V", p, 0, Path.GetFileName(p).StartsWith("chunk-") ? 1000 : new FileInfo(p).Length, 1);
                 };
                 var result = await Finish(f.Save(1));
                 Require(result.Succeeded == enough && f.Files.Copies == 1 && f.Source.ExportCount == (enough ? 1 : 0),
-                    "Remaining600 + exact concat37 must fit637, reject636, without crediting materialization against pre-write free.");
-                if (enough) Require(Encoding.UTF8.GetByteCount(string.Join(Environment.NewLine, f.Source.Concat) + Environment.NewLine) == 37,
-                    "The prospectively specified Windows one-input concat fixture must be37 bytes.");
+                    "Remaining600 + exact concat55 must fit655, reject654, without crediting materialization against pre-write free.");
+                if (enough) Require(Encoding.UTF8.GetByteCount(string.Join(Environment.NewLine, f.Source.Concat) + Environment.NewLine) == 55,
+                    "The Windows one-input concat including its explicit inpoint must be55 bytes.");
             }
         });
 
@@ -1273,8 +1367,8 @@ internal static class ReplayOwnershipChecks
                 // A later explicit request may use a completed endpoint. It is
                 // a new request, never a silent shortening of the first one.
                 Require((await Finish(f.Save(2))).Succeeded, "Stopped completed footage was no longer explicitly savable.");
-                int trim = Array.IndexOf(f.Source.Arguments, "-t");
-                Require(f.Source.Arguments[trim + 1] == "2.000000", "Explicit completed-endpoint request changed its endpoint.");
+                int trim = Array.IndexOf(f.Source.Arguments, "-vf");
+                Require(f.Source.Arguments[trim + 1].Contains("trim=start=0:end=2,"), "Explicit completed-endpoint request changed its endpoint.");
             }
             finally { resume.TrySetResult(); }
         });
@@ -1292,8 +1386,8 @@ internal static class ReplayOwnershipChecks
                 await f.Source.StopEntered.Task.WaitAsync(Deadline);
                 Require(!f.Source.Disposed && !retirement.IsCompleted, "Retirement removed waiting save inputs.");
                 resume.SetResult(); Require((await Finish(save)).Succeeded, "Accepted waiting save did not finish.");
-                int trim = Array.IndexOf(f.Source.Arguments, "-t");
-                Require(f.Source.Arguments[trim + 1] == "4.000000", "Retirement shortened the accepted request.");
+                int trim = Array.IndexOf(f.Source.Arguments, "-vf");
+                Require(f.Source.Arguments[trim + 1].Contains("trim=start=0:end=4,"), "Retirement shortened the accepted request.");
                 await retirement.WaitAsync(Deadline);
             }
             finally { resume.TrySetResult(); }
@@ -1375,8 +1469,8 @@ internal static class ReplayOwnershipChecks
             Require(f.Source.SaveCutoffAt(f.Source.Trigger(50)) == 1.5, "A later stop moved the first cutoff.");
             Require(f.Source.SaveCutoffAt(f.Source.Trigger(1)) == 1, "Stop changed an earlier trigger.");
             Require((await Finish(f.Save(20))).Succeeded, "First-stop save failed.");
-            int trim = Array.IndexOf(f.Source.Arguments, "-t");
-            Require(f.Source.Arguments[trim + 1] == "1.500000", "First-stop cutoff did not reach export.");
+            int trim = Array.IndexOf(f.Source.Arguments, "-vf");
+            Require(f.Source.Arguments[trim + 1].Contains("trim=start=0:end=1.5,"), "First-stop cutoff did not reach export.");
         });
 
         await Check("monitor-application-sequence", async path =>
@@ -1403,7 +1497,7 @@ internal static class ReplayOwnershipChecks
                 Require(File.Exists(f.Source.Chunk(999999999)), "Pruning removed a newer unlisted chunk.");
                 Require(f.Source.Arguments.Contains("0:a:0") && f.Source.Arguments.Contains("+faststart"), "Audio map or MP4 finalization missing.");
                 Require(f.Source.Arguments.Contains("hvc1") == (codec == "hevc_nvenc"), "HEVC tag changed.");
-                Require(f.Source.Arguments.Any(s => s.Contains("setts=time_base=1/48000")) == (codec == "av1_nvenc"), "AV1 clock restoration changed.");
+                Require(f.Source.Arguments.Contains(codec) && f.Source.Arguments.Contains("passthrough") && !f.Source.Arguments.Contains("copy"), "Precise export must encode actual trimmed frames without CFR padding.");
                 Require(!Directory.GetFiles(f.Destination, "*.partial.mp4").Any(), "Successful save left a partial output.");
             });
 
@@ -1443,18 +1537,18 @@ internal static class ReplayOwnershipChecks
             File.WriteAllText(f.Source.ReplayInfo.Manifest,
                 Path.GetFileName(f.Source.Chunk(0)) + ",0.25,1.5\n" + Path.GetFileName(f.Source.Chunk(1)) + ",1.5,2.75\n");
             Require((await Finish(f.Save(2.5))).Succeeded, "Fractional-boundary export failed.");
-            Require(f.Source.Concat[1] == "duration 1.250000" && f.Source.Concat[3] == "duration 1.250000", "Concat used container probes instead of manifest boundaries.");
-            int trim = Array.IndexOf(f.Source.Arguments, "-t");
-            Require(f.Source.Arguments[trim + 1] == "2.250000", "Trigger trim ignored the selected keyframe start.");
+            Require(f.Source.Concat[1] == "duration 1.250000" && f.Source.Concat[4] == "duration 1.250000", "Concat used container probes instead of manifest boundaries.");
+            int trim = Array.IndexOf(f.Source.Arguments, "-vf");
+            Require(f.Source.Arguments[trim + 1].Contains("trim=start=0.25:end=2.5,"), "Trigger trim ignored the selected keyframe start.");
         });
 
-        await Check("keyframe-start-and-window", async path =>
+        await Check("exact-head-and-window", async path =>
         {
             using var f = new Fixture(path); f.Source.Segments(0, 64);
             Require((await Finish(f.Save(62.5))).Succeeded, "Keyframe selection failed.");
-            Require(f.Source.Contents.StartsWith("picture-3|") && f.Source.Contents.EndsWith("|picture-62"), "Replay did not start on the first keyframe after the window start.");
-            int trim = Array.IndexOf(f.Source.Arguments, "-t");
-            Require(f.Source.Arguments[trim + 1] == "59.500000", "Replay length or frozen fractional end changed.");
+            Require(f.Source.Contents.StartsWith("picture-2|") && f.Source.Contents.EndsWith("|picture-62"), "Replay did not retain the preceding head for exact trimming.");
+            int trim = Array.IndexOf(f.Source.Arguments, "-vf");
+            Require(f.Source.Arguments[trim + 1].Contains("trim=start=2.5:end=62.5,"), "Replay length or frozen fractional end changed.");
         });
 
         await Check("throwing-notification-observers", async path =>

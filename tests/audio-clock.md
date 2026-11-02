@@ -79,18 +79,28 @@ References: [FFmpeg9.0.2 ddagrab source](https://github.com/FFmpeg/FFmpeg/blob/n
 [Matroska element specification](https://www.matroska.org/technical/elements.html).
 
 
-Save cutoffs on the common-clock system-audio path use the capture session's
+Save cutoffs with system audio enabled or disabled use the capture session's
 existing QPC media epoch, sampled once when Save is handled before async work.
 FFmpeg's `-copyts` progress reports can subtract a first-report origin; they
 remain liveness/metrics only and must not be compared directly with manifest
 times. Source stop freezes the first stop request; retained exports still clamp
 to the same session's last completed segment. A trigger older than a replacement
-epoch cannot save that replacement's footage. Synthetic/audio-off paths retain
-their existing progress-based behavior.
+epoch cannot save that replacement's footage. The direct video-only graph now
+uses the same bridge/QPC cutoff; synthetic fixtures retain their modeled clock.
+The first live segment is excluded while the capture source becomes available,
+including audio-off sessions.
 
 Portable checks cover nonzero origins, report-origin differences, fractional
 selection/export bounds, UTC independence, concurrent repeated stop, stale
-generation and the five-minute/keyframe allowance. Live endpoint checks must
+generation and full five-minute intervals including the preceding head GOP. Live endpoint checks must
 retain actual selected TS/snapshot inputs and exact trigger/epoch/cutoff receipts;
 source submission age remains a bounded proxy, not acquisition/scanout or a
 physical hotkey latency qualification. No constant offset should be fitted.
+
+Closed live segments now retain the session timestamps instead of resetting each
+file to zero. Nested muxers disable automatic negative-timestamp shifting; TS
+also uses `mpegts_copyts=1`. Exact export supplies explicit per-file inpoints,
+excludes decoder preroll and restores the video frame clock before trimming.
+Audio and video subtract the same requested origin. See [precision checks](replay-precision.md);
+generated-source evidence does not replace native device/clock acceptance or
+fresh storage calibration for this recipe.

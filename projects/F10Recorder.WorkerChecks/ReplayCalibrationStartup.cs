@@ -15,11 +15,11 @@ internal static class ReplayCalibrationStartup
     static void Require(bool value, string reason) { if (!value) throw new IOException(reason); }
     static string Hash(string path) { using var file = File.OpenRead(path); return Convert.ToHexString(SHA256.HashData(file)); }
     static void Write(string root, string name, object value) => File.WriteAllText(Path.Combine(root, name + ".json"), JsonSerializer.Serialize(value, Json));
-    internal static string[] NormalizeCaptureArguments(IReadOnlyList<string> arguments, string cell)
+    internal static string[] NormalizeCaptureArguments(IReadOnlyList<string> arguments, string cell, string expectedCacheRoot = null)
     {
         Require(arguments.Count > 0, "Capture arguments are empty.");
         string target = Path.GetFullPath(arguments[^1]), session = Path.GetDirectoryName(target);
-        string buffer = Path.GetFullPath(Path.Combine(cell, "buffer")).TrimEnd(Path.DirectorySeparatorChar);
+        string buffer = Path.GetFullPath(expectedCacheRoot ?? Path.Combine(cell, "buffer")).TrimEnd(Path.DirectorySeparatorChar);
         Require(string.Equals(Path.GetDirectoryName(session), buffer, StringComparison.OrdinalIgnoreCase), "Startup capture escaped private buffer.");
         var normalized = arguments.Select(v => v.StartsWith(@"\\.\pipe\F10Recorder-", StringComparison.Ordinal)
             ? "<audio-pipe>" : Regex.Replace(v, "setpts='[^']+'", "<clock>")).ToArray();

@@ -18,6 +18,8 @@ internal static class ReplayRetirementChecks
     };
     sealed class Source(string directory, FailureStage stage, bool failExport) : IReplaySessionSource
     {
+        public ReplayValidation ValidateOutput(string path, ReplayInterval interval, Action<ReplayProducerProof> changed, Action check)
+            => new("ControlledNonmedia", 0, 0);
         internal readonly ManualResetEventSlim ExportEntered = new(), ReleaseExport = new();
         internal bool Disposed;
         public ReplaySessionInfo ReplayInfo => new(directory, Path.Combine(directory, "segments.csv"), 2, 20, 60, "h264_nvenc", ".ts", false, false);

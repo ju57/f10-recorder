@@ -121,6 +121,7 @@ internal static class RecorderWorker
         {
             string error = null;
             RecordingEngineCapabilities capabilities = null;
+            SaveSubmission replay = null;
             try
             {
                 if (request.Version != WorkerProtocol.Version) throw new InvalidDataException("Unsupported recorder protocol version.");
@@ -138,7 +139,7 @@ internal static class RecorderWorker
                 switch (request.Command)
                 {
                     case "status": break;
-                    case "save": host.SaveReplay(); break;
+                    case "save": replay = host.SubmitReplay(); break;
                     case "pause": host.Pause(request.Value); PersistPause(); break;
                     case "restart": host.Restart(); break;
                     case "apply": await host.ApplyAsync(request.Settings ?? throw new ArgumentException("Capture settings are required."), request.Value); break;
@@ -152,7 +153,11 @@ internal static class RecorderWorker
             }
             catch (Exception ex) { error = ex.Message; Log.Write(ex.ToString()); }
             if (request.Command is "apply" or "repairMedia") completedApply = request.OperationId;
-            return new WorkerReply { Error = error, Status = Snapshot(request.AfterEvent), Capabilities = capabilities };
+            return new WorkerReply { Error = error, Status = Snapshot(request.AfterEvent), Capabilities = capabilities,
+                ReplayAccepted = replay?.Accepted, ReplayRejection = replay?.Rejection,
+                ReplayAdmissionCoversOpenTail = replay?.AdmissionDemand?.CoversOpenTail,
+                ReplayAdmissionSnapshotPeakBytes = replay?.AdmissionDemand?.SnapshotPeakAllocatedBytes,
+                ReplayRequestStart = replay?.Interval?.Start, ReplayRequestEnd = replay?.Interval?.End, ReplayRequestedSeconds = replay?.Interval?.RequestedSeconds };
         }
         loop.Tick = () =>
         {

@@ -23,10 +23,16 @@ internal static class ReplayOutputValidationChecks
         public string Diagnostics => "Independent nonmedia source";
         public string OutputDemandIdentity => Exporter;
         public bool OutputProducerStopped => ProducerAbsent;
+        public ReplayValidation ValidateOutput(string path, ReplayInterval interval, Action<ReplayProducerProof> changed, Action check)
+        {
+            ValidationAction?.Invoke();
+            return new("ControlledNonmedia", (long)Math.Round(interval.Seconds * ReplayInfo.FramesPerSecond), 0);
+        }
         internal bool ProducerAbsent = true;
         internal string Exporter = "independent-exporter-v1";
         internal int Estimates, Exports;
         internal Action<IReadOnlyList<string>, string> ExportAction;
+        internal Action ValidationAction;
         internal Func<ReplayOutputSelection, int, ReplayOutputDemand> Estimate;
         internal Source(string directory)
         {
@@ -345,6 +351,92 @@ internal static class ReplayOutputValidationChecks
             f.Preserved();
         });
 
+        await Check("validation-failure-prevents-publication", async path =>
+        {
+            using var f = new Fixture(path);
+            f.Source.ValidationAction = () => throw new IOException("Independent corrupt MP4/full decode failure");
+            var saved = await Finish(f.Save());
+            Require(!saved.Succeeded && f.Files.Publications == 0 && saved.Validation == null,
+                "An existing large partial file or successful encoder was mistaken for validated publication.");
+            f.Preserved();
+        });
+        await Check("subsecond-rejects-before-export", path =>
+        {
+            using var f = new Fixture(path);
+            Require(!f.Save(999).Accepted && f.Source.Exports == 0 && f.Files.Publications == 0,
+                "A request shorter than one second was accepted.");
+            f.Preserved(); return Task.CompletedTask;
+        });
+        await Check("combined-video-endpoint-rejects-two-frame-overrun", path =>
+        {
+            Directory.CreateDirectory(path);
+            var receipt = new ReplayExportProcessReceipt { ProducerAbsent = true, ActualExitObserved = true, ExitCode = 0, CaptureComplete = true,
+                StandardOutput = "frame=61\nprogress=end\n", StandardError = "n: 0 pts: 800 pts_time:0.0166667" };
+            bool rejected = false;
+            try { ReplayExactExport.ReadValidation(receipt, new ReplayInterval(0, 1, 1), 60); } catch (IOException) { rejected = true; }
+            Require(rejected, "Independent first-frame/count allowances combined into two frames of endpoint error.");
+            receipt.StandardOutput = "frame=60\nprogress=end\n";
+            receipt.StandardError = "n: 0 pts: 840 pts_time:0.0175";
+            rejected = false;
+            try { ReplayExactExport.ReadValidation(receipt, new ReplayInterval(0, 1, 1), 60); } catch (IOException) { rejected = true; }
+            Require(rejected, "A first picture later than one output frame passed using a loose millisecond allowance.");
+            return Task.CompletedTask;
+        });
+        await Check("worker-admission-is-distinct-from-publication", async path =>
+        {
+            Directory.CreateDirectory(path);
+            using var wire = new MemoryStream();
+            await WorkerProtocol.WriteAsync(wire, new WorkerReply { ReplayAccepted = true,
+                Status = new WorkerStatus { Saving = true, Metrics = new RecorderMetrics { ReplaySaveState = "Accepted" } } }, CancellationToken.None);
+            wire.Position = 0;
+            var acknowledgement = await WorkerProtocol.ReadAsync<WorkerReply>(wire, CancellationToken.None);
+            Require(acknowledgement.ReplayAccepted == true && acknowledgement.Status.Metrics.ReplaySaveState == "Accepted"
+                && !acknowledgement.Status.Metrics.LastSaveSucceeded && acknowledgement.Status.Metrics.LastSaveValidation == null,
+                "Worker admission acquired a published/validated success state.");
+        });
+        await Check("large-validation-diagnostics-survive-worker-wire", async path =>
+        {
+            Directory.CreateDirectory(path);
+            var receipt = new ReplayExportProcessReceipt { ProducerAbsent = true, ActualExitObserved = true, ExitCode = 0, CaptureComplete = true,
+                StandardOutput = "frame=60\nprogress=end\n", Error = new string('\uFFFF', 600000), StandardError = new string('\uFFFF', 1400000) };
+            string message = null;
+            try { ReplayExactExport.ReadValidation(receipt, new ReplayInterval(0, 1, 1), 60); }
+            catch (IOException error) { message = error.Message; }
+            Require(message != null && message.Length <= 1024 && receipt.StandardError.Length == 1400000 && receipt.Error.Length == 600000,
+                "Public detail was not bounded or the full diagnostic receipt was lost.");
+            using var wire = new MemoryStream();
+            await WorkerProtocol.WriteAsync(wire, new WorkerReply { Status = new WorkerStatus { Metrics = new RecorderMetrics { ReplaySaveState = "Failed" },
+                Events = Enumerable.Range(1, 64).Select(n => new WorkerEvent { Sequence = n, Kind = n % 2 == 0 ? "saved" : "notification",
+                    Message = message, Title = "Replay not saved", Success = false }).ToArray() } }, CancellationToken.None);
+            wire.Position = 0; var reply = await WorkerProtocol.ReadAsync<WorkerReply>(wire, CancellationToken.None);
+            Require(reply.Status.Events.Length == 64 && reply.Status.Events.All(e => !e.Success && e.Message == message)
+                && reply.Status.Metrics.ReplaySaveState == "Failed", "Large-diagnostic failure was lost or became success over the wire.");
+        });
+        await Check("completion-notices-keep-own-history", async path =>
+        {
+            Directory.CreateDirectory(path);
+            var delayed = new TaskCompletionSource<ReplaySaveResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var seen = new List<ReplaySaveResult>(); var notices = new ReplaySaveNotifications();
+            var warm = new ReplaySaveResult(true, "warm.mp4", null, 2048, 1, new ReplayInterval(0, 1.25, 300));
+            var full = new ReplaySaveResult(true, "full.mp4", null, 2048, 1, new ReplayInterval(3, 303, 300));
+            var first = notices.Observe(delayed.Task, null, null, seen.Add);
+            var second = notices.Observe(Task.FromResult(full), null, null, seen.Add);
+            delayed.SetResult(warm); await Task.WhenAll(first, second).WaitAsync(Deadline);
+            Require(seen.Count == 2 && seen[0] == warm && seen[1] == full && seen[0].Interval.LimitedHistory && !seen[1].Interval.LimitedHistory,
+                "A delayed warm-up completion used a later save's history.");
+        });
+        await Check("legacy-live-calibration-rejects-before-device-work", path =>
+        {
+            Directory.CreateDirectory(path); string plan = Path.Combine(path, "legacy.json");
+            File.WriteAllText(plan, JsonSerializer.Serialize(new { plan = new CalibrationPlan("unused-root", "unused-engine", "unused-environment",
+                new Dictionary<string, string>(), [], [], 0, 0) }));
+            string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(plan)));
+            bool rejected = false;
+            try { ReplayCalibrationRun.Run(plan, hash); }
+            catch (IOException ex) { rejected = ex.Message.StartsWith("Legacy copy-export calibration admission"); }
+            Require(rejected, "Legacy child/resource admission reached device work for a changed exporter.");
+            return Task.CompletedTask;
+        });
         File.WriteAllText(Path.Combine(root, "verification.json"), JsonSerializer.Serialize(new
         {
             result = failed == 0 ? "passed" : "failed", checks = results,

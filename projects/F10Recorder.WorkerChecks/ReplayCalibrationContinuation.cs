@@ -80,6 +80,7 @@ internal static partial class ReplayCalibrationRun
     {
         Require(new FileInfo(path).Length <= 131072 && HashFile(path) == expectedPlanHash, "Continuation admission changed.");
         var continuation = JsonSerializer.Deserialize<CalibrationContinuationPlan>(File.ReadAllBytes(path), Json);
+        RequireExactExporterAdmission(continuation.Plan);
         ValidateContinuation(continuation);
         var plan = continuation.Plan;
         foreach (var input in plan.Files) Require(HashFile(input.Key) == input.Value, "Bound continuation input changed: " + input.Key);
