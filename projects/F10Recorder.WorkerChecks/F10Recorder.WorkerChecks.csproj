@@ -7,7 +7,11 @@
     <UseWindowsForms>true</UseWindowsForms>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
   </PropertyGroup>
-  <ItemGroup>
+  <ItemGroup Condition="'$(QualificationProductDirectory)' == ''">
     <ProjectReference Include="../F10Recorder.Windows/F10Recorder.Windows.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(QualificationProductDirectory)' != ''">
+    <Reference Include="F10Recorder.Windows"><HintPath>$(QualificationProductDirectory)/F10Recorder.Windows.dll</HintPath></Reference>
+    <Reference Include="F10Recorder.Core"><HintPath>$(QualificationProductDirectory)/F10Recorder.Core.dll</HintPath></Reference>
   </ItemGroup>
 </Project>

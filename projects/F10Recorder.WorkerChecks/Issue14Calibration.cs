@@ -21,9 +21,10 @@ internal static partial class ReplayCalibrationRun
             File.AppendAllText(Path.Combine(nativeChildRoot, "child-admissions.jsonl"), JsonSerializer.Serialize(new { ordinal, role, utc = DateTime.UtcNow }) + "\n");
         }
     }
-    internal static bool Exact14(CalibrationPlan p) => p?.ReplayExporterRecipe == ReplayExactExport.Recipe && p.MaximumChildren is 48 or 68 or 80 or 96 or 97 or 105 or 118 or 122 or 125 or 129 or 137 or 141 or 145 or 147 or 151;
+    internal static bool Exact14(CalibrationPlan p) => p?.ReplayExporterRecipe == ReplayExactExport.Recipe && (p.ProductionQualification || p.MaximumChildren is 48 or 68 or 80 or 96 or 97 or 105 or 118 or 122 or 125 or 129 or 137 or 141 or 145 or 147 or 151);
     static void ValidateExact14(CalibrationPlan p)
     {
+        if (p?.ProductionQualification == true) { ValidateProductionQualification(p); return; }
         if (p?.MaximumChildren is 118 or 122 or 125 or 129 or 137 or 141 or 145 or 147 or 151) { ValidateExactContinuation14(p); return; }
         Require(p?.ExactContinuationRoot == null && !p.OperatorForegroundHandoff && !p.UserForegroundHandoff && !p.AutomaticFixtureHandoff, "A legacy admission cannot select continuation policy.");
         bool corrected = p?.MaximumChildren == 68;
@@ -170,6 +171,7 @@ internal static partial class ReplayCalibrationRun
 
     static CalibrationPlan VerifyIssue14Execution(CalibrationPlan p, JsonElement document)
     {
+        if (p.ProductionQualification) return VerifyProductionExecution(p, document);
         var phase = document.GetProperty("nativePhase");
         Require(phase.ValueKind == JsonValueKind.Object, "Live run requires a reviewed cumulative native-phase receipt and completed rehearsal.");
         int reserve = ExactFinalWorker14(p) ? p.MaximumChildren is 145 or 147 or 151 ? 960 : 1200 : p.UserForegroundHandoff ? 2340 : 2160;
@@ -188,7 +190,7 @@ internal static partial class ReplayCalibrationRun
 
     static void ReuseIssue14EngineControls(CalibrationPlan p)
     {
-        Require(ExactContinuation14(p) || p.ReadonlyValidationPhases && (p.MaximumChildren == 97 && p.RetainedChildren == 60 || p.MaximumChildren == 105 && p.RetainedChildren == 68), "Only the reviewed interrupted restart may reuse controls.");
+        Require(p.ProductionQualification || ExactContinuation14(p) || p.ReadonlyValidationPhases && (p.MaximumChildren == 97 && p.RetainedChildren == 60 || p.MaximumChildren == 105 && p.RetainedChildren == 68), "Only an explicitly admitted restart may reuse controls.");
         string prior = null;
         foreach (string name in new[] { "version", "nonzero", "timeout", "output-limit" })
         {

@@ -8,9 +8,10 @@ namespace F10Recorder;
 
 internal static class CalibrationPattern
 {
+    internal static bool ValidLabel(string label) => label is "T01" or "T02" or "T03" or "H02" or "H01" or "H03";
     internal static int Run(string root, string label, bool manualHandoff = false)
     {
-        if (!new[] { "T01", "T02", "T03", "H02", "H01", "H03" }.Contains(label)) return 2;
+        if (!ValidLabel(label)) return 2;
         Forms.Application.SetUnhandledExceptionMode(Forms.UnhandledExceptionMode.ThrowException);
         CalibrationWakeLease wake = null;
         using var display = new CalibrationDesktop();

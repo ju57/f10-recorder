@@ -8,6 +8,15 @@ namespace F10Recorder;
 
 internal static class WorkerChecks
 {
+    internal static bool TryCalibrationFixture(string[] args, out string root, out string label, out bool manual)
+    {
+        root = label = null; manual = false;
+        if (args.Length is not (3 or 4) || args[0] != "--calibration-fixture" || !CalibrationPattern.ValidLabel(args[2])
+            || string.IsNullOrWhiteSpace(args[1]) || args.Length == 4 && args[3] != "manual-handoff") return false;
+        try { root = Path.GetFullPath(args[1]); }
+        catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
+        label = args[2]; manual = args.Length == 4; return true;
+    }
     static string data, desktop;
     static bool live;
     static bool gpuFixture;
@@ -64,6 +73,7 @@ internal static class WorkerChecks
             return args.Length == 2 && args[0] == "--replay-storage-races" ? ReplayStorageRaceChecks.Run(Path.GetFullPath(args[1])) : 2;
         if (args.Any(a => a.StartsWith("--replay-calibration", StringComparison.OrdinalIgnoreCase) || a.StartsWith("--calibration-fixture", StringComparison.OrdinalIgnoreCase)))
         {
+            if (args.Length == 5 && args[0] == "--replay-calibration-production-prepare") return ReplayCalibrationRun.PrepareProductionQualification(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]), Path.GetFullPath(args[4]));
             if (args.Length == 3 && args[0] == "--replay-calibration-output-metadata") return ReplayCalibrationRun.OutputMetadataChecks(Path.GetFullPath(args[1]), args[2]);
             if (args.Length == 3 && args[0] == "--replay-calibration-closed-validation") return ReplayCalibrationRun.ClosedValidationChecks(Path.GetFullPath(args[1]), args[2]);
             if (args.Length == 3 && args[0] == "--replay-calibration-captured-transition") return ReplayCalibrationRun.CapturedTransitionChecks(Path.GetFullPath(args[1]), args[2]);
@@ -115,9 +125,8 @@ internal static class WorkerChecks
             if (args.Length == 3 && args[0] == "--replay-calibration-controls") return ReplayCalibrationRun.Controls(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
             if (args.Length == 3 && args[0] == "--replay-calibration-run") return ReplayCalibrationRun.Run(Path.GetFullPath(args[1]), args[2]);
             if (args.Length == 3 && args[0] == "--replay-calibration-inspect-existing") return ReplayCalibrationRun.InspectExisting(Path.GetFullPath(args[1]), args[2]);
-            if (args.Length == 3 && args[0] == "--calibration-fixture") return CalibrationPattern.Run(Path.GetFullPath(args[1]), args[2]);
-            if (args.Length == 4 && args[0] == "--calibration-fixture" && args[3] == "manual-handoff" && args[2] is "H02" or "H01" or "H03")
-                return CalibrationPattern.Run(Path.GetFullPath(args[1]), args[2], manualHandoff: true);
+            if (TryCalibrationFixture(args, out string fixtureRoot, out string fixtureLabel, out bool manualFixture))
+                return CalibrationPattern.Run(fixtureRoot, fixtureLabel, manualFixture);
             return 2;
         }
         if (args.Any(value => value.StartsWith("--replay-output-validation", StringComparison.OrdinalIgnoreCase)))

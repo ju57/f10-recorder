@@ -1,5 +1,48 @@
 # Verification launch effects
 
+`--replay-calibration-production-prepare <plan> <engine-root> <fresh-root> <phase>`
+freezes a coherent self-contained production package and its exact Windows/Core
+libraries. Preparation reads display/audio endpoint metadata and runs tiny
+archive/alias/profile controls; it acquires no media and launches no child.
+The separate reviewed `tests/replay-calibration.ps1` plan runs six new sources
+in T01/T02/T03/H02/H01/H03 order, with primary-display pixels, default-system-audio
+loopback, quiet chirp playback and the owned fullscreen fixture. It freezes a new
+model after T03 and never refits held-out observations or imports the old model.
+Qualification storage must match the unchanged production cache/output volume.
+
+This production phase retains18 acquisitions/160 media-helper charges, including
+the wrong-working-directory launch and a fixture-argument rejection before
+capture. It charges preparer161 and plans31 further children (collector and
+five per source), to192 within a210 ceiling and24 acquisitions. Four completed
+engine controls from the failed attempt are hash-bound and reused against the
+same frozen product/engine. The actual fixture parser is checked for all six
+labels, both handoff forms and malformed inputs before capture.
+All old D: evidence and the isolated C: evidence are charged under60GB cap/58GB
+stop,60GB caller-free floors on both volumes,36GB retained evidence,40960 files,
+4096 directories and1GiB outside-build allowance. It retains16200 prior wall
+seconds and1200 offline seconds; one new7200-second phase has an absolute
+deadline and4200-second full-schedule reserve, with2700 cumulative offline
+seconds. There are no short warm-up exports in this six-main-source calibration.
+All500ms active guards remain through encoding/full runtime decode. Raw inputs
+and MP4 aliases use native snapshots/hardlinks; source-growth observations are
+persisted before inspection and final allocation is measured after metadata
+release. Failed attempts remain failed and retained. The capture plan performs
+no account catalog activation, installation, startup or preferences changes.
+
+A production partial-training continuation may retain only the unchanged complete
+T01/T02 samples from that same package and C: volume, then acquire T03/H02/H01/H03.
+It checks the original sample/process/lineage/audio/growth receipts and binds both
+observation traces; no prior model or held-out observation is imported. The first
+new model freezes after T03 using all three original training hashes. This route
+carries20 acquisitions/173 helpers plus preparer174 and21 planned children
+(195 within210;24 acquisitions),1240 prior offline seconds and a2820-second
+whole-schedule reserve within the unchanged23:26–01:26 phase. It makes one normal
+ShowWindow/SetForegroundWindow request on each verified owned fixture before
+acquisition, records the request result separately, and still requires actual
+foreground/ownership/visibility. No injected input or foreground-policy bypass
+is used. A refused request blocks capture; no failed source is repaired into a
+passing sample.
+
 The issue14 native continuation can reuse the three independently completed
 training samples and their unchanged frozen model, then acquire only H02/H01/H03.
 Its separate reviewed admission retains all prior failures, acquisition/process

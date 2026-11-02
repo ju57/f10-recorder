@@ -14,7 +14,7 @@ if (-not $Sdk) {
     if ($hosts.Count -ne 1) { throw 'Plan must bind exactly one dotnet host.' }
     $Sdk = $hosts[0].Name
 }
-$arguments = @($AssemblyPath, '--replay-calibration-run', $PlanFile, $ExpectedPlanSha256)
+$arguments = @([IO.Path]::GetFullPath($AssemblyPath), '--replay-calibration-run', [IO.Path]::GetFullPath($PlanFile), $ExpectedPlanSha256)
 if (-not $Run) {
     [pscustomobject]@{Executable=$Sdk;Arguments=$arguments;Root=$plan.plan.Root;Effects=@('Primary monitor pixels','Actual WASAPI system audio','Quiet repeating chirp playback','Controlled fullscreen window','NVIDIA NVENC',"$($plan.plan.BudgetBytes) byte operational cap;$($plan.plan.MaximumChildren) cumulative calibration children","$($plan.plan.DeadlineSeconds) second cumulative deadline;separate active/offline phases",'Task-private held-out capture/export claims;no account catalog activation','No installed profile/startup/display/vendor preferences changes')}
     return
@@ -30,7 +30,15 @@ $nonce = [guid]::NewGuid().ToString('N')
 $stdout = Join-Path $directory ("controller-$nonce.stdout.txt")
 $stderr = Join-Path $directory ("controller-$nonce.stderr.txt")
 $timer = [Diagnostics.Stopwatch]::StartNew()
-$absoluteDeadline = if ($plan.nativePhase.resumeStartedUtc) {
+$absoluteDeadline = if ($plan.plan.ProductionQualification) {
+    $start = ([datetime]$plan.nativePhase.startedUtc).ToUniversalTime()
+    $deadline = ([datetime]$plan.nativePhase.absoluteDeadlineUtc).ToUniversalTime()
+    $reserve = if ($plan.plan.ProductionTrainingRoot) { 2820 } else { 4200 }
+    if ($deadline -ne $start.AddSeconds(7200) -or $plan.nativePhase.priorElapsedSeconds -ne 16200 -or $plan.plan.DeadlineSeconds -ne 23400 -or $plan.nativePhase.conservativeRemainingSeconds -ne $reserve -or [datetime]::UtcNow -ge $deadline.AddSeconds(-$reserve)) {
+        throw 'Complete fresh production qualification no longer fits; no controller launched'
+    }
+    $deadline
+} elseif ($plan.nativePhase.resumeStartedUtc) {
     $resume = ([datetime]$plan.nativePhase.resumeStartedUtc).ToUniversalTime()
     $deadline = ([datetime]$plan.nativePhase.absoluteDeadlineUtc).ToUniversalTime()
     $freshSeconds = if ($plan.plan.MaximumChildren -eq 151) { 7200 } elseif ($plan.plan.MaximumChildren -eq 147) { 6300 } elseif ($plan.plan.MaximumChildren -in @(137,141,145)) { 5400 } else { 3600 }
@@ -48,7 +56,8 @@ if ($plan.nativePhase.resumeStartedUtc) {
 $owned = $null
 try {
     $quoted = $arguments | ForEach-Object { if ($_ -match '"') { throw 'Quotes unsupported in reviewed launcher arguments' }; '"' + $_ + '"' }
-    $owned = Start-Process -FilePath $Sdk -ArgumentList $quoted -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    $working = if ($plan.plan.ProductionQualification) { $plan.nativePhase.workingRepository } else { (Get-Location).Path }
+    $owned = Start-Process -FilePath $Sdk -ArgumentList $quoted -WorkingDirectory $working -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     $pidOwned = $owned.Id; $started = $owned.StartTime.ToUniversalTime()
     while (-not $owned.WaitForExit(1000)) {
         if ([datetime]::UtcNow -gt $absoluteDeadline.AddSeconds(-5)) { throw 'Outer calibration deadline reached; five-second owned cleanup reserve remains' }

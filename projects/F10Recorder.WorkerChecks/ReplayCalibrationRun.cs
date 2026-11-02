@@ -19,7 +19,7 @@ internal sealed record CalibrationPlan(string Root, string EngineRoot, string En
     bool FreezeRetainedAllocations = false, string ReplayExporterRecipe = null, int ValidationChildren = 0, string RehearsalReuseRoot = null,
     long SourceComponentBytes = 1_000_000_000, bool RetainActiveOutputHandles = false, bool ReadonlyValidationPhases = false,
     string ExactContinuationRoot = null, bool OperatorForegroundHandoff = false, bool UserForegroundHandoff = false, string ExactHeldoutContinuationRoot = null,
-    bool AutomaticFixtureHandoff = false);
+    bool AutomaticFixtureHandoff = false, bool ProductionQualification = false, string ProductionTrainingRoot = null);
 
 // Purpose-specific controller. It never provisions tools, edits ordinary profiles,
 // runs games, changes NVIDIA/display/audio preferences or retries a failed batch.
@@ -38,8 +38,8 @@ internal static partial class ReplayCalibrationRun
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     static void Require(bool value, string message) { if (!value) throw new IOException(message); }
     static void RequireExactExporterAdmission(CalibrationPlan plan)
-        => Require(plan?.ReplayExporterRecipe == ReplayExactExport.Recipe && plan.ValidationChildren >= (ExactFinalWorker14(plan) ? 1 : ExactContinuation14(plan) ? 3 : 8)
-            && plan.MaximumChildren - plan.RetainedChildren >= (ExactFinalWorker14(plan) ? 6 : ExactContinuation14(plan) ? 16 : plan.ReadonlyValidationPhases && (plan.MaximumChildren == 97 && plan.RetainedChildren == 60 || plan.MaximumChildren == 105 && plan.RetainedChildren == 68) ? 37 : 40),
+        => Require(plan?.ReplayExporterRecipe == ReplayExactExport.Recipe && plan.ValidationChildren >= (plan.ProductionQualification ? plan.Order.Length : ExactFinalWorker14(plan) ? 1 : ExactContinuation14(plan) ? 3 : 8)
+            && plan.MaximumChildren - plan.RetainedChildren >= (plan.ProductionQualification ? 1 + 5 * plan.Order.Length : ExactFinalWorker14(plan) ? 6 : ExactContinuation14(plan) ? 16 : plan.ReadonlyValidationPhases && (plan.MaximumChildren == 97 && plan.RetainedChildren == 60 || plan.MaximumChildren == 105 && plan.RetainedChildren == 68) ? 37 : 40),
             "Legacy copy-export calibration admission does not cover exact re-encoding and eight runtime validation children. Prepare a newly reviewed recipe/resource admission before live collection.");
     static string HashFile(string path) { using var file = File.OpenRead(path); return Convert.ToHexString(SHA256.HashData(file)); }
     static void Write(string path, object value)
@@ -114,6 +114,7 @@ internal static partial class ReplayCalibrationRun
         hardBytes = plan.BudgetBytes, minimumFreeBytes = plan.FloorBytes, deadlineSeconds = plan.DeadlineSeconds };
     internal static void ValidateResources(CalibrationPlan plan)
     {
+        Require(plan?.ProductionTrainingRoot == null || plan.ProductionQualification, "Retained production training requires its explicit qualification route.");
         if (plan?.MaximumChildren == 48 || plan?.ReplayExporterRecipe != null) { ValidateExact14(plan); return; }
         Require(plan?.OperatorForegroundHandoff != true && plan?.UserForegroundHandoff != true && plan?.AutomaticFixtureHandoff != true, "Explicit foreground handoff requires its exact continuation admission.");
         bool shutdownNoticeReplacement = plan != null && plan.MaximumChildren == 806 && plan.RetainedChildren == 774
@@ -221,7 +222,7 @@ internal static partial class ReplayCalibrationRun
         tracePersistence = "FIFO1024rows/8192bytes-per-row/64MiB-total; nonblocking enqueue; writer-only IO outside observation gate; overflow/error/incomplete3s drain invalidates qualification",
         observationContract = plan.ReadonlyValidationPhases ? "active-payload-readonly-validation-v2" : "active-offline-v1", expectedBytes = plan.StopBytes,
         fileLimit = plan.FileLimit, directoryLimit = plan.DirectoryLimit, offlineDeadlineSeconds = plan.OfflineDeadlineSeconds,
-        completeOfflineBatchCeilingSeconds = ExactFinalWorker14(plan) ? MainInspectionSeconds + 30 : ExactContinuation14(plan) ? 3 * MainInspectionSeconds + 3 * 30 : Exact14(plan)
+        completeOfflineBatchCeilingSeconds = plan.ProductionQualification ? plan.Order.Length * (MainInspectionSeconds + 30) : ExactFinalWorker14(plan) ? MainInspectionSeconds + 30 : ExactContinuation14(plan) ? 3 * MainInspectionSeconds + 3 * 30 : Exact14(plan)
             ? 6 * MainInspectionSeconds + 2 * ShortInspectionSeconds + (plan.RetainActiveOutputHandles ? 6 * 30 : 0) + (plan.ReadonlyValidationPhases ? 8 * 120 : 0)
             : CompleteOfflineBatchSeconds,
         readonlyValidation = plan.ReadonlyValidationPhases ? "120s per runtime decoder only after capture/audio absence and the same successful encoder's actual exit/absence; exact closed MP4/null-output recipe;130s combined save controller and product500ms guard unchanged; active before every encoder" : null,
@@ -936,7 +937,7 @@ internal static partial class ReplayCalibrationRun
                 Require(bootstrapClock.Elapsed.TotalSeconds < 35
                 && total.Elapsed.TotalSeconds < 330, "Capture bootstrap deadline."); Thread.Sleep(100); }
             capture = create.GetAwaiter().GetResult();
-            if (plan.ExactContinuationRoot != null) nativeEvidence = new NativeEvidence(root, capture.DirectoryPath,
+            if (plan.ExactContinuationRoot != null || plan.ProductionQualification) nativeEvidence = new NativeEvidence(root, capture.DirectoryPath,
                 completedSegments: ((IReplaySessionSource)capture).ReadSegments, excludeInitial: ((IReplaySessionSource)capture).ReplayInfo.ExcludeInitialSegment);
             capture.ValidationArgumentObserver = args =>
             {
@@ -964,7 +965,7 @@ internal static partial class ReplayCalibrationRun
             processes.Add(new { role = "capture", label, pid = captureIdentity.Pid, start = captureIdentity.StartedUtc, sessionDirectory = captureIdentity.SessionDirectory });
             if (workerCase == null)
             {
-                cache = new ReplayCache(plan.ExactContinuationRoot != null ? new ReplayFiles() : new RetainFiles(sampler, Exact14(plan)), cacheDirectory: Path.Combine(root, "buffer"), volumeReservations: sharedClaims);
+                cache = new ReplayCache(plan.ExactContinuationRoot != null || plan.ProductionQualification ? new ReplayFiles() : new RetainFiles(sampler, Exact14(plan)), cacheDirectory: Path.Combine(root, "buffer"), volumeReservations: sharedClaims);
                 id = cache.RegisterSession(nativeEvidence != null ? new EvidenceSource(capture, nativeEvidence) : capture);
             }
             void StopSource()
@@ -1055,7 +1056,7 @@ internal static partial class ReplayCalibrationRun
                 SaveProcess(root, "runtime-validation", capture.LastValidation), capture.ValidationArguments);
             Write(Path.Combine(root, "runtime-validation-exit.json"), sample.RuntimeProcess);
             Write(Path.Combine(root, plan.RetainActiveOutputHandles ? "pre-release-sample.json" : "sample.json"), sample);
-            if (label == "T02")
+            if (label == "T02" && !plan.ProductionQualification)
                 foreach (var control in new[] { (Seconds: 1, End: availableStart + 3), (Seconds: 2, End: availableStart + 6) })
                 {
                     sampler.Check(32_000_000);
@@ -1348,6 +1349,9 @@ internal static partial class ReplayCalibrationRun
         var samples = new List<Sample>(); var processes = new List<object>();
         var qualifications = new List<ReplayCalibrationSourceReceipt>();
         ReplayReferenceModel model = null;
+        if (plan.ProductionTrainingRoot != null)
+            foreach (var retained in ReadProductionTraining(plan.ProductionTrainingRoot, plan.Root))
+            { samples.Add(retained.Sample); qualifications.Add(retained.Receipt); }
         if (ExactContinuation14(plan))
         {
             model = FrozenContinuationModel(plan);
@@ -1365,7 +1369,7 @@ internal static partial class ReplayCalibrationRun
         }
         try
         {
-                if (ExactContinuation14(plan) || Exact14(plan) && (plan.MaximumChildren == 97 && plan.RetainedChildren == 60 || plan.MaximumChildren == 105 && plan.RetainedChildren == 68))
+                if (plan.ProductionQualification || ExactContinuation14(plan) || Exact14(plan) && (plan.MaximumChildren == 97 && plan.RetainedChildren == 60 || plan.MaximumChildren == 105 && plan.RetainedChildren == 68))
                     ReuseIssue14EngineControls(plan);
                 else
                 {
@@ -1376,7 +1380,7 @@ internal static partial class ReplayCalibrationRun
             foreach (string label in plan.Order)
             {
                 Action<int, IntPtr> focus = null;
-                if (ExactContinuation14(plan) && plan.OperatorForegroundHandoff || plan.MaximumChildren is 513 or 545 or 577 or 654 or 706 or 738 or 806)
+                if ((ExactContinuation14(plan) || plan.ProductionQualification) && plan.OperatorForegroundHandoff || plan.MaximumChildren is 513 or 545 or 577 or 654 or 706 or 738 or 806)
                 {
                     // Normal desktop activation completes before capture/bootstrap.
                     // Keep the same bounded handshake already used by continuation.
@@ -1389,6 +1393,16 @@ internal static partial class ReplayCalibrationRun
                     focus = (pid, hwnd) =>
                     {
                         Write(Path.Combine(plan.Root, "operator-focus-ready-" + label + ".json"), new { label, pid, hwnd = hwnd.ToInt64(), noCaptureAdmitted = true });
+                        if (plan.ProductionQualification)
+                        {
+                            Native.GetWindowThreadProcessId(hwnd, out uint owned);
+                            Require(owned == pid && Native.IsWindowVisible(hwnd), "Only the verified visible owned fixture may be activated.");
+                            Native.ShowWindow(hwnd, 5);
+                            bool requested = SetForegroundWindow(hwnd);
+                            Write(Path.Combine(plan.Root, "operator-activation-" + label + ".json"), new { label, pid,
+                                hwnd = hwnd.ToInt64(), requested, actualForeground = GetForegroundWindow() == hwnd,
+                                meaning = "One normal owned-window activation request before acquisition; actual foreground is checked independently. No focus-policy bypass or injected input." });
+                        }
                         var activation = Stopwatch.StartNew();
                         if (plan.UserForegroundHandoff)
                             while ((!plan.AutomaticFixtureHandoff && !File.Exists(Path.Combine(plan.Root, "operator-focused-" + label + ".json"))) || GetForegroundWindow() != hwnd)
@@ -1422,13 +1436,13 @@ internal static partial class ReplayCalibrationRun
                     sampler.BeginOffline("output-release", 0, 30);
                     string cell = Path.Combine(plan.Root, label);
                     var finals = new List<string> { sample.File };
-                    if (ExactContinuation14(plan)) finals = Directory.GetFiles(cell, "*.mp4", SearchOption.AllDirectories).ToList();
+                    if (ExactContinuation14(plan) || plan.ProductionQualification) finals = Directory.GetFiles(cell, "*.mp4", SearchOption.AllDirectories).ToList();
                     foreach (string control in Directory.GetFiles(cell, "control-?.json"))
                     {
                         using var entry = JsonDocument.Parse(File.ReadAllText(control));
                         finals.Add(entry.RootElement.GetProperty("shortResult").GetProperty("File").GetString());
                     }
-                    Require((ExactContinuation14(plan) ? finals.Count is >= 2 and <= 16 : finals.Count == (label == "T02" ? 3 : 1)) && finals.Distinct(StringComparer.OrdinalIgnoreCase).Count() == finals.Count
+                    Require((ExactContinuation14(plan) || plan.ProductionQualification ? finals.Count is >= 2 and <= 16 : finals.Count == (label == "T02" ? 3 : 1)) && finals.Distinct(StringComparer.OrdinalIgnoreCase).Count() == finals.Count
                         && finals.All(file => Path.GetFullPath(file).StartsWith(cell + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
                             && file.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase) && !file.EndsWith(".partial.mp4", StringComparison.OrdinalIgnoreCase) && File.Exists(file)),
                         "Release must cover exactly this case's declared main/short published files, including worker application folders.");
@@ -1477,7 +1491,8 @@ internal static partial class ReplayCalibrationRun
                     var target = ReplayStorage.ObserveCapacity(caseRoot);
                     long residual = Math.Max(0, samples.Max(s => s.FinalBytes - s.InputBytes));
                     long extra = Math.Max(0, samples.Max(s => s.PeakAllocation - ReplayReferenceModel.Round(s.FinalBytes, target.AllocationUnit)));
-                    string[] receipts = Order.Take(3).Select(l => HashFile(Path.Combine(plan.Root, l, "sample.json"))).ToArray();
+                    string[] receipts = Order.Take(3).Select(l => HashFile(Path.Combine(
+                        plan.ProductionTrainingRoot != null && l is "T01" or "T02" ? plan.ProductionTrainingRoot : plan.Root, l, "sample.json"))).ToArray();
                     var training = qualifications.Take(3).ToArray();
                     Require(training.All(q => q.CaptureVolume == target.Volume), "Capture/output volume is outside the first reference cell.");
                     var headroom = new ReplayCaptureHeadroom(sample.Scope, target.Volume, target.AllocationUnit,
@@ -1505,7 +1520,14 @@ internal static partial class ReplayCalibrationRun
             Write(Path.Combine(plan.Root, "observation-summary.json"), new { sampler.MaximumActiveGap, sampler.MaximumOfflineGap, sampler.MaximumGap,
                 sampler.Used, sampler.PeakUsed, sampler.MaximumFiles, sampler.MaximumDirectories, offlineSeconds = sampler.OfflineSeconds });
             double maximumActive = Math.Max(sampler.MaximumActiveGap, qualifications.Max(q => q.MaximumActiveGapMs));
-            string observationHash = ExactContinuation14(plan) ? ReplayReferenceModel.Hash(new { retained = HashFile(Path.Combine(plan.ExactContinuationRoot, "storage.csv")),
+            if (plan.ProductionTrainingRoot != null)
+            {
+                using var retainedFailure = JsonDocument.Parse(File.ReadAllText(Path.Combine(plan.ProductionTrainingRoot, "failure.json")));
+                maximumActive = Math.Max(maximumActive, retainedFailure.RootElement.GetProperty("MaximumActiveGap").GetDouble());
+            }
+            string observationHash = plan.ProductionTrainingRoot != null ? ReplayReferenceModel.Hash(new {
+                retained = HashFile(Path.Combine(plan.ProductionTrainingRoot, "storage.csv")), current = HashFile(Path.Combine(plan.Root, "storage.csv")) })
+                : ExactContinuation14(plan) ? ReplayReferenceModel.Hash(new { retained = HashFile(Path.Combine(plan.ExactContinuationRoot, "storage.csv")),
                 heldout = ExactFinalWorker14(plan) ? HashFile(Path.Combine(plan.ExactHeldoutContinuationRoot, "storage.csv")) : null, current = HashFile(Path.Combine(plan.Root, "storage.csv")) })
                 : HashFile(Path.Combine(plan.Root, "storage.csv"));
             var qualification = ReplayCalibrationCatalog.CreateReceipt(model, qualifications.ToArray(), maximumActive, observationHash, expectedPlanHash);
