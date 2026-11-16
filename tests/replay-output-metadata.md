@@ -39,3 +39,19 @@ sample. Only after terminal active coverage and bounded release should the
 collector freeze final allocation and `sample.json`. The larger pre-release
 allocation remains part of the observed peak. Main and short outputs are taken
 from explicit result paths, including worker application subfolders.
+
+## Launch effects
+
+These route-specific declarations are indexed by [test-effects.md](test-effects.md).
+Read the selected route's complete effects and bounds before execution.
+
+### tests/replay-output-metadata.ps1 -Plan
+
+`tests/replay-output-metadata.ps1 -Plan` previews a bounded nonmedia comparison;
+`-Prepare` freezes SDK/consumer/harness/source-byte identities, and `-Run` requires
+the reviewed plan hash. One180s helper writes two800MB dummy outputs with850MB
+preallocation under20GB retained-family/60GB caller-floor bounds. It uses real
+replay snapshots/capacity callbacks, native allocation queries, rewrite/close/
+rename/replacement and atomic release observations. No engine, media children,
+GPU, devices, window, capture, startup/preferences or model activation runs.
+See [output metadata checks](replay-output-metadata.md). Failed cases remain failed.

@@ -21,8 +21,14 @@ namespace F10Recorder
         }
         internal static string FinalDirectoryPath(Microsoft.Win32.SafeHandles.SafeFileHandle file)
         {
-            var name = new System.Text.StringBuilder(32768);
+            var name = new System.Text.StringBuilder(256);
             uint length = file.IsInvalid ? 0 : GetFinalPathNameByHandle(file, name, (uint)name.Capacity, 0);
+            // Required length includes NUL on insufficient buffer.
+            if (length >= name.Capacity && length <= 32768)
+            {
+                name.EnsureCapacity(checked((int)length));
+                length = GetFinalPathNameByHandle(file, name, (uint)name.Capacity, 0);
+            }
             if (length == 0 || length >= name.Capacity) throw new System.ComponentModel.Win32Exception();
             string final = name.ToString();
             if (final.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) return @"\\" + final.Substring(8);

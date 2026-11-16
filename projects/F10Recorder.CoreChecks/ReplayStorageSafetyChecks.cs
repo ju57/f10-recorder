@@ -5,7 +5,7 @@ internal static class PortableReplayStorageSafetyChecks
     internal static void Run()
     {
         const string volume = @"\\?\Volume{00000000-0000-0000-0000-000000000001}\";
-        var growth = new ReplayCaptureHeadroom(new string('A', 64), volume, 4096, 65536, 32768);
+        var growth = new ReplayCaptureHeadroom(new string('A', 64), volume, 4096, 65536, 32768, ReplayCapacityPolicy.CoverageMilliseconds);
         ReplayStorageAssessment Assess(long bytes, ReplayCaptureHeadroom model) => ReplayStorageSafety.Assess(new(volume, 4096, bytes), model);
         void Require(bool value, string reason) { if (!value) throw new Exception(reason); }
         var missing = Assess(20_000_000_000, null);

@@ -73,3 +73,32 @@ Both routes require fresh evidence and retain failures.
 These checks establish Storage controls integration, not output calibration,
 low-space/Resume, full-shell migration, native media or release acceptance.
 Issue13 remains open for its other criteria; all twelve gates stay unresolved.
+
+## Launch effects
+
+These route-specific declarations are indexed by [test-effects.md](test-effects.md).
+Read the selected route's complete effects and bounds before execution.
+
+### F10Recorder.MigrationTests
+
+`F10Recorder.MigrationTests <fresh-root> --storage-notice-ui` shows only an owned
+non-activating notification using software rendering. It verifies persistence
+beyond six seconds, accessible individual dismissal, native interaction styles,
+centered vector geometry, simultaneous storage-problem/save-result independence,
+screenshot-preparation hiding/restoration, and a later success notice's finite
+lifetime. It writes its own rendered PNG
+and report, then closes the window within twenty seconds. No recorder/worker,
+engine, desktop/audio capture, model activation, preference/startup write or
+installation occurs. Malformed notice routes reject before UI creation.
+
+### MigrationTests
+
+`MigrationTests <fresh-root> --storage-controls-ui` runs the focused Storage
+editor checks using controlled transport and real profile persistence. It renders
+software-only controls through a never-shown ordinary Window, with no capture
+exclusion, engine/probe/GPU, recording, startup or installed-app changes. Supplying
+the explicit WorkerChecks executable and retained private engine root selects the
+separate paused-worker named-pipe integration route, including task-owned hidden
+Ctrl+Alt+Shift+F4-F6 shortcuts and read-only engine verification. Review
+[Storage controls](storage-controls.md) for parameters, effects and limits before
+running either route. Neither route opens the native folder dialog during tests.

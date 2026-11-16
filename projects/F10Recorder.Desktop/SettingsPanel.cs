@@ -326,8 +326,13 @@ internal sealed class SettingsPanel : UserControl
         repairEngine.Content = recorder.Applying ? "Working…" : "Repair recording engine";
         apply.Content = recorder.Applying ? "Applying…" : "Apply changes"; recording.IsEnabled = entry.CanEdit && !recorder.Applying && recorder.ProfileStatus?.RequiresCorrection == false;
         if (reset != null) reset.IsEnabled = entry.CanEdit && !recorder.Applying;
-        if (cacheUsage != null) cacheUsage.Text = recorder.Metrics?.CacheBytes >= 0 && !string.IsNullOrEmpty(recorder.Metrics.SampledUtc) ? "Cache used: " + (recorder.Metrics.CacheBytes / 1_000_000_000m).ToString("0.###", CultureInfo.CurrentCulture) + " GB" : "Cache used: unavailable";
         var metrics = recorder.Metrics;
+        if (cacheUsage != null)
+        {
+            bool cacheKnown = metrics?.CacheBytes >= 0 && !string.IsNullOrEmpty(metrics.CacheBytesObservedUtc);
+            cacheUsage.Text = cacheKnown ? "Cache used (last checked): " + (metrics.CacheBytes / 1_000_000_000m).ToString("0.###", CultureInfo.CurrentCulture) + " GB" : "Cache used: unavailable";
+            ToolTip.SetTip(cacheUsage, cacheKnown ? "Last checked: " + metrics.CacheBytesObservedUtc : null);
+        }
         bool known = metrics != null && recorder.Phase is not (CapturePhase.Unknown or CapturePhase.Reconnecting);
         outputDemandStatus.Text = !known ? "Replay output estimate: unavailable." : metrics.ReplayOutputDemandKind switch
         {

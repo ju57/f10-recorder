@@ -83,8 +83,9 @@ internal static partial class ReplayCalibrationRun
                     && !p.GetProperty("OutputLimitExceeded").GetBoolean(), "Retained native process closure is incomplete.");
             }
             string capture = Path.Combine(cell, "capture-exit.json"), fixture = Path.Combine(cell, "fixture-exit.json");
+            RequireExportEvidence(sample, q);
             Require(q.Capture.EvidenceHash == HashFile(capture) && q.Source.EvidenceHash == HashFile(fixture)
-                && q.Export.EvidenceHash == HashFile(samplePath)
+                && q.Export == q.ExportProcesses[^1]
                 && q.RuntimeValidation.EvidenceHash == HashFile(Path.Combine(cell, "runtime-validation-exit.json"))
                 && q.Decode.EvidenceHash == HashFile(Path.Combine(cell, Path.GetFileName(sample.File) + ".decode.json"))
                 && q.SourcePicturesHash == HashFile(Path.Combine(cell, Path.GetFileName(sample.File) + ".source-pictures.json"))

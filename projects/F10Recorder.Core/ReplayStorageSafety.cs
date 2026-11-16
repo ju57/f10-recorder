@@ -2,7 +2,8 @@ namespace F10Recorder;
 
 // Only a qualified, matching model supplies these growth bounds. Missing model
 // evidence is represented by null, never by an assumed zero growth allowance.
-internal sealed record ReplayCaptureHeadroom(string Scope, string Volume, long AllocationUnit, long PollGrowthBytes, long StopGrowthBytes);
+internal sealed record ReplayCaptureHeadroom(string Scope, string Volume, long AllocationUnit, long PollGrowthBytes, long StopGrowthBytes,
+    int ObservationMilliseconds = 500);
 internal sealed record ReplayUnreservedCapacity(string Volume, long AllocationUnit, long Bytes);
 internal enum ReplayStorageSafetyKind { Unmeasured, Safe, Warning, Stop }
 internal enum ReplayStorageAssessmentSource { Unmeasured, Qualified }
@@ -43,7 +44,8 @@ internal static class ReplayStorageSafety
         }
         if (!ValidScope(headroom.Scope) || !ValidVolume(headroom.Volume) || !ValidUnit(headroom.AllocationUnit)
             || !string.Equals(capacity.Volume, headroom.Volume, StringComparison.OrdinalIgnoreCase)
-            || capacity.AllocationUnit != headroom.AllocationUnit || headroom.PollGrowthBytes < 0 || headroom.StopGrowthBytes < 0)
+            || capacity.AllocationUnit != headroom.AllocationUnit || headroom.PollGrowthBytes < 0 || headroom.StopGrowthBytes < 0
+            || headroom.ObservationMilliseconds != ReplayCapacityPolicy.CoverageMilliseconds)
             return Stop("Capture headroom is invalid or does not match the observed volume and allocation unit.");
         long threshold;
         try { threshold = checked(MinimumBytes + headroom.PollGrowthBytes + headroom.StopGrowthBytes); }

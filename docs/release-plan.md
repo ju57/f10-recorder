@@ -1,5 +1,7 @@
 # Windows + NVIDIA public beta release plan
 
+> **Planning baseline and decision history, 20–25 October 2026.** The consolidated [beta specification](beta-spec.md) owns accepted requirements; this page retains milestone ordering, rationale and the original interview/decision chronology. Open-work columns, candidate descriptions and status statements are dated planning observations. Follow [live issues](agents/issue-tracker.md) for current delivery/dependencies and the [README documentation map](../README.md#documentation) for document responsibilities.
+
 Date: 20 October 2026; planning decisions consolidated through Q158 on 25 October 2026 (Europe/Lisbon). Original planning baseline: `e8713db24a7476b0e7db71548ae69b75c57886af`; security implementation baseline: `692c4dfd6d50ff0062c51947c1c5351ee01ca7de`.
 
 **Status: M0 planning complete under Q158, 25 October 2026.** The [versioned consolidated spec](beta-spec.md), published as [issue #10](https://github.com/ju57/f10-recorder/issues/10), records accepted behaviour and an owned mandatory release-gate register. M1–M5, implementation and binary-release qualification remain open. This planning document authorizes no implementation, live capture, installation or public binary release. PR #4 integrated the five security remediations and screenshot-binding fix; remaining verification and final-candidate review still gate distribution.

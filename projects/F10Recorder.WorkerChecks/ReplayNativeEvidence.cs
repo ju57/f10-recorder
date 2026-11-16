@@ -111,7 +111,12 @@ internal static partial class ReplayCalibrationRun
     }
     sealed class EvidenceSource(IReplaySessionSource inner, NativeEvidence evidence) : IReplaySessionSource
     {
+        public bool SupportsOwnedExport => inner.SupportsOwnedExport;
+        // This decorator's prelaunch witness requires the complete closed
+        // snapshot. It deliberately retains the unstaged guarded route.
+        public bool SupportsStagedPreparation => false;
         public ReplaySessionInfo ReplayInfo => inner.ReplayInfo;
+        public double InputPrerollSeconds => inner.InputPrerollSeconds;
         public bool PreserveEvidence => true;
         public bool Stopped => inner.Stopped;
         public bool OutputProducerStopped => inner.OutputProducerStopped;
@@ -125,11 +130,16 @@ internal static partial class ReplayCalibrationRun
         public void CheckCaptureHealth(double end) => inner.CheckCaptureHealth(end);
         public List<Segment> ReadSegments() => inner.ReadSegments();
         public ReplayOutputDemand EstimateOutput(ReplayOutputSelection selection) => inner.EstimateOutput(selection);
+        public ReplayOutputDemand RecheckOutputDemand(ReplayOutputSelection selection) => inner.RecheckOutputDemand(selection);
         public void Export(IReadOnlyList<string> args, string snapshot) => throw new IOException("Guarded evidence export required.");
+        public void Export(ReplayExportRequest request, string snapshot, Action<ReplayProducerProof> changed, Action check)
+        { try { inner.Export(request, snapshot, proof => { long at = System.Diagnostics.Stopwatch.GetTimestamp(); try { changed(proof); } finally { evidence.RecordTiming("export-producer-changed", at); } }, check); } finally { evidence.PreserveOutput(request.Partial); } }
         public void Export(IReadOnlyList<string> args, string snapshot, Action<ReplayProducerProof> changed, Action check)
         { try { inner.Export(args, snapshot, proof => { long at = System.Diagnostics.Stopwatch.GetTimestamp(); try { changed(proof); } finally { evidence.RecordTiming("export-producer-changed", at); } }, check); } finally { evidence.PreserveOutput(args[^1]); } }
         public ReplayValidation ValidateOutput(string path, ReplayInterval interval, Action<ReplayProducerProof> changed, Action check)
         { try { return inner.ValidateOutput(path, interval, proof => { long at = System.Diagnostics.Stopwatch.GetTimestamp(); try { changed(proof); } finally { evidence.RecordTiming("validation-producer-changed", at); } }, check); } finally { evidence.PreserveOutput(path); } }
+        public ReplayValidation ValidateOutput(ReplayExportRequest request, Action<ReplayProducerProof> changed, Action check)
+        { try { return inner.ValidateOutput(request, proof => { long at = System.Diagnostics.Stopwatch.GetTimestamp(); try { changed(proof); } finally { evidence.RecordTiming("validation-producer-changed", at); } }, check); } finally { evidence.PreserveOutput(request.Partial); } }
         public void Dispose() => inner.Dispose();
     }
 

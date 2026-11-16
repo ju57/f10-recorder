@@ -87,12 +87,13 @@ internal static partial class ReplayCalibrationRun
                 string cell = Path.Combine(p.ExactHeldoutContinuationRoot, label);
                 var sample = JsonSerializer.Deserialize<Sample>(File.ReadAllText(Path.Combine(cell, "sample.json")));
                 var q = JsonSerializer.Deserialize<ReplayCalibrationSourceReceipt>(File.ReadAllText(Path.Combine(cell, "qualification-source.json")));
+                RequireExportEvidence(sample, q);
                 Require(q.Label == label && sample.Label == label && q.SampleHash == HashFile(Path.Combine(cell, "sample.json"))
                     && q.Scope == model.Scope && sample.Scope == model.Scope && q.AllTracksDecoded && q.SourceLineageVerified && q.NonSilentAudio
                     && q.MaximumActiveGapMs <= 500 && sample.ExportSeconds == 300 && q.ExportSeconds == 300
                     && new[] { q.Capture, q.Source, q.Export, q.Decode, q.RuntimeValidation }.All(child => child is
                         { ProducerAbsent: true, ActualExitObserved: true, ExitCode: 0, TimedOut: false, OutputLimitExceeded: false, ForcedTermination: false })
-                    && model.CoversObservations(sample.InputBytes, sample.FinalBytes, sample.FinalAllocation, sample.PeakAllocation),
+                    && model.CoversObservations(sample.InputBytes, sample.FinalBytes, sample.FinalAllocation, sample.CombinedPeakAllocation),
                     "A retained held-out source is incomplete or exceeds the unchanged frozen model.");
             }
         return model;

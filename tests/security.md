@@ -88,3 +88,21 @@ Directory leases use directory-listing access, with write sharing retained for
 normal child-file updates and delete sharing withheld for path stability. See
 [CreateFile sharing semantics](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)
 and [directory access masks](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-smb2/0a5934b1-80f1-4da0-b1bf-5e021c309b71).
+
+## Launch effects
+
+These route-specific declarations are indexed by [test-effects.md](test-effects.md).
+Read the selected route's complete effects and bounds before execution.
+
+### ./tests/settings-validation.ps1
+
+`./tests/settings-validation.ps1` exercises a paused direct recorder host with
+missing and untrusted engines in isolated storage. It creates hidden shortcut
+windows and temporarily registers Ctrl+Alt+Shift+F1–F6; an occupied shortcut fails
+the check without stopping its owner. It shows no capture-excluded UI, records
+no pixels/audio, probes no GPU, changes no startup setting and installs nothing.
+Use an ordinary Windows desktop token; a restricted sandbox can deny shortcut
+registration before the check reaches engine preflight.
+The check verifies rejection before proposed-shortcut admission, transaction
+notifications, preference persistence or capture startup. Portable CoreChecks
+exercise preference validation without engine initialization separately.

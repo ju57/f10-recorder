@@ -4,6 +4,23 @@
 
 The next engineering step is a controlled indexed-reader prototype. Fullscreen and coexistence remain deferred. E1 and M0 remain open.
 
+**2 November 2026 refresh:** read-only REA inspection verified that the installed
+capcore/nvmf hashes still match the identities below and refreshed the indexed
+reader, save-worker, sample-handoff and mux traces. The selected encoded-sample
+copying path remains supported. It does not establish equivalent full-output
+validation, exact arbitrary-frame cuts or newly measured NVIDIA save latency.
+Both analysis sessions were exported and closed without executing the target or
+changing NVIDIA preferences.
+
+F10 has since changed: accepted issue #14, merged through PR #84 at
+`d53d0617debf5616d873b0cd33c1743cf07f1eac`, reencodes the exact requested interval
+and fully decodes the closed MP4 before publication. The dated F10 source
+comparisons and line numbers below describe the October implementation. Issue
+#83's fresh worker baseline and finite reader/decoder pilots are documented by
+the [validated replay latency checks](../../tests/replay-latency.md); neither the
+older measurements nor a GOP-aligned mux diagnostic establishes current
+end-to-end latency acceptance.
+
 ## Scope, identity and method
 
 Read-only native analysis of the installed NVIDIA app **11.0.9.565**, using REA 6.4.0, Ghidra 12.1.4 and the configured full JDK 21.0.12.1. The matching retained capcore snapshot was reused; new save-path queries extended its coverage. The current nvmf binary was opened separately and its routines were located from current diagnostic references. Old 11.0.9.251 addresses were leads only, never assumed to apply to the current target.

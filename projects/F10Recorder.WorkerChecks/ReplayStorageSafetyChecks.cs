@@ -8,7 +8,7 @@ internal static class ReplayStorageSafetyChecks
 {
     const string Volume = @"\\?\Volume{00000000-0000-0000-0000-000000000001}\";
     const string OtherVolume = @"\\?\Volume{00000000-0000-0000-0000-000000000002}\";
-    static readonly ReplayCaptureHeadroom ControlledHeadroom = new(new string('A', 64), Volume, 4096, 4096, 8192);
+    static readonly ReplayCaptureHeadroom ControlledHeadroom = new(new string('A', 64), Volume, 4096, 4096, 8192, ReplayCapacityPolicy.CoverageMilliseconds);
     static ReplayStorageAssessment Assess(long bytes, ReplayCaptureHeadroom headroom = null) => ReplayStorageSafety.Assess(new(Volume, 4096, bytes), headroom ?? ControlledHeadroom);
     static void Require(bool condition, string error) { if (!condition) throw new Exception(error); }
     internal static int Run(string root)
@@ -66,7 +66,8 @@ internal static class ReplayStorageSafetyChecks
             string alias = Path.Combine(folder, "alias");
             var command = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             command.ArgumentList.Add("/d"); command.ArgumentList.Add("/c"); command.ArgumentList.Add("mklink"); command.ArgumentList.Add("/J"); command.ArgumentList.Add(alias); command.ArgumentList.Add(profile);
-            using var junction = Process.Start(command); junction.WaitForExit();
+            using var junction = Process.Start(command);
+            if (!junction.WaitForExit(3000)) { junction.Kill(); junction.WaitForExit(1000); throw new IOException("Controlled junction creation exceeded three seconds."); }
             Require(junction.ExitCode == 0, "Controlled profile junction fixture creation failed: " + junction.StandardError.ReadToEnd());
             Require(new ReplayStorageStopLatch(alias, security).Read().HoldId == stopped.HoldId, "Filesystem aliases must share the hold.");
             Require(new ReplayStorageStopLatch(Path.Combine(profile, "."), security).Read().Held, "Normalized path aliases must share the hold.");

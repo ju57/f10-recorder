@@ -213,3 +213,25 @@ The next implementation scope must supply reviewed native observation, trust,
 selection, snapshot, bounded execution and owned cleanup adapters before seeking
 separate engine/GPU/media execution authorization. Passing these controlled
 checks does not make that scope implemented or authorize the pilot.
+
+## Launch effects
+
+These route-specific declarations are indexed by [test-effects.md](test-effects.md).
+Read the selected route's complete effects and bounds before execution.
+
+### python -B tests/pilot_collector.py --plan
+
+`python -B tests/pilot_collector.py --plan` (also the default) is an inert R1
+preparation preview: no root/tool stat, hash, directory creation, build or child.
+`--assess <json>` reads only that caller-named JSON (at most 1 MiB), hashes those
+small input bytes and prints supplied storage assumptions/eligibility; it writes
+no files. JSON stdout is capped at 128 KiB including line endings; oversized
+results/errors return complete bounded rejection JSON, never partial success.
+Execution is always disabled. `test_pilot_collector.py` uses controlled
+observations and public entry functions, retains tiny JSON inputs/receipts under
+fresh ignored artifact directories, and launches no child/engine/probe/GPU/UI or
+capture. Output-boundary and nested-JSON cases use a capped CRLF stdout sink and
+fresh retained inputs/receipts; old oversized evidence is not rewritten or deleted.
+No profile/startup/vendor changes or cleanup of prior evidence occurs.
+See [pilot preparation](pilot-collector.md) for the deferred native/measurement
+adapters and the distinction between supplied cleanup and actual process proof.

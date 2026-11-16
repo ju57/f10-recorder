@@ -105,7 +105,7 @@ internal static class ReplayProducerRecoveryChecks
                     Require(store.ObserveUnreserved(profile, new Files()).Bytes == (sealedLaunch ? 9_000_000_000 : 8_999_995_904), "Recovery released the wrong future obligation.");
                     Require(latch.Read().Held && File.ReadAllText(sentinel) == "protected fixture footage", "Recovery must preserve the stop and retained material.");
                     string scope = new('A', 64);
-                    var headroom = new ReplayCaptureHeadroom(scope, Volume, 4096, 4096, 8192);
+                    var headroom = new ReplayCaptureHeadroom(scope, Volume, 4096, 4096, 8192, ReplayCapacityPolicy.CoverageMilliseconds);
                     var model = new ReplayReferenceModel("controlled-recovery", scope, Volume, 4096, 0, 0, [], headroom);
                     using var coordinator = new ReplayStorageCoordinator(latch, store, new Files(), () => new(model, null), (_, _) => true);
                     if (sealedLaunch)
@@ -136,7 +136,7 @@ internal static class ReplayProducerRecoveryChecks
             string profile = Path.Combine(root, "normal-profile"), security = Path.Combine(root, "normal-security"); Directory.CreateDirectory(profile);
             var latch = new ReplayStorageStopLatch(profile, security);
             string scope = new('B', 64);
-            var headroom = new ReplayCaptureHeadroom(scope, Volume, 4096, 4096, 8192);
+            var headroom = new ReplayCaptureHeadroom(scope, Volume, 4096, 4096, 8192, ReplayCapacityPolicy.CoverageMilliseconds);
             var model = new ReplayReferenceModel("controlled-normal-recovery", scope, Volume, 4096, 0, 0, [], headroom);
             using (var coordinator = new ReplayStorageCoordinator(latch, new ReplayVolumeReservations(security), new Files(), () => new(model, null), (_, _) => true))
             {

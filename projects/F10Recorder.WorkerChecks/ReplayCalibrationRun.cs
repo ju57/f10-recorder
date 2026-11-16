@@ -8,7 +8,7 @@ using Forms = System.Windows.Forms;
 
 namespace F10Recorder;
 
-internal sealed record CalibrationPlan(string Root, string EngineRoot, string Environment,
+internal sealed partial record CalibrationPlan(string Root, string EngineRoot, string Environment,
     Dictionary<string, string> Files, string[] Order, string[] RetainedRoots, double RetainedElapsedSeconds, int RetainedChildren,
     int MaximumChildren = 46, long BudgetBytes = 64_000_000_000,
     long StopBytes = 62_500_000_000, long FloorBytes = 60_000_000_000, int DeadlineSeconds = 9000,
@@ -19,12 +19,18 @@ internal sealed record CalibrationPlan(string Root, string EngineRoot, string En
     bool FreezeRetainedAllocations = false, string ReplayExporterRecipe = null, int ValidationChildren = 0, string RehearsalReuseRoot = null,
     long SourceComponentBytes = 1_000_000_000, bool RetainActiveOutputHandles = false, bool ReadonlyValidationPhases = false,
     string ExactContinuationRoot = null, bool OperatorForegroundHandoff = false, bool UserForegroundHandoff = false, string ExactHeldoutContinuationRoot = null,
-    bool AutomaticFixtureHandoff = false, bool ProductionQualification = false, string ProductionTrainingRoot = null);
+    bool AutomaticFixtureHandoff = false, bool ProductionQualification = false, string ProductionTrainingRoot = null,
+    bool CompositeQualification = false, bool CompositeManualForegroundHandoff = false, string CompositeTrainingRoot = null,
+    bool CompositeExplicitForegroundRelease = false,
+    long AdditionalHistoricalReserveBytes = 0, long CopyFallbackReserveBytes = 0,
+    string[] SelectedRetainedFiles = null);
 
 // Purpose-specific controller. It never provisions tools, edits ordinary profiles,
 // runs games, changes NVIDIA/display/audio preferences or retries a failed batch.
 internal static partial class ReplayCalibrationRun
 {
+    static ReplayPairedSelectionLease sameCaptureInputOwner;
+    static FrozenCalibrationHistory sameCapturePresentationOwner;
     internal const int MainInspectionSeconds = 60, ShortInspectionSeconds = 30, ArchiveSeconds = 60;
     internal const int CompleteOfflineBatchSeconds = 6 * MainInspectionSeconds + 2 * ShortInspectionSeconds + 8 * ArchiveSeconds;
     internal const int ReplacementVerificationSeconds = 60 + 120; // Preflight plus retained-output/preservation audit.
@@ -32,24 +38,50 @@ internal static partial class ReplayCalibrationRun
     internal const int FullReplacementWallSeconds = 4200;
     const int InspectionCleanupSeconds = 10;
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true, IncludeFields = true };
+    static readonly JsonSerializerOptions TerminalJson = new(Json) { WriteIndented = false };
     static readonly string[] Order = ["T01", "T02", "T03", "H02", "H01", "H03"];
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     static void Require(bool value, string message) { if (!value) throw new IOException(message); }
+    internal static bool ConfirmedProducerAbsent(ReplayExportProcessReceipt receipt)
+        => receipt is { ProducerAbsent: true } &&
+            (receipt is { ProcessId: > 0, ProcessStartedUtc: not null, ActualExitObserved: true }
+                // Run joins launch work before returning this exact no-child
+                // shape. A missing PID or an arbitrary failure is insufficient.
+                || receipt is { ProcessId: null, ProcessStartedUtc: null, ActualExitObserved: false, Failure: "launch-failed" });
     static void RequireExactExporterAdmission(CalibrationPlan plan)
         => Require(plan?.ReplayExporterRecipe == ReplayExactExport.Recipe && plan.ValidationChildren >= (plan.ProductionQualification ? plan.Order.Length : ExactFinalWorker14(plan) ? 1 : ExactContinuation14(plan) ? 3 : 8)
             && plan.MaximumChildren - plan.RetainedChildren >= (plan.ProductionQualification ? 1 + 5 * plan.Order.Length : ExactFinalWorker14(plan) ? 6 : ExactContinuation14(plan) ? 16 : plan.ReadonlyValidationPhases && (plan.MaximumChildren == 97 && plan.RetainedChildren == 60 || plan.MaximumChildren == 105 && plan.RetainedChildren == 68) ? 37 : 40),
             "Legacy copy-export calibration admission does not cover exact re-encoding and eight runtime validation children. Prepare a newly reviewed recipe/resource admission before live collection.");
     static string HashFile(string path) { using var file = File.OpenRead(path); return Convert.ToHexString(SHA256.HashData(file)); }
-    static void Write(string path, object value)
+    static void Write(string path, object value, int maximumBytes = 131072)
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(value, Json);
-        Require(bytes.Length <= 131072, "Calibration JSON exceeds128KiB.");
+        // Terminal reports aggregate six full samples. Whitespace must not make
+        // a valid complete report exceed the same bounded evidence envelope.
+        bool terminal = Path.GetFileName(path) is "result.json" or "failure.json";
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(value, terminal ? TerminalJson : Json);
+        Require(maximumBytes is >= 131072 and <= 4194304 && bytes.Length <= maximumBytes, "Calibration JSON exceeds its finite byte bound.");
         using var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
         output.Write(bytes); output.Flush(true);
     }
-    internal static int Prepare(string path, string engineRoot)
+    static void WriteFailure(string root, Exception error, object report)
+    {
+        Console.Error.WriteLine(error + " Evidence: " + root);
+        try { Write(Path.Combine(root, "failure.json"), report); }
+        catch (Exception reportingError)
+        {
+            // Reporting failure must not replace the original failure or skip
+            // Run's finally/owned-output cleanup. Never overwrite a partial file.
+            static string Bounded(Exception e) { string text = e.ToString(); return text.Length <= 8192 ? text : text[..8192]; }
+            Console.Error.WriteLine("Failure report could not be written: " + Bounded(reportingError));
+            try { Write(Path.Combine(root, "failure-summary.json"), new { result = "failed-incomplete-report", error = Bounded(error),
+                reportingError = Bounded(reportingError), fullReportUnavailable = true }); }
+            catch (Exception fallbackError) { Console.Error.WriteLine("Failure summary could not be written: " + Bounded(fallbackError)); }
+        }
+    }
+    internal static int Prepare(string path, string engineRoot, bool composite = false, bool compositeManualForegroundHandoff = false,
+        string compositeTrainingRoot = null, bool compositeExplicitForegroundRelease = false)
     {
         string assembly = typeof(ReplayCalibrationRun).Assembly.Location;
         string build = Path.GetDirectoryName(assembly);
@@ -59,11 +91,35 @@ internal static partial class ReplayCalibrationRun
             Path.Combine(build, "F10Recorder.WorkerChecks.deps.json"), Path.Combine(build, "F10Recorder.WorkerChecks.runtimeconfig.json"), engine }
             .ToDictionary(Path.GetFullPath, HashFile, StringComparer.OrdinalIgnoreCase);
         string admission = Path.GetDirectoryName(Path.GetFullPath(path));
+        if(composite)PrepareOwnedHistoryOutside(admission);
+        if (composite)
+        {
+            string controller = Path.GetFullPath(Path.Combine("tests", "replay-composite-calibration.ps1"));
+            files.Add(controller, HashFile(controller));
+        }
         foreach (string evidence in new[] { "source-manifest.json", "host-facts.json", "preservation-before.json", "RUN.md", "retained-attempt.json", "resources.json", "rehearsal.json" })
         {
             string file = Path.Combine(admission, evidence);
             Require(File.Exists(file), "Missing frozen admission evidence: " + file);
             files.Add(file, HashFile(file));
+        }
+        if (compositeTrainingRoot != null)
+        {
+            string retainedBinding = Path.Combine(admission, "composite-training-bindings.json");
+            files.Add(retainedBinding, HashFile(retainedBinding));
+        }
+        if (composite)
+        {
+            foreach (string name in new[] { "outside-storage-baseline.json", "outside-inventory.json", "outside-inventory-plan.json" })
+            { string file = Path.Combine(admission, name); files.Add(file, HashFile(file)); }
+            using var outside=JsonDocument.Parse(File.ReadAllText(Path.Combine(admission,"outside-inventory-plan.json")));
+            if(outside.RootElement.TryGetProperty("kind",out var outsideKind) && outsideKind.GetString()=="owned-history-fixed-outside-inputs-v1")
+                foreach(var entry in outside.RootElement.GetProperty("files").EnumerateArray())
+                {
+                    string file=entry.GetProperty("path").GetString(),hash=entry.GetProperty("sha256").GetString();
+                    Require(HashFile(file)==hash && (!files.TryGetValue(file,out var bound)||bound==hash),"Changed declared fixed outside input.");
+                    files.TryAdd(file,hash);
+                }
         }
         string dotnet = Path.GetDirectoryName(Environment.ProcessPath);
         foreach (string directory in new[] { Path.Combine(dotnet, "host", "fxr"), Path.Combine(dotnet, "shared", "Microsoft.NETCore.App"),
@@ -77,8 +133,27 @@ internal static partial class ReplayCalibrationRun
         string root = Path.GetFullPath(resourceRecord.RootElement.GetProperty("experimentRoot").GetString());
         Require(!Directory.Exists(root) && !File.Exists(root), "Calibration needs its approved fresh experiment root.");
         var capacity = ReplayStorage.ObserveCapacity(Path.GetDirectoryName(root));
-        Require(capacity.AvailableBytes >= checked(resourceRecord.RootElement.GetProperty("budgetBytes").GetInt64() + 60_000_000_000L),
-            "Insufficient caller-free floor plus whole proposed batch budget.");
+        bool capacityContinuation = resourceRecord.RootElement.TryGetProperty("freshCandidateAdmission", out var candidateKind)
+            && candidateKind.GetString() == CapacityContinuationAdmission;
+        bool durationContinuation = candidateKind.ValueKind == JsonValueKind.String && candidateKind.GetString() == DurationTrainingAdmission;
+        string durationKind = candidateKind.ValueKind == JsonValueKind.String ? candidateKind.GetString() : null;
+        var durationShape = DurationPreparation(durationKind,
+            DurationAdmissionKind(durationKind) ? resourceRecord.RootElement.GetProperty("replayMinutes").GetInt32() : 5);
+        bool durationCohort = durationShape.HasValue;
+        int replayMinutes = durationShape?.Minutes ?? 5;
+        Require(ReplayReferenceModel.SupportedMinutes(replayMinutes), "Unsupported duration cell.");
+        long sourceBytes = durationShape?.Source ?? 1_000_000_000L;
+        long outputBytes = durationShape?.Output ?? 2_000_000_000L;
+        long copyBytes = durationShape?.Copy ?? 1_000_000_000L;
+        long scratchBytes = durationShape?.Scratch ?? 1_256_000_000L;
+        long traceBytes = durationShape?.Trace ?? 67_108_864L;
+        bool capacityCohort = durationCohort || capacityContinuation || candidateKind.ValueKind == JsonValueKind.String && candidateKind.GetString() is CapacityAdmission or OwnedHistoryAdmission or OwnedHistoryRepairAdmission;
+        string[] admittedOrder = durationKind is ContextConfirmationAdmission or SameCaptureContextAdmission ? ["H03"] : compositeTrainingRoot == null ? Order : Order.Skip(capacityContinuation || durationContinuation ? 3 : 2).ToArray();
+        long namespaceBytes = DurationAliasNamespaceBytes(durationKind, replayMinutes, admittedOrder.Length);
+        long requiredFree = capacityCohort ? new QualificationCommitments(admittedOrder, sourceBytes, outputBytes, copyBytes, scratchBytes,traceBytes,namespaceBytes).InitialRequiredFreeBytes(60_000_000_000L+(durationCohort || candidateKind.GetString() is OwnedHistoryAdmission or OwnedHistoryRepairAdmission?OwnedHistoryOutsideFuture:0))
+            : checked(resourceRecord.RootElement.GetProperty("budgetBytes").GetInt64() + 60_000_000_000L);
+        Require(capacity.AvailableBytes >= requiredFree,
+            "Insufficient caller-free floor plus new finite acquisition/output commitments.");
         var environment = new { os = Environment.OSVersion.VersionString, machine = Environment.MachineName,
             bounds.Width, bounds.Height, primaryOutput = Native.PrimaryOutputIndex(), endpoint.EndpointId, endpoint.SampleRate, endpoint.Channels, endpoint.FfmpegFormat, capacity };
         using var retained = JsonDocument.Parse(File.ReadAllText(Path.Combine(admission, "retained-attempt.json")));
@@ -86,7 +161,8 @@ internal static partial class ReplayCalibrationRun
         double retainedSeconds = retained.RootElement.GetProperty("elapsedSeconds").GetDouble();
         int retainedChildren = retained.RootElement.GetProperty("retainedChildren").GetInt32();
         double offline = retained.RootElement.GetProperty("offlineSeconds").GetDouble();
-        var plan = new CalibrationPlan(root, MediaDependency.RootDirectory, ReplayReferenceModel.Hash(environment), files, Order, retainedRoots, retainedSeconds, retainedChildren,
+        var plan = new CalibrationPlan(root, MediaDependency.RootDirectory, ReplayReferenceModel.Hash(environment), files,
+            admittedOrder, retainedRoots, retainedSeconds, retainedChildren,
             MaximumChildren: resourceRecord.RootElement.GetProperty("maximumChildren").GetInt32(),
             RetainedOfflineSeconds: offline, MetadataHandleRoots: retainedRoots, ReuseCurrentMetadataHandles: true,
             DirectoryLimit: resourceRecord.RootElement.TryGetProperty("directoryLimit", out var dl) ? dl.GetInt32() : 48,
@@ -95,25 +171,73 @@ internal static partial class ReplayCalibrationRun
             FileLimit: resourceRecord.RootElement.TryGetProperty("fileLimit", out var fl) ? fl.GetInt32() : 4096,
             FreezeRetainedAllocations: resourceRecord.RootElement.TryGetProperty("freezeRetainedAllocations", out var fr) && fr.GetBoolean(),
             OfflineDeadlineSeconds: resourceRecord.RootElement.GetProperty("offlineDeadlineSeconds").GetInt32(),
-            OutsideBuildAllowanceBytes: resourceRecord.RootElement.GetProperty("outsideBuildAllowanceBytes").GetInt64());
+            OutsideBuildAllowanceBytes: resourceRecord.RootElement.GetProperty("outsideBuildAllowanceBytes").GetInt64(),
+            AdditionalHistoricalReserveBytes: resourceRecord.RootElement.TryGetProperty("additionalHistoricalReserveBytes", out var hr) ? hr.GetInt64() : 0,
+            CopyFallbackReserveBytes: resourceRecord.RootElement.TryGetProperty("copyFallbackReserveBytes", out var cr) ? cr.GetInt64() : 0);
         plan = plan with { BudgetBytes = resourceRecord.RootElement.GetProperty("budgetBytes").GetInt64(),
-            StopBytes = resourceRecord.RootElement.GetProperty("stopBytes").GetInt64(), DeadlineSeconds = resourceRecord.RootElement.GetProperty("deadlineSeconds").GetInt32() };
+            ReplayMinutes = replayMinutes,
+            StopBytes = resourceRecord.RootElement.GetProperty("stopBytes").GetInt64(), DeadlineSeconds = resourceRecord.RootElement.GetProperty("deadlineSeconds").GetInt32(),
+            FreshCandidateAdmission = resourceRecord.RootElement.TryGetProperty("freshCandidateAdmission", out var admissionKind) ? admissionKind.GetString() : null };
+        if (plan.FreshCandidateAdmission != null)
+            foreach (string name in new[] { "fresh-candidate-qualification.json", "outside-forward-envelope.json", "outside-outstanding-writes.json" })
+            {
+                string file = Path.Combine(admission, name);
+                Require(File.Exists(file), "Fresh candidate preparation is missing a bound role: " + name);
+                files.Add(file, HashFile(file));
+            }
+        if (ContextQualification(plan))
+        {
+            string file = Path.Combine(admission, "coverage-freeze.json"); files.Add(file, HashFile(file));
+        }
+        if(OwnedHistoryRepair(plan))
+        {
+            string file=Path.Combine(admission,"prior-failed-attempt.json");files.Add(file,HashFile(file));
+            using var prior=ReadOwnedHistoryJson(file);
+            foreach(string role in new[]{"planPath","controllerPath"})
+            {string evidence=prior.RootElement.GetProperty(role).GetString();files.TryAdd(evidence,HashFile(evidence));}
+        }
+        if (durationContinuation)
+        {
+            string disposition = Path.Combine(admission, "duration-failure-disposition.json"); files.Add(disposition, HashFile(disposition));
+            using var prior = ReadOwnedHistoryJson(disposition);
+            foreach (string role in new[] { "oldPlan", "oldController", "nativeClosure", "reuseAudit", "reuseReview", "helperCompatibilityReview" })
+            { string evidence = prior.RootElement.GetProperty(role).GetString(); files.TryAdd(evidence, HashFile(evidence)); }
+        }
+        Require(!compositeManualForegroundHandoff || composite, "Manual composite handoff requires the composite route.");
+        Require(!compositeExplicitForegroundRelease || composite && compositeManualForegroundHandoff,
+            "Explicit controller release requires the composite pre-capture handoff.");
+        if (composite) plan = plan with { CompositeQualification = true, CompositeManualForegroundHandoff = compositeManualForegroundHandoff, ReplayExporterRecipe = ReplaySaveExport.PolicyIdentity,
+            ValidationChildren = SameCaptureQualification(plan) ? 6 : ContextQualification(plan) ? 3 : compositeTrainingRoot == null ? 18 : capacityContinuation || durationContinuation ? 9 : 12, SourceComponentBytes = sourceBytes,
+            CompositeTrainingRoot = compositeTrainingRoot == null ? null : Path.GetFullPath(compositeTrainingRoot),
+            CompositeExplicitForegroundRelease = compositeExplicitForegroundRelease };
+        plan = plan with { EvidenceRoles = PreparedEvidenceRoles(admission, files) };
         ValidateResources(plan);
         using var resources = JsonDocument.Parse(File.ReadAllText(Path.Combine(admission, "resources.json")));
         Require(resources.RootElement.GetProperty("budgetBytes").GetInt64() == plan.BudgetBytes
             && resources.RootElement.GetProperty("maximumChildren").GetInt32() == plan.MaximumChildren
             && resources.RootElement.GetProperty("deadlineSeconds").GetInt32() == plan.DeadlineSeconds, "Approved resource record differs from plan.");
         using var rehearsal = JsonDocument.Parse(File.ReadAllText(Path.Combine(admission, "rehearsal.json")));
-        Require(rehearsal.RootElement.GetProperty("result").GetString() == "passed-full-nonmedia-rehearsal", "A complete successful full-size rehearsal is required.");
-        Write(path, new { plan, environment, effects = Effects(plan), recipe = Recipe(plan), execution_requires_review = true });
+        Require(rehearsal.RootElement.GetProperty("result").GetString() == (composite ? "passed-composite-storage-rehearsal" : "passed-full-nonmedia-rehearsal"),
+            "A successful full-size rehearsal of this collector's storage shape is required.");
+        var prepared = DateTime.UtcNow;
+        Write(path, new { plan, environment, effects = Effects(plan), recipe = Recipe(plan), execution_requires_review = true,
+            createdUtc = prepared, expiresUtc = prepared.AddHours(durationCohort ? 10 : 2) });
         Console.WriteLine(path); return 0;
     }
     static object Effects(CalibrationPlan plan) => new { realPrimaryMonitor = true, realDefaultSystemAudio = true, quietChirpPlayback = true,
         gpuNvenc = true, fullScreenControlledFixture = true, startupWrites = false, installedProfileWrites = false,
-        vendorPreferencesWrites = false, displayChanges = false, sourceSeconds = 330, sources = plan.Order.Length, maximumChildren = plan.MaximumChildren,
+        vendorPreferencesWrites = false, displayChanges = false, sourceSeconds = AcquisitionSeconds(plan), replayMinutes = plan.ReplayMinutes,
+        sources = plan.Order.Length, maximumChildren = plan.MaximumChildren,
         hardBytes = plan.BudgetBytes, minimumFreeBytes = plan.FloorBytes, deadlineSeconds = plan.DeadlineSeconds };
     internal static void ValidateResources(CalibrationPlan plan)
     {
+        Require(plan != null && (plan.ReplayMinutes == 5 || DurationQualification(plan)), "Other durations require their distinct fresh reference admission.");
+        Require(plan?.CompositeTrainingRoot == null || plan.CompositeQualification, "A paired training continuation requires its distinct composite admission.");
+        Require(plan?.CompositeManualForegroundHandoff != true || plan.CompositeQualification,
+            "Composite operator handoff cannot alter a historical or non-composite admission.");
+        Require(plan?.CompositeExplicitForegroundRelease != true || plan.CompositeQualification && plan.CompositeManualForegroundHandoff,
+            "Explicit controller release cannot bypass the composite foreground handoff.");
+        if (plan?.CompositeQualification == true) { ValidateCompositeResources(plan); return; }
         Require(plan?.ProductionTrainingRoot == null || plan.ProductionQualification, "Retained production training requires its explicit qualification route.");
         if (plan?.MaximumChildren == 48 || plan?.ReplayExporterRecipe != null) { ValidateExact14(plan); return; }
         Require(plan?.OperatorForegroundHandoff != true && plan?.UserForegroundHandoff != true && plan?.AutomaticFixtureHandoff != true, "Explicit foreground handoff requires its exact continuation admission.");
@@ -214,15 +338,28 @@ internal static partial class ReplayCalibrationRun
         if (fresh) Require(plan.RetainedElapsedSeconds + (startupReplacement ? FullReplacementWallSeconds : 4080) <= plan.DeadlineSeconds,
             "Fresh calibration requires its full conservative phase/closeout envelope before capture.");
     }
-    static object Recipe(CalibrationPlan plan) => new { version = "reference-exact-bytes-v2", baseline = "sum-selected-TS-EOF",
+    static object Recipe(CalibrationPlan plan) => new { version = plan.CompositeQualification ? "reference-composite-paired-v1" : "reference-exact-bytes-v2", baseline = "sum-selected-TS-EOF",
+        compositePolicy = plan.CompositeQualification ? ReplaySaveExport.PolicyIdentity : null,
+        compositeCapture = plan.CompositeQualification
+            ? "all-six-primary-saves-while-capture-continues; actual-request-clock-interval; stop-after-primary-before-paired-exact-fallback"
+            : null,
+        compositeForegroundHandoff = plan.CompositeManualForegroundHandoff
+            ? $"up-to180seconds-for-operator-click-on-owned-visible-fixture-before-capture; then-independent10second-foreground-proof; fixture{FixtureSeconds(plan)}seconds-including-handoff-and-startup; acquisition{AcquisitionSeconds(plan)}seconds-from-completed-handoff"
+            : null,
+        sourceBarcode = "seed256+floor(animationFrame/divisor); divisor=ceil((ceil(fixtureLifetimeSeconds*1000/16)+1)/25000); timer-enforces-finite-frame-and-lifetime; unchanged-seed-complement-static-motion-and-25000-ID-range",
+        compositeControllerRelease = plan.CompositeExplicitForegroundRelease
+            ? "capture-disarmed-until-all-UI-calls-return-and-controller-atomically-publishes-matching-nonce-PID-window-case; actual-foreground-still-required; same180second-handoff"
+            : null,
+        pairedOutputs = plan.CompositeQualification ? "six acquisitions; packet+exact-fallback from same protected selection; train union first3pairs; both heldout variants, no-refit" : null,
         residual = "max(0,max(training-finalEOF-inputEOF))", guard = "max(16MiB,ceil(base/20))",
-        peakExtra = "max-training(sampled-peakAllocation-round(finalEOF))", rounding = "requested-output300seconds; preceding-head-input-span-up-to301.1seconds",
+        peakExtra = "max-training(sampled-peakAllocation-round(finalEOF))", rounding = $"requested-output{ReferenceSeconds(plan)}seconds; preceding-head-input-span-up-to{ReferenceSeconds(plan)+1.1}seconds",
         heldoutMustPass = "zero-final-or-observed-peak-exceedances; no-refit; no-universal-bound",
-        sampleIntervalMs = 100, maximumActiveGapMs = 500,
+        inventorySampleIntervalMs = 100, maximumInventoryEvidenceGapMs = ReplayCapacityPolicy.CoverageMilliseconds,
+        capacitySampleIntervalMs = ReplayCapacityPolicy.IntervalMilliseconds, maximumCapacityObservationGapMs = ReplayCapacityPolicy.CoverageMilliseconds,
         tracePersistence = "FIFO1024rows/8192bytes-per-row/64MiB-total; nonblocking enqueue; writer-only IO outside observation gate; overflow/error/incomplete3s drain invalidates qualification",
         observationContract = plan.ReadonlyValidationPhases ? "active-payload-readonly-validation-v2" : "active-offline-v1", expectedBytes = plan.StopBytes,
         fileLimit = plan.FileLimit, directoryLimit = plan.DirectoryLimit, offlineDeadlineSeconds = plan.OfflineDeadlineSeconds,
-        completeOfflineBatchCeilingSeconds = plan.ProductionQualification ? plan.Order.Length * (MainInspectionSeconds + 30) : ExactFinalWorker14(plan) ? MainInspectionSeconds + 30 : ExactContinuation14(plan) ? 3 * MainInspectionSeconds + 3 * 30 : Exact14(plan)
+        completeOfflineBatchCeilingSeconds = plan.CompositeQualification ? 12 * MainInspectionLimit(plan) : plan.ProductionQualification ? plan.Order.Length * (MainInspectionSeconds + 30) : ExactFinalWorker14(plan) ? MainInspectionSeconds + 30 : ExactContinuation14(plan) ? 3 * MainInspectionSeconds + 3 * 30 : Exact14(plan)
             ? 6 * MainInspectionSeconds + 2 * ShortInspectionSeconds + (plan.RetainActiveOutputHandles ? 6 * 30 : 0) + (plan.ReadonlyValidationPhases ? 8 * 120 : 0)
             : CompleteOfflineBatchSeconds,
         readonlyValidation = plan.ReadonlyValidationPhases ? "120s per runtime decoder only after capture/audio absence and the same successful encoder's actual exit/absence; exact closed MP4/null-output recipe;130s combined save controller and product500ms guard unchanged; active before every encoder" : null,
@@ -230,20 +367,24 @@ internal static partial class ReplayCalibrationRun
         historicalAllocation = plan.FreezeRetainedAllocations ? "fresh native baseline; GENERIC_READ/share-read leases deny data writes and unlink through aliases; sticky synchronous subtree change handles; per-volume caller-free; full pre/post hashes" : "native allocation refreshed each scan",
         activeOutputMetadataHandles = plan.RetainActiveOutputHandles,
         outputAllocation = plan.RetainActiveOutputHandles ? "fresh native peak includes held allocation; final allocation after bounded producer-absent metadata release" : "short-lived metadata observations",
-        phaseLimitsSeconds = new { captureSetup = 330, exportController = 130, exportFailureCleanup = "close the owned capture job before joining accepted export/validator work; no long child timeout wait",
-            foregroundAdmission = CalibrationForeground.DeadlineSeconds, mainInspection = MainInspectionSeconds, mainDecodeChild = MainInspectionSeconds - InspectionCleanupSeconds,
+        phaseLimitsSeconds = new { captureSetup = AcquisitionSeconds(plan), exportController = ExportControllerLimit(plan), exportFailureCleanup = "close the owned capture job before joining accepted export/validator work; no long child timeout wait",
+            foregroundAdmission = CalibrationForeground.DeadlineSeconds, mainInspection = MainInspectionLimit(plan), mainDecodeChild = MainInspectionLimit(plan) - InspectionCleanupSeconds,
             shortInspection = ShortInspectionSeconds, shortDecodeChild = ShortInspectionSeconds - InspectionCleanupSeconds,
             archive = ArchiveSeconds, engineControls = 40 },
-        componentBytes = new { sources = checked((ExactFinalWorker14(plan) ? 1 : ExactContinuation14(plan) ? 3 : 6) * plan.SourceComponentBytes), copyFallback = Exact14(plan) ? 1_010_000_000L : 6_000_000_000L,
+        componentBytes = new { retainedCap = plan.RetainedBudgetBytes,
+            additionalHistoricalReserve = plan.AdditionalHistoricalReserveBytes,
+            sources = checked((ExactFinalWorker14(plan) ? 1 : ExactContinuation14(plan) ? 3 : 6) * plan.SourceComponentBytes),
+            copyFallback = plan.CompositeQualification ? plan.CopyFallbackReserveBytes : Exact14(plan) ? 1_010_000_000L : 6_000_000_000L,
             outputs = checked((ExactFinalWorker14(plan) ? 1 : ExactContinuation14(plan) ? 3 : 6) * plan.OutputComponentBytes),
-            snapshotArchives = Exact14(plan) ? 0 : 6_000_000_000L, controls = 64_000_000L, builds = plan.OutsideBuildAllowanceBytes, evidence = 256_000_000L,
-            boundedTrace = 67_108_864L },
+            snapshotArchives = Exact14(plan) || plan.CompositeQualification ? 0 : 6_000_000_000L,
+            controls = 64_000_000L, builds = plan.OutsideBuildAllowanceBytes, evidence = 256_000_000L,
+            boundedTrace = QualificationTraceBytes(plan), scratchAndClosure = QualificationScratchBytes(plan),
+            newCohortFileForecast = QualificationFileForecast(plan), checkedEarlyCeiling = plan.StopBytes,
+            accounting = "native allocation plus booked commitments; copied bytes may conservatively coexist with the fixed copy reservation" },
         captureArguments = CaptureTemplate("<primary-index>"),
-        exportArguments = ReplayExactExport.Arguments(new("<session>", "<manifest>", 300, 20, 60, "h264_nvenc", ".ts", true, true), new ReplayInterval(3.25, 303.25, 300), 3, "<owned-concat>", "<owned-partial>"),
+        exportArguments = ReplayExactExport.Arguments(new("<session>", "<manifest>", ReferenceSeconds(plan), 20, 60, "h264_nvenc", ".ts", true, true), new ReplayInterval(3.25, 3.25 + ReferenceSeconds(plan), ReferenceSeconds(plan)), 3, "<owned-concat>", "<owned-partial>"),
         validationArguments = ReplayExactExport.DecodeArguments("<owned-partial>", true, 60),
-        analysisArguments = new[] { "-hide_banner", "-loglevel", "info", "-nostdin", "-xerror", "-i", "<owned-final>", "-map", "0:v:0", "-map", "0:a:0", "-af", "astats=metadata=0:reset=0", "-f", "null", "-",
-            "-map", "0:v:0", "-vf", "<select three ascending frames within rounded duration>,crop=576:48:16:8,scale=24:2:flags=neighbor,format=gray", "-frames:v", "3", "-fps_mode", "passthrough", "-threads:v", "1", "-f", "rawvideo", "<owned-barcode-raw>",
-            "-map", "0:v:0", "-vf", "<select three ascending frames within rounded duration>,crop=1920:984:0:96,scale=64:36:flags=neighbor,format=rgb24", "-frames:v", "3", "-fps_mode", "passthrough", "-threads:v", "1", "-f", "rawvideo", "<owned-picture-raw>" },
+        analysisArguments = InspectionArguments("<evidence-root>", "<owned-final>", ReferenceSeconds(plan)),
         dynamicTokens = "task-owned paths/nonces, actual acquisition-clock epoch, observed source keyframe-rounded duration only; exact arrays persisted before each launch",
         analysis = "one bounded all-track full decode with audio astats per export; no packet predictor/index prerequisite" };
 
@@ -290,7 +431,7 @@ internal static partial class ReplayCalibrationRun
     internal static double SamplingGap(double previous, double now)
     {
         double gap = now - previous;
-        Require(double.IsFinite(gap) && gap >= 0 && gap <= 500, "Storage polling gap exceeded500ms or clock moved backwards.");
+        Require(double.IsFinite(gap) && gap >= 0, "Inventory measurement clock moved backwards or is invalid.");
         return gap;
     }
 
@@ -352,15 +493,30 @@ internal static partial class ReplayCalibrationRun
         readonly long? currentBudgetBytes;
         internal long CurrentAllocatedBytes;
         readonly TimedFiles inventoryFiles;
+        readonly CalibrationFileOperationSummary metadataOperations = new();
         readonly FrozenCalibrationHistory frozenHistory;
         readonly BoundedCalibrationTrace trace;
+        readonly object writerReceiptGate = new();
+        bool writerReceiptAttempted, writerReceiptDurable, traceClosedHealthy, disposalAttempted;
+        Exception writerReceiptError, disposalError, closureError;
+        static readonly List<Sampler> uncertainDisposals = new();
         readonly HashSet<string> closedCases = new(StringComparer.OrdinalIgnoreCase);
+        readonly QualificationCommitments commitments;
         readonly Thread thread;
         readonly Stopwatch clock = Stopwatch.StartNew();
         readonly Dictionary<string, long> peaks = new(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, long> combinedPeaks = new(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, long> workspacePeaks = new(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, long> workspaceIdentityPeaks = new(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, long> workFilePeaks = new(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, (long Assembly, long First, long Second)> workFileIdentityPeaks = new(StringComparer.OrdinalIgnoreCase);
         readonly ManualResetEventSlim ready = new();
         volatile bool stop;
-        internal volatile string Failure;
+        string failure;
+        internal string Failure => Volatile.Read(ref failure);
+        readonly CalibrationObserverProbe probe;
+        internal bool ObserverAbsent => thread?.IsAlive != true && capacityThread?.IsAlive != true && capacityQuery?.Running != true;
+        internal bool StopRequested => stop;
         internal long Used;
         internal long PeakUsed;
         internal string SlowestLeafPath;
@@ -369,14 +525,23 @@ internal static partial class ReplayCalibrationRun
         internal int Observations;
         internal int MetadataHandles;
         internal object LastObservation;
-        readonly Dictionary<string, (int Count, double MaximumMilliseconds)> outputOperations = new();
+        readonly Dictionary<string, (int Count, double MaximumMilliseconds, string MaximumPath)> outputOperations = new();
         readonly Dictionary<string, ReplayFileExtent> outputExtents = new(StringComparer.OrdinalIgnoreCase);
         internal ReplayFileExtent OutputExtent(string path) { lock (Gate) return outputExtents.GetValueOrDefault(path); }
-        internal object OutputOperationTimings { get { lock (Gate) return outputOperations.ToDictionary(p => p.Key, p => new { p.Value.Count, p.Value.MaximumMilliseconds }); } }
+        internal object OutputOperationTimings { get { lock (Gate) return outputOperations.ToDictionary(p => p.Key,
+            p => new { p.Value.Count, p.Value.MaximumMilliseconds, p.Value.MaximumPath }); } }
+        internal object MetadataOperationTimings { get { lock (Gate) return new { failure = inventoryFiles.TimingFailure, operations = metadataOperations.Snapshot() }; } }
         double lastCompletion, lastObservationStarted, activeStarted, offlineDeadline, offlineStarted, offlineElapsed;
+        readonly object capacityGate = new();
+        ReplayCapacityObservation<ReplayVolumeCapacity> capacityQuery;
+        Thread capacityThread;
+        ReplayVolumeCapacity capacityEvidence;
+        long capacityEvidenceAt;
+        internal double MaximumCapacityGap, MaximumCapacityObservationMilliseconds;
+        internal long CapacityObservations;
         double RetainedOfflineSeconds => plan.RetainedOfflineSeconds ?? plan.RetainedElapsedSeconds;
         double MaximumOfflineSeconds => plan.OfflineDeadlineSeconds;
-        bool activeCoverage;
+        volatile bool activeCoverage;
         string phase;
 
         sealed class CaptureGrowth
@@ -399,11 +564,17 @@ internal static partial class ReplayCalibrationRun
         internal double ElapsedSeconds => clock.Elapsed.TotalSeconds;
         internal object TraceReceipt => trace?.Receipt;
         internal double TraceMaximumWriteMilliseconds => trace?.MaximumWriteMilliseconds ?? 0;
-        internal Sampler(CalibrationPlan plan, bool active = true, string traceName = "storage.csv", long? currentBudgetBytes = null, Func<Stream> traceOpen = null)
+        internal Sampler(CalibrationPlan plan, bool active = true, string traceName = "storage.csv", long? currentBudgetBytes = null, Func<Stream> traceOpen = null,
+            CalibrationObserverProbe probe = null)
         {
+            Require(probe == null || plan.Environment == "nonmedia-observer-followup" && plan.EngineRoot == "unused-no-engine"
+                && plan.Order.Length == 0 && plan.RetainedRoots.Length == 0, "Observer probe is restricted to the isolated nonmedia fixture.");
+            this.probe = probe;
             plan = plan with { Root = Path.GetFullPath(plan.Root), RetainedRoots = plan.RetainedRoots.Select(Path.GetFullPath).ToArray(),
                 MetadataHandleRoots = plan.MetadataHandleRoots?.Select(Path.GetFullPath).ToArray() };
             this.plan = plan; root = plan.Root; rootPrefix = root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            commitments = new(plan.Order, plan.SourceComponentBytes, plan.OutputComponentBytes, plan.CopyFallbackReserveBytes,
+                QualificationScratchBytes(plan),QualificationTraceBytes(plan),QualificationAliasNamespaceBytes(plan));
             Require(currentBudgetBytes == null || currentBudgetBytes > 0, "Current source byte ceiling must be positive.");
             this.currentBudgetBytes = currentBudgetBytes;
             retainedPrefixes = plan.RetainedRoots.Select(r => Path.GetFullPath(r).TrimEnd(Path.DirectorySeparatorChar)
@@ -422,27 +593,59 @@ internal static partial class ReplayCalibrationRun
                 "Retained offline time is missing a valid cumulative bound.");
             activeCoverage = active; phase = active ? "active" : "boundary";
             inventoryFiles = new TimedFiles(plan.MetadataHandleRoots ?? [], CanRetainMetadata, root, plan.RetainActiveOutputHandles);
-            inventoryFiles.OperationTimed = (_, operation, elapsed) => { lock (Gate) { var previous = outputOperations.GetValueOrDefault(operation);
-                outputOperations[operation] = (previous.Count + 1, Math.Max(previous.MaximumMilliseconds, elapsed)); } };
+            if (probe?.DiagnosticsEnabled != false) inventoryFiles.OperationObserved = metadataOperations.Record;
+            inventoryFiles.InventoryOpenedForChecks = probe?.Opened;
+            inventoryFiles.OperationTimed = (path, operation, elapsed) => { lock (Gate) { var previous = outputOperations.GetValueOrDefault(operation);
+                outputOperations[operation] = (previous.Count + 1, Math.Max(previous.MaximumMilliseconds, elapsed),
+                    elapsed >= previous.MaximumMilliseconds ? path : previous.MaximumPath); } };
             inventoryFiles.OutputObserved = (path, extent) => outputExtents[path] = extent;
             if (plan.ReuseCurrentMetadataHandles) inventoryFiles.RetainHandlesUnder(root);
             Require(!plan.FreezeRetainedAllocations || !active, "Historical leases must be acquired outside active media coverage.");
-            frozenHistory = plan.FreezeRetainedAllocations ? new(plan.RetainedRoots, plan.FileLimit, plan.DirectoryLimit) : null;
+            Require(plan.SelectedRetainedFiles == null || plan.FreshCandidateAdmission is RetainedCoverageAdmission or SameCaptureRetainedAdmission
+                && plan.FreezeRetainedAllocations && !active, "Selected-only leases are restricted to the fixed retained pair.");
             try
             {
+                frozenHistory = plan.FreezeRetainedAllocations ? new(plan.RetainedRoots, plan.FileLimit, plan.DirectoryLimit,
+                    report => Write(Path.Combine(root, "history-admission-events.json"), report), plan.SelectedRetainedFiles) : null;
                 if (frozenHistory != null)
                     Write(Path.Combine(root, "frozen-history.json"), new { frozenHistory.FileCount, frozenHistory.DirectoryCount,
                         frozenHistory.AllocatedBytes, frozenHistory.Volumes, readOnlyDataLeases = true, synchronousStickyChanges = true,
                         metadataHash = ReplayReferenceModel.Hash(frozenHistory.Inventory), mutation = "abort without rearming or rewriting evidence" });
-                trace = new BoundedCalibrationTrace(Path.Combine(root, traceName), traceOpen);
+                trace = new BoundedCalibrationTrace(Path.Combine(root, traceName), traceOpen, maximumBytes:QualificationTraceBytes(plan));
+                capacityEvidence = ReplayStorage.ObserveCapacity(root);
+                capacityEvidenceAt = Stopwatch.GetTimestamp();
+                capacityQuery = new(() => ReplayStorage.ObserveCapacity(root));
+                capacityThread = new Thread(() =>
+                {
+                    try
+                    {
+                        while (!stop) { CheckCapacity(0); Thread.Sleep(50); }
+                    }
+                    catch (Exception error) { Interlocked.CompareExchange(ref failure, error.Message, null); stop = true; ready.Set(); }
+                }) { IsBackground = true, Name = "bounded-calibration-capacity" };
+                capacityThread.Start();
                 thread = new Thread(Loop) { IsBackground = true, Name = "bounded-calibration-storage" };
                 thread.Start();
                 Require(ready.Wait(5000), "Initial storage observation timed out.");
                 Check();
+                if (CapacityQualification(plan))
+                {
+                    lock (Gate)
+                    {
+                        Write(Path.Combine(root, "file-count-admission.json"), new { baselineFiles = MaximumFiles,
+                            newCohortFiles = QualificationFileForecast(plan), maximumFiles = plan.FileLimit,
+                            projectedFiles = (long)MaximumFiles + QualificationFileForecast(plan),
+                            accepted = CapacityFileForecastFits(MaximumFiles, plan.FileLimit,QualificationFileForecast(plan)), captureStarted = false,
+                            scope = "Fresh complete inventory plus whole fixed cohort file reserve, before fixture/capture. No existing file/alias credit; runtime file/handle caps remain independent." });
+                        Require(CapacityFileForecastFits(MaximumFiles, plan.FileLimit,QualificationFileForecast(plan)),
+                            "Retained inventory plus the complete cohort file reserve exceeds the file limit; no fixture/capture may start.");
+                    }
+                }
             }
             catch
             {
                 stop = true;
+                if (capacityThread?.IsAlive == true) Require(capacityThread.Join(1000), "Failed capacity supervisor constructor did not stop.");
                 if (thread?.IsAlive == true) Require(thread.Join(5000), "Failed observer constructor did not stop.");
                 try { trace?.Dispose(); }
                 finally { frozenHistory?.Dispose(); inventoryFiles.Dispose(); ready.Dispose(); }
@@ -460,6 +663,7 @@ internal static partial class ReplayCalibrationRun
                 while (!stop)
                 {
                     double at = clock.Elapsed.TotalMilliseconds, gap = at - previous; previous = at;
+                    long allocatedBefore = probe == null ? 0 : GC.GetAllocatedBytesForCurrentThread();
                     MaximumGap = Math.Max(MaximumGap, gap);
                     Require(double.IsFinite(gap) && gap >= 0, "Storage clock moved backwards or is invalid.");
                     lock (Gate)
@@ -475,6 +679,7 @@ internal static partial class ReplayCalibrationRun
                             maximumFiles: plan.FileLimit - (frozenHistory?.FileCount ?? 0),
                             maximumDirectories: plan.DirectoryLimit - (frozenHistory?.DirectoryCount ?? 0), inspectAttributes: ValidateMediaAttributes);
                         files.EndScan(); // Release absent names before allocation/capacity accounting.
+                        Require(files.TimingFailure == null, "Metadata timing failed: " + files.TimingFailure);
                         Volatile.Write(ref MetadataHandles, files.HandleCount + (frozenHistory?.FileCount ?? 0));
                         double inventoried = clock.Elapsed.TotalMilliseconds;
                         if (files.MaximumLeafMilliseconds > SlowestLeafMilliseconds)
@@ -485,26 +690,23 @@ internal static partial class ReplayCalibrationRun
                         MaximumDirectories = Math.Max(MaximumDirectories, frozenHistory == null
                             ? new[] { root }.Concat(plan.RetainedRoots).Sum(r => 1 + Directory.GetDirectories(r, "*", SearchOption.AllDirectories).Length)
                             : frozenHistory.DirectoryCount + 1 + Directory.GetDirectories(root, "*", SearchOption.AllDirectories).Length);
-                        Used = checked((frozenHistory?.BytesIncluding(inventory) ?? ReplayStorage.Bytes(inventory)) + plan.OutsideBuildAllowanceBytes);
-                        var retainedInventory = frozenHistory == null ? inventory.Where(i => retainedPrefixes.Any(prefix => i.Key.StartsWith(prefix,
-                            StringComparison.OrdinalIgnoreCase))).ToDictionary(i => i.Key, i => i.Value) : null;
+                        Used = checked((frozenHistory?.BytesIncluding(inventory) ?? ReplayStorage.Bytes(inventory)) + plan.OutsideBuildAllowanceBytes
+                            + plan.AdditionalHistoricalReserveBytes + plan.CopyFallbackReserveBytes);
+                        var accounting = new CalibrationInventoryAccounting(inventory, root, Order,
+                            frozenHistory == null ? retainedPrefixes : [], currentBudgetBytes.HasValue);
                         if (currentBudgetBytes.HasValue)
                         {
-                            string currentPrefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-                            CurrentAllocatedBytes = ReplayStorage.Bytes(inventory.Where(i => i.Key.StartsWith(currentPrefix, StringComparison.OrdinalIgnoreCase))
-                                .ToDictionary(i => i.Key, i => i.Value));
+                            CurrentAllocatedBytes = ReplayStorage.Bytes(accounting.Current);
                             Require(CurrentAllocatedBytes < currentBudgetBytes.Value, "Startup diagnostic source byte stop reached.");
                         }
-                        Require((frozenHistory?.AllocatedBytes ?? ReplayStorage.Bytes(retainedInventory)) <= plan.RetainedBudgetBytes, "Retained evidence envelope exceeded.");
+                        Require((frozenHistory?.AllocatedBytes ?? ReplayStorage.Bytes(accounting.Retained)) <= plan.RetainedBudgetBytes, "Retained evidence envelope exceeded.");
                         PeakUsed = Math.Max(PeakUsed, Used);
                         foreach (string label in Order)
                         {
-                            string prefix = Path.Combine(root, label) + Path.DirectorySeparatorChar;
-                            var members = inventory.Where(i => i.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-                            Require(ReplayStorage.Bytes(members.Where(i => Path.GetFileName(i.Key).StartsWith("chunk-"))
-                                .ToDictionary(i => i.Key, i => i.Value)) <= plan.SourceComponentBytes,
+                            var cell = accounting.Cells[label];
+                            Require(ReplayStorage.Bytes(cell.Sources) <= plan.SourceComponentBytes,
                                 "Source component exceeded its admitted byte limit.");
-                            Require(ReplayStorage.Bytes(members.Where(i => i.Key.EndsWith(".mp4")).ToDictionary(i => i.Key, i => i.Value)) <= plan.OutputComponentBytes, "Output component exceeded limit.");
+                            Require(ReplayStorage.Bytes(cell.OutputsAndWork) <= plan.OutputComponentBytes, "Output/scratch component exceeded limit.");
                         }
                         double accounted = clock.Elapsed.TotalMilliseconds;
                         var capacity = ReplayStorage.ObserveCapacity(root);
@@ -525,10 +727,17 @@ internal static partial class ReplayCalibrationRun
                         Require(Used < plan.StopBytes && capacity.AvailableBytes >= plan.FloorBytes + 1_256_000_000L,
                             "Calibration byte stop or free-space reserve breached.");
                         Require(clock.Elapsed.TotalSeconds + plan.RetainedElapsedSeconds < plan.DeadlineSeconds, "Calibration cumulative wall deadline exceeded.");
-                        foreach (var item in inventory.Where(i => i.Key.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)))
-                            peaks[item.Value.Identity] = Math.Max(peaks.GetValueOrDefault(item.Value.Identity), item.Value.AllocatedBytes);
+                        var workspaceCurrent = accounting.Workspaces.ToDictionary(i => i.Key,
+                            i => ReplayStorage.Bytes(i.Value), StringComparer.OrdinalIgnoreCase);
+                        foreach (var work in workspaceCurrent) workspacePeaks[work.Key] = Math.Max(workspacePeaks.GetValueOrDefault(work.Key), work.Value);
+                        foreach (var file in accounting.Workspaces.Values.SelectMany(i => i))
+                        {
+                            workFilePeaks[file.Key] = Math.Max(workFilePeaks.GetValueOrDefault(file.Key), file.Value.AllocatedBytes);
+                        }
+                        foreach (var item in accounting.Outputs)
+                            RecordOutput(item.Key, item.Value, workspaceCurrent.GetValueOrDefault(item.Key));
                         double observed = clock.Elapsed.TotalMilliseconds;
-                        if (activeCoverage) ObserveCaptureGrowth(inventory, observed);
+                        if (activeCoverage) ObserveCaptureGrowth(accounting, observed);
                         frozenHistory?.Check();
                         long traceStarted = Stopwatch.GetTimestamp();
                         trace.Append(FormattableString.Invariant($"{at},{observed - at},{gap},{observed - previousCompletion},{Used},{capacity.AvailableBytes},{fileCount},{entered - at},{inventoried - entered},{files.LeafMilliseconds},{files.LeafCount},{files.MaximumLeafMilliseconds},{phase},\"{files.MaximumLeafPath?.Replace("\"", "\"\"")}\",{files.OpenCount},{MetadataHandles},{accounted - inventoried},{observed - accounted}"));
@@ -560,15 +769,16 @@ internal static partial class ReplayCalibrationRun
                         }
                         else MaximumOfflineGap = Math.Max(MaximumOfflineGap, completed - previousCompletion);
                         previousCompletion = completed;
-                        lastCompletion = completed;
+                        Volatile.Write(ref lastCompletion, completed);
                         Volatile.Write(ref lastObservationStarted, at);
                         Interlocked.Increment(ref Observations);
                         ready.Set();
+                        probe?.Record(completed - at, GC.GetAllocatedBytesForCurrentThread() - allocatedBefore);
                     }
                     Thread.Sleep(SamplingWaitMilliseconds(at, clock.Elapsed.TotalMilliseconds));
                 }
             }
-            catch (Exception ex) { Failure = ex.Message; ready.Set(); }
+            catch (Exception ex) { Interlocked.CompareExchange(ref failure, ex.Message, null); ready.Set(); }
         }
 
         internal void SealClosedCase(string label)
@@ -584,6 +794,7 @@ internal static partial class ReplayCalibrationRun
                 // before this sampler is disposed. Allocation is still queried
                 // natively on every scan, never inferred from closure.
                 inventoryFiles.RetainHandlesUnder(cell);
+                lock (capacityGate) commitments.Seal(label);
             }
         }
         bool CanRetainMetadata(string path)
@@ -619,15 +830,13 @@ internal static partial class ReplayCalibrationRun
             inventoryFiles.ReleaseHandles(); Volatile.Write(ref MetadataHandles, 0);
         }
 
-        void ObserveCaptureGrowth(Dictionary<string, ReplayFileExtent> inventory, double at)
+        void ObserveCaptureGrowth(CalibrationInventoryAccounting accounting, double at)
         {
             foreach (var label in Order)
             {
                 var state = captureGrowth[label];
-                string prefix = Path.Combine(root, label, "buffer") + Path.DirectorySeparatorChar;
                 var current = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-                foreach (var member in inventory.Where(i => i.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                    && (Path.GetFileName(i.Key).StartsWith("chunk-", StringComparison.Ordinal) || Path.GetFileName(i.Key) == "segments.csv")))
+                foreach (var member in accounting.Cells[label].Capture)
                 {
                     string volume = member.Value.Volume, identity = volume + ":" + member.Value.Identity;
                     Require(state.Volume == null || state.Volume == volume, "Capture allocation volume changed.");
@@ -640,7 +849,7 @@ internal static partial class ReplayCalibrationRun
                 state.Previous.Clear(); foreach (var member in current) state.Previous.Add(member.Key, member.Value);
                 Interlocked.Exchange(ref state.Total, checked(Interlocked.Read(ref state.Total) + growth));
                 state.Window.Enqueue((at, growth)); state.WindowBytes = checked(state.WindowBytes + growth);
-                while (state.Window.Count > 1 && state.Window.Peek().At < at - 500)
+                while (state.Window.Count > 1 && state.Window.Peek().At < at - ReplayCapacityPolicy.CoverageMilliseconds)
                     state.WindowBytes -= state.Window.Dequeue().Bytes;
                 state.PeakWindowBytes = Math.Max(state.PeakWindowBytes, state.WindowBytes);
             }
@@ -652,12 +861,27 @@ internal static partial class ReplayCalibrationRun
             var state = captureGrowth[label];
             Interlocked.CompareExchange(ref state.StopAt, Interlocked.Read(ref state.Total), -1);
         }
+        // A request is not absence or observer closure. In particular, never
+        // acquire Gate here: a native inventory call may hold it indefinitely.
+        internal void RequestCaptureStop(string label, Action requestStop)
+        {
+            stop = true;
+            MarkCaptureStop(label);
+            requestStop();
+        }
+        internal void RequireFailureClosure(bool producerAbsent)
+        {
+            Require(!StopRequested && Failure == null || producerAbsent && ObserverAbsent && Failure == null && writerReceiptDurable && traceClosedHealthy && closureError == null,
+                "Storage observer/producer closure remains uncertain; retain ownership and reservations.");
+        }
         internal (long PollGrowth, long StopGrowth, string Volume) CaptureMetrics(string label)
         {
             lock (Gate)
             {
                 var state = captureGrowth[label];
                 Require(!activeCoverage && state.StopAt >= 0 && state.Volume != null, "Capture growth evidence is incomplete.");
+                Require(MaximumActiveGap <= ReplayCapacityPolicy.CoverageMilliseconds,
+                    "Inventory evidence has gaps outside the measured growth horizon; qualification remains inconclusive.");
                 return (state.PeakWindowBytes, checked(state.Total - state.StopAt), state.Volume);
             }
         }
@@ -696,15 +920,23 @@ internal static partial class ReplayCalibrationRun
                 activeCoverage = false; phase = "boundary";
             }
         }
+        internal void RequireFreshActiveObservation()
+        {
+            lock (Gate) Require(activeCoverage, "Output-owner release must remain inside active coverage.");
+            FreshObservation();
+        }
         internal void BeginOffline(string name, long allocationBytes, int deadlineSeconds)
         {
-            Require(Regex.IsMatch(name, "^[a-z0-9-]{1,32}$") && allocationBytes >= 0 && deadlineSeconds is > 0 and <= 300,
+            Require(Regex.IsMatch(name, "^[a-z0-9-]{1,32}$") && allocationBytes >= 0 && deadlineSeconds > 0
+                && deadlineSeconds <= (DurationQualification(plan) ? 1200 : 300),
                 "Offline calibration phase is not bounded.");
             FreshObservation();
             RequireTime(deadlineSeconds);
             lock (Gate)
             {
                 Require(!activeCoverage && offlineDeadline == 0, "Media coverage or another offline phase is still open.");
+                Require(checked(Used + allocationBytes + QualificationScratchBytes(plan)) <= plan.BudgetBytes,
+                    "Proposed offline stage cannot fit existing bytes plus closure reserves; no stage was accepted.");
                 Check(allocationBytes);
                 Require(RetainedOfflineSeconds + offlineElapsed + deadlineSeconds <= MaximumOfflineSeconds,
                     "The complete offline phase deadline cannot fit the cumulative analysis allowance.");
@@ -724,6 +956,16 @@ internal static partial class ReplayCalibrationRun
         }
         internal void Check(long next = 0)
         {
+            try
+            {
+            // Controller-side liveness must not wait for Loop/Gate to return.
+            // A late call still fails; no timestamp is renewed on this path.
+            if (activeCoverage)
+            {
+                double previous = Math.Max(Volatile.Read(ref lastCompletion), Volatile.Read(ref activeStarted));
+                SamplingGap(previous, clock.Elapsed.TotalMilliseconds);
+            }
+            Require(inventoryFiles.TimingFailure == null, "Metadata timing failed: " + inventoryFiles.TimingFailure);
             Require(trace?.Failure == null, trace?.Failure);
             Require(Failure == null, Failure);
             frozenHistory?.Check();
@@ -731,9 +973,40 @@ internal static partial class ReplayCalibrationRun
             Require(RetainedOfflineSeconds + offlineElapsed + (offlineDeadline == 0 ? 0 : clock.Elapsed.TotalSeconds - offlineStarted) <= MaximumOfflineSeconds,
                 "Cumulative offline analysis exceeded its approved allowance.");
             Require(Used + next + 1_256_000_000L <= plan.BudgetBytes, "Next stage cannot fit retained bytes plus closure/poll reserves.");
-            var capacity = ReplayStorage.ObserveCapacity(root);
-            Require(capacity.AvailableBytes >= plan.FloorBytes + Math.Max(next + 1_256_000_000L, plan.BudgetBytes - Used),
-                "Fresh caller-free cannot hold remaining declared batch commitments plus floor.");
+            CheckCapacity(next);
+            }
+            catch (Exception ex)
+            {
+                Interlocked.CompareExchange(ref failure, ex.Message, null);
+                stop = true;
+                throw;
+            }
+        }
+        void CheckCapacity(long next)
+        {
+            lock (capacityGate)
+            {
+                Require(Stopwatch.GetElapsedTime(capacityEvidenceAt).TotalMilliseconds <= ReplayCapacityPolicy.CoverageMilliseconds,
+                    "Qualification capacity monitoring exhausted conservative cover.");
+                if (capacityQuery.TryComplete(out var completed))
+                {
+                    Require(completed.Value.Volume == capacityEvidence.Volume && completed.Value.AllocationUnit == capacityEvidence.AllocationUnit,
+                        "Qualification capacity volume or allocation unit changed.");
+                    Require(Stopwatch.GetElapsedTime(completed.Started, completed.Finished).TotalMilliseconds <= ReplayCapacityPolicy.CoverageMilliseconds,
+                        "Qualification capacity query exceeded its bounded cover.");
+                    MaximumCapacityGap = Math.Max(MaximumCapacityGap, Stopwatch.GetElapsedTime(capacityEvidenceAt, completed.Finished).TotalMilliseconds);
+                    MaximumCapacityObservationMilliseconds = Math.Max(MaximumCapacityObservationMilliseconds,
+                        Stopwatch.GetElapsedTime(completed.Started, completed.Finished).TotalMilliseconds);
+                    CapacityObservations++;
+                    capacityEvidence = completed.Value; capacityEvidenceAt = completed.Started;
+                }
+                // Only confirmed closed cases retire their future commitment.
+                // Their actual native allocation remains charged in Used.
+                Require(capacityEvidence.AvailableBytes >= commitments.RuntimeRequiredFreeBytes(QualificationPhysicalFloor(plan), next),
+                    "Caller-free cannot cover remaining finite cohort commitments and physical floor.");
+                if (!stop && Stopwatch.GetElapsedTime(capacityEvidenceAt).TotalMilliseconds >= ReplayCapacityPolicy.IntervalMilliseconds)
+                    capacityQuery.Start();
+            }
         }
         internal void RequireTime(int seconds)
         {
@@ -749,14 +1022,100 @@ internal static partial class ReplayCalibrationRun
                 return Math.Max(extent.AllocatedBytes, peaks.GetValueOrDefault(extent.Identity));
             }
         }
+        void RecordOutput(string path, ReplayFileExtent extent, long work)
+        {
+            peaks[extent.Identity] = Math.Max(peaks.GetValueOrDefault(extent.Identity), extent.AllocatedBytes);
+            combinedPeaks[extent.Identity] = Math.Max(combinedPeaks.GetValueOrDefault(extent.Identity),
+                Math.Max(checked(extent.AllocatedBytes + work), workspacePeaks.GetValueOrDefault(path)));
+            workspaceIdentityPeaks[extent.Identity] = Math.Max(workspaceIdentityPeaks.GetValueOrDefault(extent.Identity), workspacePeaks.GetValueOrDefault(path));
+            var prior = workFileIdentityPeaks.GetValueOrDefault(extent.Identity);
+            workFileIdentityPeaks[extent.Identity] = (Math.Max(prior.Assembly, workFilePeaks.GetValueOrDefault(ReplayOutputWorkspace.AssemblyPath(path))),
+                Math.Max(prior.First, workFilePeaks.GetValueOrDefault(ReplayOutputWorkspace.BoundaryPath(path, 0))),
+                Math.Max(prior.Second, workFilePeaks.GetValueOrDefault(ReplayOutputWorkspace.BoundaryPath(path, 1))));
+        }
+        internal void BeforePublication(string partial, ReplayFileExtent expected = null)
+        {
+            // The output producer has joined. These observations do not
+            // authorize publication or replace normal validation/ownership.
+            // Native observations can be slow on close; they
+            // must not prevent the independent sampler from making progress.
+            // Only merge the peaks under its gate. RetainFiles still serializes
+            // the actual rename with namespace enumeration below.
+            CalibrationOutputObservation.Run(partial, Gate, (work, extent, bytes) => {
+                foreach (var file in work) workFilePeaks[file.Key] = Math.Max(workFilePeaks.GetValueOrDefault(file.Key), file.Value.AllocatedBytes);
+                workspacePeaks[partial] = Math.Max(workspacePeaks.GetValueOrDefault(partial), bytes);
+                RecordOutput(partial, extent, bytes);
+            }, expected);
+        }
+        internal (long Combined, long Work, long Assembly, long[] Boundaries) OutputAndWorkspacePeak(string output)
+        {
+            lock (Gate)
+            {
+                var extent = ReplayStorage.Observe(output);
+                var files = workFileIdentityPeaks.GetValueOrDefault(extent.Identity);
+                return (Math.Max(extent.AllocatedBytes, combinedPeaks.GetValueOrDefault(extent.Identity)),
+                    workspaceIdentityPeaks.GetValueOrDefault(extent.Identity), files.Assembly, [files.First, files.Second]);
+            }
+        }
+        // Failure cleanup cannot take Gate: the observer may still own it while
+        // finishing native I/O. Actual joins and writer persistence are required
+        // before a stopped capture's durable claims may be released.
+        internal void JoinStoppedObservers(int observerJoinMilliseconds = 5000)
+        {
+            if (closureError != null) throw new IOException("Earlier observer closure failed.", closureError);
+            try
+            {
+                Require(observerJoinMilliseconds is > 0 and <= 5000, "Observer join budget is outside its finite bound.");
+                stop = true;
+                Require(thread.Join(observerJoinMilliseconds), "Storage observer did not stop.");
+                Require(capacityThread.Join(1000), "Capacity supervisor did not stop.");
+                Require(capacityQuery.WaitForClosure(1000), "Capacity observer closure is unconfirmed; retain experiment ownership.");
+                capacityQuery.TryComplete(out _);
+                CompleteTraceAndPersist(dispose: false);
+                Require(ObserverAbsent, "Storage observer closure changed after joining; retain experiment ownership.");
+            }
+            catch (Exception error) { RetainClosureError(error); throw; }
+        }
+        void RetainClosureError(Exception error)
+        {
+            closureError ??= error;
+            lock (uncertainDisposals) if (!uncertainDisposals.Contains(this)) uncertainDisposals.Add(this);
+        }
+        void PersistWriterReceipt()
+        {
+            lock (writerReceiptGate)
+            {
+                if (!writerReceiptAttempted)
+                {
+                    writerReceiptAttempted = true;
+                    try
+                    {
+                        // Exactly one CreateNew/Flush(true) attempt. Never
+                        // replace a partial, failed or incomplete first receipt.
+                        Write(Path.Combine(root, Path.GetFileNameWithoutExtension(traceName) + "-writer.json"), trace.Receipt);
+                        writerReceiptDurable = true;
+                    }
+                    catch (Exception error) { writerReceiptError = error; }
+                }
+                if (writerReceiptError != null) throw new IOException("Actual trace receipt persistence failed.", writerReceiptError);
+            }
+        }
+        void CompleteTraceAndPersist(bool dispose)
+        {
+            var errors = new List<Exception>();
+            try { if (dispose) trace.Dispose(); else trace.CompleteAndCheck(); }
+            catch (Exception error) { errors.Add(error); }
+            try { PersistWriterReceipt(); } catch (Exception error) { errors.Add(error); }
+            if (errors.Count != 0) throw new IOException("Actual trace closure or receipt failed: " + string.Join("; ", errors.Select(e => e.Message)), new AggregateException(errors));
+            traceClosedHealthy = trace.Receipt is BoundedCalibrationTrace.TraceReceipt { final: true, writerAbsent: true, failure: null } receipt
+                && receipt.enqueued == receipt.written && receipt.bytes == receipt.persistedBytes;
+            Require(traceClosedHealthy, "Actual persisted trace closure is incomplete or failed.");
+        }
         internal void StopAndCheck()
         {
             if (activeCoverage) EndActive();
             Require(offlineDeadline == 0, "Offline phase must close before the sampler.");
-            stop = true;
-            Require(thread.Join(5000), "Storage observer did not stop.");
-            trace.CompleteAndCheck();
-            Write(Path.Combine(root, Path.GetFileNameWithoutExtension(traceName) + "-writer.json"), trace.Receipt);
+            JoinStoppedObservers();
             double stopped = clock.Elapsed.TotalMilliseconds;
             MaximumGap = Math.Max(MaximumGap, stopped - lastCompletion);
             if (activeCoverage) SamplingGap(lastCompletion, stopped);
@@ -764,13 +1123,62 @@ internal static partial class ReplayCalibrationRun
         }
         public void Dispose()
         {
-            stop = true; Require(thread.Join(5000), "Storage observer did not stop.");
-            try { trace.Dispose(); }
-            finally { frozenHistory?.Dispose(); ready.Dispose(); }
+            if (disposalAttempted)
+            {
+                if (disposalError != null) throw new IOException("Earlier sampler disposal failed.", disposalError);
+                return;
+            }
+            disposalAttempted = true;
+            try
+            {
+                stop = true; Require(thread.Join(5000), "Storage observer did not stop.");
+                Require(capacityThread.Join(1000), "Capacity supervisor did not stop.");
+                Require(capacityQuery.WaitForClosure(1000), "Capacity observer closure is unconfirmed; retain experiment ownership.");
+                var errors = new List<Exception>();
+                if (closureError != null) errors.Add(closureError);
+                if (Failure != null) errors.Add(new IOException(Failure));
+                try { capacityQuery.TryComplete(out _); } catch (Exception error) { errors.Add(error); }
+                try { CompleteTraceAndPersist(dispose: true); } catch (Exception error) { errors.Add(error); }
+                if (errors.Count != 0) throw new IOException("Actual sampler disposal failed: " + string.Join("; ", errors.Select(e => e.Message)), new AggregateException(errors));
+                frozenHistory?.Dispose(); ready.Dispose();
+            }
+            catch (Exception error)
+            {
+                disposalError = error;
+                // Retain uncertainty and native history owners through actual
+                // controller exit; a failed receipt is not permission to release.
+                RetainClosureError(error);
+                throw;
+            }
         }
     }
-    sealed class RetainFiles(Sampler sampler, bool hardlinksRequired = false) : ReplayFiles
+    internal static void VerifyPublicationObservation(ReplayFileExtent observed, ReplayFileExtent expected)
+        => Require(expected == null || observed.Volume == expected.Volume && observed.Identity == expected.Identity
+            && observed.Length == expected.Length && observed.AllocationUnit == expected.AllocationUnit,
+            "Publication bookkeeping observed a different checked output object.");
+    internal static void CompleteStoppedCaptureClaim(Sampler sampler, bool producerAbsent, Action complete,
+        int observerJoinMilliseconds = 5000)
     {
+        if (sampler.StopRequested || sampler.Failure != null)
+        {
+            Require(producerAbsent, "Capture producer absence is unconfirmed; retain ownership and reservations.");
+            sampler.JoinStoppedObservers(observerJoinMilliseconds);
+        }
+        sampler.RequireFailureClosure(producerAbsent);
+        complete();
+    }
+
+    internal static void WithPublicationGate(object gate, Action prepare, Action publish)
+    {
+        prepare();
+        lock (gate) publish();
+    }
+
+    sealed class RetainFiles(Sampler sampler, bool hardlinksRequired = false,
+        Action<ReplayExportRequest, string> retainOutput = null) : ReplayFiles
+    {
+        internal override ReplayNamespaceIdentity ObserveNamespace(string path, ReplayFileExtent enumerated)
+            => new(enumerated.Volume, enumerated.Identity); // Real native namespace, never allocation credit.
         internal override bool TryHardLink(string copy, string original)
         {
             bool linked = base.TryHardLink(copy, original);
@@ -779,24 +1187,54 @@ internal static partial class ReplayCalibrationRun
         }
         internal override void DeleteDirectory(string path) { } // All successes and failures are retained.
         internal override void DeleteFile(string path) { }
-        internal override void Publish(string partial, string final) { lock (sampler.Gate) base.Publish(partial, final); }
+        internal override void Publish(string partial, string final)
+            => WithPublicationGate(sampler.Gate, () => sampler.BeforePublication(partial), () => base.Publish(partial, final));
+        internal override void Publish(ReplayExportRequest request, string final)
+        {
+            if (request.ValidatedOutput == null) { base.Publish(request, final); return; }
+            WithPublicationGate(sampler.Gate, () => { sampler.BeforePublication(request.Partial, request.ValidatedOutput.CheckedIdentity); retainOutput?.Invoke(request, final); },
+                () => base.Publish(request, final));
+        }
     }
-    sealed class ShortSource(CaptureSession source, int seconds, double end) : IReplaySessionSource
+    internal sealed class ShortSource(IReplaySessionSource source, int seconds, double end, bool exactFallback = false,
+        Action<ReplayExportRequest> protect = null, CalibrationValidationWork.GuardContext validationContext = null,
+        bool preserveEvidence = false, Action<ReplayExportRequest, Action> inspectPublication = null,
+        Func<List<Segment>> protectedSegments = null, Func<ReplayOutputSelection, ReplayOutputDemand> qualificationDemand = null) : IReplaySessionSource
     {
+        public ReplayValidation ValidateOutput(ReplayExportRequest request, Action<ReplayProducerProof> changed, Action check)
+        { using var scope = validationContext?.Enter(check); var result = inner.ValidateOutput(request, changed, check); inspectPublication?.Invoke(request, check); return result; }
         public ReplayValidation ValidateOutput(string path, ReplayInterval interval, Action<ReplayProducerProof> changed, Action check)
-            => inner.ValidateOutput(path, interval, changed, check);
+        { using var scope = validationContext?.Enter(check); return inner.ValidateOutput(path, interval, changed, check); }
         readonly IReplaySessionSource inner = source;
         public ReplaySessionInfo ReplayInfo => inner.ReplayInfo with { ReplaySeconds = seconds };
+        public double InputPrerollSeconds => inner.InputPrerollSeconds;
+        public bool PreserveEvidence => preserveEvidence || inner.PreserveEvidence;
+        public bool SupportsOwnedExport => inner.SupportsOwnedExport;
+        public bool SupportsStagedPreparation => !exactFallback && inner.SupportsStagedPreparation;
+        public ReplaySavePreparation BeginPreparation(ReplayRootedFiles files, ReplayInterval interval, Segment candidate, string partial,
+            Action accepted, Action<ReplayProducerProof> changed, Action check, Action<ReplaySavePreparation> take)
+            => !exactFallback ? inner.BeginPreparation(files, interval, candidate, partial, accepted, changed, check, take)
+                : throw new IOException("Exact-fallback qualification does not stage a packet boundary.");
+        public ReplayProducerProof ProducerProof => inner.ProducerProof;
+        public ReplayOutputDemand OutputDemandStatus => inner.OutputDemandStatus;
+        public List<Segment> ReadSegments() => protectedSegments?.Invoke() ?? inner.ReadSegments();
         public bool Stopped => true;
         public string Diagnostics => inner.Diagnostics;
-        public string OutputDemandIdentity => inner.OutputDemandIdentity;
+        public string OutputDemandIdentity => qualificationDemand == null ? inner.OutputDemandIdentity : ReplayReferenceModel.ExporterIdentity;
         public bool OutputProducerStopped => inner.OutputProducerStopped;
-        public ReplayOutputDemand EstimateOutput(ReplayOutputSelection selection) => inner.EstimateOutput(selection);
+        public ReplayOutputDemand EstimateOutput(ReplayOutputSelection selection) => qualificationDemand?.Invoke(selection) ?? inner.EstimateOutput(selection);
+        public ReplayOutputDemand RecheckOutputDemand(ReplayOutputSelection selection) => qualificationDemand?.Invoke(selection) ?? inner.RecheckOutputDemand(selection);
         public double SaveCutoffAt(long timestamp) => end;
         public void FreezeAt(long timestamp) { }
         public void StopCapture() { }
         public void CheckCaptureHealth(double completedEnd) { }
         public void Export(IReadOnlyList<string> arguments, string snapshot) => inner.Export(arguments, snapshot);
+        public void Export(ReplayExportRequest request, string snapshot, Action<ReplayProducerProof> changed, Action check)
+        {
+            protect?.Invoke(request);
+            if (exactFallback) ((CaptureSession)inner).ExportRequest(request, snapshot, changed, check, ReplaySaveExport.Construction.ExactFallback);
+            else inner.Export(request, snapshot, changed, check);
+        }
         public void Export(IReadOnlyList<string> arguments, string snapshot, Action<ReplayProducerProof> changed, Action check)
             => inner.Export(arguments, snapshot, changed, check);
         public void Dispose() { } // Original source registration owns its job.
@@ -813,17 +1251,50 @@ internal static partial class ReplayCalibrationRun
         return new { receipt.ProcessId, receipt.ProcessStartedUtc, receipt.ExitCode, receipt.ProducerAbsent, receipt.ActualExitObserved,
             receipt.TimedOut, receipt.OutputLimitExceeded, receipt.CaptureComplete, receipt.CapturedBytes, receipt.ElapsedMilliseconds,
             receipt.LastStorageCheckWorkMilliseconds, receipt.LastStorageCheckIdleMilliseconds,
+            receipt.CpuMilliseconds, receipt.ReadBytes, receipt.WriteBytes, receipt.SampledPeakWorkingSetBytes, receipt.ResourcesFinal, receipt.ResourceError,
             receipt.Failure, receipt.Error, stdout, stderr };
+    }
+    static object[] SaveProcesses(string root, string prefix, CaptureSession source) => source.LastExportProcesses
+        .Select((receipt, number) => SaveProcess(root, prefix + "-stage-" + number, receipt)).ToArray();
+    static ReplayCalibrationProcessReceipt[] ExportChildren(Sample sample)
+    {
+        Require(sample.ExportProcesses != null && sample.ExportProcesses.Length >= (sample.ManagedExport == null ? 1 : 0)
+            && sample.ExportProcesses.Length <= 3, "Complete actual export child list is required.");
+        return sample.ExportProcesses.Select(child =>
+        {
+            var observed = JsonSerializer.SerializeToElement(child);
+            Require(observed.GetProperty("CaptureComplete").GetBoolean() && observed.GetProperty("ProducerAbsent").GetBoolean()
+                && observed.GetProperty("ActualExitObserved").GetBoolean() && observed.GetProperty("ExitCode").GetInt32() == 0
+                && !observed.GetProperty("TimedOut").GetBoolean() && !observed.GetProperty("OutputLimitExceeded").GetBoolean(),
+                "An export child lacks complete normal closure evidence.");
+            return new ReplayCalibrationProcessReceipt(ReplayReferenceModel.Hash(child), true, true, 0, false, false, false,
+                observed.GetProperty("ProcessId").GetInt32(), observed.GetProperty("ProcessStartedUtc").GetDateTime().ToUniversalTime().Ticks);
+        }).ToArray();
+    }
+    static void RequireExportEvidence(Sample sample, ReplayCalibrationSourceReceipt receipt)
+    {
+        var children = ExportChildren(sample);
+        Require(receipt.ExportProcesses != null && receipt.ExportProcesses.SequenceEqual(children) && receipt.Export == children.LastOrDefault()
+            && receipt.CombinedPeakAllocation == sample.CombinedPeakAllocation && receipt.WorkPeakAllocation == sample.WorkPeakAllocation
+            && receipt.AssemblyPeakAllocation == sample.AssemblyPeakAllocation && receipt.BoundaryPeakAllocations != null
+            && sample.BoundaryPeakAllocations != null && receipt.BoundaryPeakAllocations.SequenceEqual(sample.BoundaryPeakAllocations)
+            && receipt.NativeExport == sample.NativeExport,
+            "Retained output/work peaks or export child evidence changed.");
     }
     sealed record Sample(string Label, string Scope, string File, long InputBytes, long FinalBytes, long FinalAllocation,
         long PeakAllocation, double RequestedEnd, double ExportSeconds, string SelectionIdentity, ReplayOutputDemand Demand,
-        object Process, string[] Arguments, ReplayInterval Interval = null, object RuntimeProcess = null, string[] RuntimeArguments = null);
+        object Process, string[] Arguments, ReplayInterval Interval = null, object RuntimeProcess = null, string[] RuntimeArguments = null,
+        long CombinedPeakAllocation = 0, long WorkPeakAllocation = 0, object[] ExportProcesses = null,
+        long AssemblyPeakAllocation = 0, long[] BoundaryPeakAllocations = null,
+        ReplayValidation NormalValidation = null, ReplayManagedMuxReceipt ManagedExport = null,
+        ReplayTransportBatchTiming IndexBatch = null, ReplaySaveTiming Timing = null, Sample LegacyOutput = null, string Variant = null,
+        string AcquisitionSelectionHash = null, ReplayCalibrationNativeReceipt NativeExport = null);
 
     static Sample Collect(CalibrationPlan plan, string label, Sampler sampler, ReplayReferenceModel model, List<object> processes,
-        Action<int, IntPtr> beforeForeground = null)
+        Action<int, IntPtr> beforeForeground = null, Dictionary<string, ReplayPublicationLease> qualificationOutputs = null)
     {
-        sampler.RequireTime(330);
-        sampler.Check(3_100_000_000L);
+        sampler.RequireTime(AcquisitionSeconds(plan));
+        sampler.Check(DurationQualification(plan) ? checked(plan.SourceComponentBytes + plan.OutputComponentBytes + QualificationScratchBytes(plan)) : 3_100_000_000L);
         string root = Path.Combine(plan.Root, label); Directory.CreateDirectory(root);
         var previous = GetForegroundWindow();
         using var fixtureJob = new Native.ProcessJob();
@@ -838,10 +1309,131 @@ internal static partial class ReplayCalibrationRun
         int exports = 0;
         bool successful = false;
         Exception primaryFailure = null;
+        SaveSubmission activeSubmission = null;
         using var bootstrapCancel = new CancellationTokenSource();
         Task<CaptureSession> create = null;
         bool runtimeOffline = false; int runtimePhases = 0; NativeEvidence nativeEvidence = null;
         bool captureClaimClosed = false;
+        ReplayPairedSelectionLease pairedInputs = null;
+        var cadence = plan.CompositeQualification ? new CalibrationMaintenanceCadence(TimeProvider.System) : null;
+        var maintenanceIntervals = new List<object[]>();
+        var validationContext = new CalibrationValidationWork.GuardContext();
+        var validationObserverTimings = new List<CalibrationValidationWorkTiming>();
+        var nativeRequests = new Dictionary<string, (ReplayExportRequest Request, bool Eligible, int Thread, long Started,int Linked,int Prepared)>(StringComparer.OrdinalIgnoreCase);
+        void ObserveNativeExport(ReplayExportRequest request)
+        {
+            Require(request.NativeFiles != null && request.NativeFiles.Eligible,
+                "Native qualification requires an owned request on its actual export thread.");
+            int owned=request.PreparedInputs?.Count??0;
+            Require(request.Timing.HardLinkedInputs+owned == request.Inputs.Count && request.Timing.PreparedOwnedInputs==owned && request.Timing.CopiedInputs == 0,
+                "Paired qualification requires live original-object ownership or hardlinks; retain copied-source failure and launch no next source.");
+            var guard=new ReplayPlanningGuard(()=>sampler.Check());guard.CheckNow();
+            foreach(var input in request.Inputs)
+            {
+                guard.Check();
+                if(request.PreparedInputs?.Contains(input.Path)==true)
+                {var extent=request.PreparedInputs.Extent(input.Path);Require(extent.Volume==input.Extent.Volume && extent.Identity==input.Extent.Identity
+                    && extent.Length==input.Extent.Length && extent.AllocationUnit==input.Extent.AllocationUnit,"Prepared original ownership differs from accepted input.");}
+            }
+            guard.CheckNow();
+            nativeRequests.Add(request.Partial, (request, request.NativeFiles.Eligible,
+                Environment.CurrentManagedThreadId, Stopwatch.GetTimestamp(),request.Timing.HardLinkedInputs,owned));
+        }
+        void RetainCheckedOutput(ReplayExportRequest request, Action check)
+        {
+            CalibrationValidationWork.Run(() => {
+                Require(qualificationOutputs != null && request.ValidatedOutput != null,
+                    "Qualification requires continuous checked-output ownership.");
+                sampler.BeforePublication(request.Partial, request.ValidatedOutput.CheckedIdentity);
+                var lease = new ReplayPublicationLease(request.Partial);
+                try
+                {
+                    Require(lease.CheckedIdentity == request.ValidatedOutput.CheckedIdentity,
+                        "Qualification handoff changed the normally checked file.");
+                    qualificationOutputs.Add(request.Partial, lease);
+                }
+                catch { lease.Dispose(); throw; }
+            }, check, receipt => {
+                Require(validationObserverTimings.Count < 16, "Validation observer timing bound.");
+                validationObserverTimings.Add(receipt);
+            });
+        }
+        ReplayCalibrationNativeReceipt CompleteNativeExport(string file, string evidenceRoot, bool packet)
+        {
+            var published = ReplayStorage.Observe(file);
+            var matches = nativeRequests.Values.Where(row => qualificationOutputs.TryGetValue(row.Request.Partial, out var lease)
+                && lease.CheckedIdentity.Volume == published.Volume && lease.CheckedIdentity.Identity == published.Identity
+                && lease.CheckedIdentity.Length == published.Length && lease.CheckedIdentity.AllocationUnit == published.AllocationUnit).ToArray();
+            Require(matches.Length == 1, "Published output has no unique continuously owned native request.");
+            var row = matches[0]; var request = row.Request;
+            Require(request.NativeFiles is { Closed: true } && row.Eligible && request.PacketPipelineSelected == packet
+                && request.Timing.ExportConstruction == (packet ? ReplaySaveExport.BoundedPacketConstruction
+                    : nameof(ReplaySaveExport.Construction.ExactFallback)),
+                "Native qualification selected the wrong construction or failed to close its request scope.");
+            if(OwnedHistoryQualification(plan))
+                Require(request.Timing.CopiedInputs==0 && row.Linked+row.Prepared==request.Inputs.Count
+                    && request.Timing.HardLinkedInputs+request.Timing.PreparedOwnedInputs-request.Timing.PreparedFallbackInputs==request.Inputs.Count
+                    && (!packet || DurationQualification(plan) || request.Timing.PreparedOwnedInputs>=request.Inputs.Count-2
+                        && request.Timing.PreparedIndexHits>=request.Inputs.Count-2
+                        && request.Timing.PreparedIndexHits+request.Timing.PreparedIndexMisses==request.Inputs.Count),
+                    "Fresh owned-history qualification did not exercise completed prepared ownership or normalized closure accounting.");
+            Require(!request.OwnWorkDirectory || !Directory.Exists(request.WorkDirectory) && !File.Exists(request.WorkDirectory),
+                "Native qualification retained its work directory after save cleanup.");
+            if(packet)
+                Require(request.Timing.IndexReadersStarted==request.IndexReaders.Started
+                    && request.Timing.IndexReadersJoined==request.IndexReaders.Joined
+                    && request.Timing.IndexAcquisitionComplete
+                    && (request.PreparedInputs==null
+                        ?request.IndexBatch.FinishedSources==request.Inputs.Count && request.IndexReaders.Joined
+                        :request.PreparedAcquisition.Complete && request.Timing.PreparedIndexHits==request.PreparedAcquisition.Hits
+                            && request.Timing.PreparedIndexMisses==request.PreparedAcquisition.Misses),
+                    "Index acquisition diagnostics differ from the actual request-owned acquisition/lifetime.");
+            var held = qualificationOutputs[request.Partial];
+            Require(!qualificationOutputs.ContainsKey(file), "Duplicate qualification output handoff.");
+            qualificationOutputs.Add(file, held); qualificationOutputs.Remove(request.Partial);
+            string witness = Path.Combine(evidenceRoot, "native-export-witness.json");
+            var staged = request.Preparation;
+            bool requireStaged = packet && label.StartsWith("H", StringComparison.Ordinal);
+            Require((staged != null) == requireStaged && (!requireStaged || staged.Joined
+                && staged.Timing is { FeedJoined: true, Aborted: false, Error: null, FeedSha256.Length: 64, FedBytes: > 0 and <= 8388608 }),
+                "Current packet heldouts must exercise actual reserved staging and join its verified feeder/producer.");
+            Write(witness, new { policy = ReplaySaveExport.PolicyIdentity, ownedRequest = request.NativeFiles != null,
+                eligibleAtExport = row.Eligible, pipelineSelected = request.PacketPipelineSelected,
+                scopeClosed = request.NativeFiles.Closed, request.Partial, published = file,
+                exportThread = row.Thread, exportEntered = row.Started,
+                selectionIdentity = capture.LastOutputSelection.Identity,
+                protectedSelectionHash = ReplayReferenceModel.Hash(new { request.Info, request.Interval, request.Inputs }),
+                linkedAtExportEntry=row.Linked,preparedAtExportEntry=row.Prepared,request.Timing.HardLinkedInputs, request.Timing.CopiedInputs,
+                request.Timing.PreparedOwnedInputs,request.Timing.PreparedIndexHits,request.Timing.PreparedIndexMisses,request.Timing.PreparedFallbackInputs,
+                request.Timing.IndexAcquisitionComplete,request.Timing.IndexReadersStarted,request.Timing.IndexReadersJoined,
+                checkedOutput = held.CheckedIdentity, request.Timing.ExportConstruction,
+                request.Timing.ExportRecipe, sourcePruningRetainedForQualification = true,
+                workBodiesRetiredAfterForcedObservation = true,
+                preparationSelected = staged != null, preparationJoined = staged?.Joined ?? false, preparation = staged?.Timing });
+            nativeRequests.Remove(request.Partial);
+            return new(HashFile(witness), ReplaySaveExport.PolicyIdentity, true, row.Eligible,
+                request.PacketPipelineSelected, request.NativeFiles.Closed,
+                staged != null, staged?.Joined ?? false, staged?.Timing.FeedSha256, staged?.Timing.FedBytes ?? 0);
+        }
+        void MaintainCapture()
+        {
+            if (cache == null || cadence != null && !cadence.MaintenanceDue) return;
+            long started = Stopwatch.GetTimestamp();
+            Exception failed = null;
+            try { cache.Maintain(id); }
+            catch (Exception error) { failed = error; throw; }
+            finally
+            {
+                long completed = Stopwatch.GetTimestamp();
+                if (cadence != null)
+                {
+                    if (maintenanceIntervals.Count < (DurationQualification(plan) ? 16384 : 2048))
+                        maintenanceIntervals.Add([started, completed, failed == null ? null : ReplayOutputDemand.Bounded(failed.ToString(), 1024)]);
+                    else if (failed == null) throw new IOException("Composite maintenance trace bound.");
+                    if (failed == null) cadence.MaintenanceCompleted(); // No catch-up or renewal on failure.
+                }
+            }
+        }
         void BeginPayloadWork()
         {
             if (!plan.ReadonlyValidationPhases) return;
@@ -853,8 +1445,17 @@ internal static partial class ReplayCalibrationRun
             var start = new ProcessStartInfo(Environment.ProcessPath) { UseShellExecute = false, CreateNoWindow = true };
             if (Path.GetFileNameWithoutExtension(Environment.ProcessPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
                 start.ArgumentList.Add(typeof(ReplayCalibrationRun).Assembly.Location);
-            foreach (string value in new[] { "--calibration-fixture", root, label }) start.ArgumentList.Add(value);
-            if (plan.UserForegroundHandoff) start.ArgumentList.Add("manual-handoff");
+            if (DurationQualification(plan))
+            {
+                foreach (string value in new[] { SameCaptureQualification(plan) ? "--replay-same-C00-fixture" : "--replay-calibration-duration-fixture", root, label, plan.ReplayMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture) }) start.ArgumentList.Add(value);
+                var presentationBinding=PresentationPlanBinding.For(plan);
+                if(presentationBinding!=null)foreach(string value in new[]{"--presentation-reference",presentationBinding.Path,presentationBinding.Hash})start.ArgumentList.Add(value);
+            }
+            else
+            {
+                foreach (string value in new[] { "--calibration-fixture", root, label }) start.ArgumentList.Add(value);
+                if (plan.UserForegroundHandoff || plan.CompositeManualForegroundHandoff) start.ArgumentList.Add("manual-handoff");
+            }
             AdmitNativeChild("fixture:" + label); fixture = Process.Start(start); fixtureJob.Add(fixture);
             processes.Add(new { role = "fixture", label, pid = fixture.Id, start = fixture.StartTime.ToUniversalTime() });
             while (!File.Exists(Path.Combine(root, "fixture-ready.json")))
@@ -862,15 +1463,42 @@ internal static partial class ReplayCalibrationRun
                 sampler.Check(); Require(!fixture.HasExited && total.Elapsed.TotalSeconds < 15, "Controlled fixture did not become ready."); Thread.Sleep(100);
             }
             using var ready = CalibrationFixturePublication.Read(root);
+            int fixtureLifetime = FixtureSeconds(plan);
+            Require(ready.RootElement.GetProperty("lifetimeSeconds").GetInt32() == fixtureLifetime
+                && ready.RootElement.GetProperty("maximumAnimatedFrame").GetInt32() == CalibrationPattern.MaximumAnimatedFrame(fixtureLifetime)
+                && ready.RootElement.GetProperty("barcodeFrameDivisor").GetInt32() == (SameCaptureQualification(plan) ? 1 : CalibrationPattern.BarcodeFrameDivisor(fixtureLifetime))
+                && (!SameCaptureQualification(plan) || ready.RootElement.GetProperty("sourceIdRange").GetInt32()==CalibrationPattern.ReferenceSourceIdRange)
+                && ready.RootElement.GetProperty("timerIntervalMilliseconds").GetInt32() == CalibrationPattern.TimerIntervalMilliseconds,
+                "Fixture lifetime/barcode contract differs from the admitted helper.");
             IntPtr hwnd = (IntPtr)ready.RootElement.GetProperty("hwnd").GetInt64();
             Require(ready.RootElement.GetProperty("width").GetInt32() == 1920 && ready.RootElement.GetProperty("height").GetInt32() == 1080, "Fixture dimensions changed.");
             uint windowProcess; Native.GetWindowThreadProcessId(hwnd, out windowProcess);
             Require(windowProcess == fixture.Id && ready.RootElement.GetProperty("pid").GetInt32() == fixture.Id,
                 "Fixture window does not belong to the task-owned process; no capture admitted.");
             beforeForeground?.Invoke(fixture.Id, hwnd);
+            if (plan.CompositeManualForegroundHandoff)
+            {
+                var release = plan.CompositeExplicitForegroundRelease
+                    ? CalibrationForegroundRelease.Create(label, fixture.Id, hwnd.ToInt64()) : null;
+                Write(Path.Combine(root, "foreground-handoff-ready.json"), new { label, pid = fixture.Id, hwnd = hwnd.ToInt64(),
+                    maximumSeconds = CalibrationForeground.UserHandoffSeconds, captureStarted = false,
+                    release,
+                    instruction = release == null
+                        ? "Click the controlled pattern and keep it foreground while recording. No capture starts before verified foreground."
+                        : "Finish all UI permission/activation calls, then atomically publish the matching release. Foreground alone cannot start capture. Keep the pattern foreground afterward." });
+                var handoffClock = Stopwatch.StartNew();
+                CalibrationForeground.WaitForUserHandoff(() => { Native.GetWindowThreadProcessId(hwnd, out uint owner);
+                        return owner == fixture.Id && Native.IsWindowVisible(hwnd) && GetForegroundWindow() == hwnd
+                            && (release == null || release.IsReleased(root)); },
+                    () => { Native.GetWindowThreadProcessId(hwnd, out uint owner); return fixture.HasExited || owner != fixture.Id; },
+                    () => sampler.Check(), () => Thread.Sleep(50), () => handoffClock.Elapsed.TotalSeconds);
+                Write(Path.Combine(root, "foreground-handoff-complete.json"), new { label, pid = fixture.Id, hwnd = hwnd.ToInt64(),
+                    waitedMilliseconds = handoffClock.Elapsed.TotalMilliseconds, captureStarted = false, release });
+                total.Restart(); // The declared operator wait precedes the unchanged acquisition deadline.
+            }
             if (plan.UserForegroundHandoff) total.Restart(); // The separately bounded focus handoff precedes source setup.
             bool requested = false;
-            if (!plan.UserForegroundHandoff)
+            if (!plan.UserForegroundHandoff && !plan.CompositeManualForegroundHandoff)
             {
                 Native.ShowWindow(hwnd, 5); // Show only our own window; no preference or input changes.
                 requested = SetForegroundWindow(hwnd);
@@ -878,10 +1506,13 @@ internal static partial class ReplayCalibrationRun
             var focusClock = Stopwatch.StartNew();
             CalibrationForeground.Wait(() => { Native.GetWindowThreadProcessId(hwnd, out uint currentOwner);
                     return currentOwner == fixture.Id && GetForegroundWindow() == hwnd && Native.IsWindowVisible(hwnd); },
-                () => fixture.HasExited, () => { sampler.Check(); Require(total.Elapsed.TotalSeconds < 330, "Source setup deadline."); },
+                () => fixture.HasExited, () => { sampler.Check(); Require(total.Elapsed.TotalSeconds < AcquisitionSeconds(plan), "Source setup deadline."); },
                 () => Thread.Sleep(50), () => focusClock.Elapsed.TotalSeconds);
             Write(Path.Combine(root, "foreground-admission.json"), new { fixturePid = fixture.Id, hwnd = hwnd.ToInt64(), requested,
                 visible = Native.IsWindowVisible(hwnd), foreground = GetForegroundWindow() == hwnd, waitedMilliseconds = focusClock.Elapsed.TotalMilliseconds });
+            var independentPresentation=PresentationPlanBinding.For(plan);
+            if(independentPresentation!=null)
+                CalibrationPresentationIntegration.RequestAndWait(root,independentPresentation,fixture.Id,hwnd,()=>sampler.Check(),()=>fixture.HasExited);
             RecorderRuntime.CaptureArgumentObserver = a =>
             {
                 var normalized = ReplayCalibrationStartup.NormalizeCaptureArguments(a, root,
@@ -890,9 +1521,11 @@ internal static partial class ReplayCalibrationRun
                 Write(Path.Combine(root, "capture-arguments.json"), a);
             };
             RecorderRuntime.ExportArgumentObserver = a => { BeginPayloadWork(); nativeEvidence?.RequireNativeSnapshot(a, capture.LastOutputSelection); AdmitNativeChild("export:" + label); Write(Path.Combine(root, "export-arguments-" + ++exports + ".json"), a); };
-            var settings = new Settings { ReplayMinutes = 5, FramesPerSecond = 60, BitrateMbps = 20, VideoCodec = "h264_nvenc",
+            var settings = new Settings { ReplayMinutes = plan.ReplayMinutes, FramesPerSecond = 60, BitrateMbps = 20, VideoCodec = "h264_nvenc",
                 SystemAudio = true, CaptureMode = "monitor", DisplayIndex = -1, OutputDirectory = root };
             Write(Path.Combine(root, "settings.json"), settings);
+            if (ContextQualification(plan))
+                sharedClaims = new ReplayVolumeReservations(Path.Combine(plan.Root, "calibration-ownership"), ReplayStorageSafety.MinimumBytes);
             if (model != null && !(Exact14(plan) && label == "H03"))
             {
                 string profile = Path.Combine(root, "storage-profile"); Directory.CreateDirectory(profile);
@@ -914,12 +1547,15 @@ internal static partial class ReplayCalibrationRun
                 () => bootstrapCancel.IsCancellationRequested || sampler.Failure != null || GetForegroundWindow() != hwnd,
                 null, beforeLaunch: source =>
                 {
+                    if (ContextQualification(plan))
+                        Require(source.ReferenceScope == ReadContextFreeze(plan).Context.Scope(ReplayReferenceModel.ExporterIdentity, 5),
+                            "C00 actual capture context differs from the prospective freeze.");
                     if (captureStorage == null) return;
                     captureStorage.BeginCapture(source.ReferenceScope, source.DirectoryPath, root, () =>
                     {
                         bootstrapCancel.Cancel();
                         _ = Task.Run(source.StopCapture);
-                    }, producerProof: source.ProducerProof);
+                    }, producerProof: source.ProducerProof, replayMinutes: plan.ReplayMinutes);
                     captureStorage.StartSupervision();
                 }, afterLaunch: source => captureStorage?.SealProducer(source.ProducerProof)));
             }
@@ -935,13 +1571,17 @@ internal static partial class ReplayCalibrationRun
                     throw new IOException("Controlled fixture lost foreground during bootstrap.");
                 }
                 Require(bootstrapClock.Elapsed.TotalSeconds < 35
-                && total.Elapsed.TotalSeconds < 330, "Capture bootstrap deadline."); Thread.Sleep(100); }
+                && total.Elapsed.TotalSeconds < AcquisitionSeconds(plan), "Capture bootstrap deadline."); Thread.Sleep(100); }
             capture = create.GetAwaiter().GetResult();
             if (plan.ExactContinuationRoot != null || plan.ProductionQualification) nativeEvidence = new NativeEvidence(root, capture.DirectoryPath,
                 completedSegments: ((IReplaySessionSource)capture).ReadSegments, excludeInitial: ((IReplaySessionSource)capture).ReplayInfo.ExcludeInitialSegment);
             capture.ValidationArgumentObserver = args =>
             {
+                Require(!plan.CompositeQualification || validationContext.Current != null,
+                    "Composite validation observer is missing its actual product guard.");
+                CalibrationValidationWork.Run(() => {
                 nativeEvidence?.PreserveOutput(args[args.ToList().IndexOf("-i") + 1]);
+                sampler.BeforePublication(args[args.ToList().IndexOf("-i") + 1]);
                 if (plan.ReadonlyValidationPhases && capture.CaptureProducerAbsent
                     && capture.LastExport is { Success: true, ActualExitObserved: true, ProducerAbsent: true })
                 {
@@ -957,16 +1597,49 @@ internal static partial class ReplayCalibrationRun
                         meaning = "Closed MP4 to null-output decoder plus bounded receipts/publication metadata. Product storage guard unchanged." });
                 }
                 AdmitNativeChild("runtime-validation:" + label);
+                }, validationContext.Current, receipt => {
+                    Require(validationObserverTimings.Count < 16, "Validation observer timing bound.");
+                    validationObserverTimings.Add(receipt);
+                });
             };
             capture.ObserveOutputDemand = workerCase == null; capture.OutputCalibration = model;
+            if (SameCaptureQualification(plan))
+            {
+                var clock = capture.AcquisitionClock;
+                Require(clock != null, "Actual C00 acquisition clock is required.");
+                Write(Path.Combine(root, "source-clock.json"), new { clock.QpcEpoch, clock.QpcFrequency, clock.UnixMicroseconds, clock.BridgeUncertaintyTicks });
+                ReplayPacketMuxExport.CompletedInputProofForChecks = (request, indices) =>
+                {
+                    Require(request.Inputs.Count == indices.Count && request.Inputs.Count <= 305, "Complete C00 digest/selection count mismatch.");
+                    var proof = request.Inputs.Select((input, n) => {
+                        Require(input.Extent.Length == indices[n].Bytes, "C00 established index EOF changed.");
+                        return new ReplayCompletedInputDigest(input.Path, input.Start, input.End, input.Extent, indices[n].Sha256);
+                    }).ToArray();
+                    Write(Path.Combine(root, "completed-input-proof.json"), proof, 524288);
+                };
+            }
             Require(capture.ReferenceScope != null, "Real reference recipe or audio/dimensions are unqualified.");
             using (var ownedCapture = Process.GetProcessById(capture.ProcessId))
                 captureIdentity = new(ownedCapture.Id, ownedCapture.StartTime.ToUniversalTime(), capture.DirectoryPath);
             processes.Add(new { role = "capture", label, pid = captureIdentity.Pid, start = captureIdentity.StartedUtc, sessionDirectory = captureIdentity.SessionDirectory });
             if (workerCase == null)
             {
-                cache = new ReplayCache(plan.ExactContinuationRoot != null || plan.ProductionQualification ? new ReplayFiles() : new RetainFiles(sampler, Exact14(plan)), cacheDirectory: Path.Combine(root, "buffer"), volumeReservations: sharedClaims);
-                id = cache.RegisterSession(nativeEvidence != null ? new EvidenceSource(capture, nativeEvidence) : capture);
+                cache = new ReplayCache(plan.ExactContinuationRoot != null || plan.ProductionQualification || plan.CompositeQualification ? null
+                    : new RetainFiles(sampler, Exact14(plan)), cacheDirectory: Path.Combine(root, "buffer"), volumeReservations: sharedClaims,
+                    fileMode: plan.CompositeQualification ? ReplayFileMode.Production : null);
+                if (plan.CompositeQualification)
+                {
+                    cache.RetainSourceNamespaceForQualificationChecks = true;
+                    cache.SerializeNamespaceMutationForChecks = mutation => {
+                        lock (sampler.Gate) { sampler.ReleaseInventoryHandles(); mutation(); }
+                    };
+                }
+                id = cache.RegisterSession(plan.CompositeQualification
+                    ? new ProtectedPairSource(capture, request => {
+                        ObserveNativeExport(request);
+                        pairedInputs = new ReplayPairedSelectionLease(request, capture.ReferenceScope, () => sampler.Check());
+                    }, validationContext, RetainCheckedOutput, ContextQualification(plan) ? selection => capture.LastOutputDemand = UnmodelledQualificationDemand(capture.LastOutputSelection = selection, plan, capture.ReferenceScope, capture.DirectoryPath) : null)
+                    : nativeEvidence != null ? new EvidenceSource(capture, nativeEvidence) : capture);
             }
             void StopSource()
             {
@@ -983,11 +1656,14 @@ internal static partial class ReplayCalibrationRun
             }
             while (((IReplaySessionSource)capture).ReadSegments().Count < 2) { sampler.Check(); Require(total.Elapsed.TotalSeconds < 35, "Initial source history timeout."); Thread.Sleep(50); }
             double availableStart = ((IReplaySessionSource)capture).ReadSegments().Where(s => !Path.GetFileName(s.Path).StartsWith("chunk-000000000.")).First().Start;
-            double triggerAt = Exact14(plan) ? availableStart + 300 + (label is "T01" or "H01" ? 1 : label is "T02" or "H03" ? .25 : .75)
+            double triggerAt = Exact14(plan) || plan.CompositeQualification ? availableStart + ReferenceSeconds(plan) + (label is "T01" or "H01" ? 1 : label is "T02" or "H03" ? .25 : .75)
                 : label is "T01" or "H01" ? 304 : label is "T02" or "H03" ? 302.25 : 302.75;
             while (((IReplaySessionSource)capture).SaveCutoffAt(Stopwatch.GetTimestamp()) < triggerAt)
             {
                 sampler.Check();
+                Require(total.Elapsed.TotalSeconds < AcquisitionSeconds(plan), "Live acquisition exceeded its admitted deadline.");
+                if (cadence == null || cadence.ObservationDue)
+                {
                 IntPtr foreground = GetForegroundWindow();
                 if (fixture.HasExited || foreground != hwnd)
                 {
@@ -1001,37 +1677,91 @@ internal static partial class ReplayCalibrationRun
                 var bounds = Native.DisplayBounds(IntPtr.Zero); Require(bounds.Width == 1920 && bounds.Height == 1080, "Display dimensions changed during capture.");
                 var health = capture.ReadHealth();
                 workerCase?.CheckHealth();
-                if (total.Elapsed.TotalSeconds >= 330 || !health.Healthy)
+                if (total.Elapsed.TotalSeconds >= AcquisitionSeconds(plan) || !health.Healthy)
                 {
                     Write(Path.Combine(root, "capture-health-failure.json"), health);
                     throw new IOException("Capture source failed or exceeded deadline: " + JsonSerializer.Serialize(health));
                 }
-                nativeEvidence?.CaptureClosed(acquiring: true); cache?.Maintain(id); Thread.Sleep(100);
+                nativeEvidence?.CaptureClosed(acquiring: true);
+                cadence?.ObservationCompleted();
+                }
+                MaintainCapture();
+                Thread.Sleep(cadence?.DelayMilliseconds ?? 100);
             }
-            if (label is "T01" or "H01")
+            // The composite model qualifies the live reference save workload.
+            // A stopped capture can lack real trailing AAC at its video cutoff;
+            // that correctly selects the exact fallback, not a packet sample.
+            // Keep historical paused-source cases in their original routes.
+            if (!plan.CompositeQualification && label is ("T01" or "H01"))
             {
                 sampler.MarkCaptureStop(label);
                 StopSource();
             }
-            sampler.RequireTime(130);
-            var save = workerCase != null ? workerCase.Save() : cache.TrySave(id, Stopwatch.GetTimestamp(), settings.OutputDirectory);
+            sampler.RequireTime(ExportControllerLimit(plan));
+            long? pressSourceChecked = null;
+            if (cadence != null)
+            {
+                // A maintenance wake may cross triggerAt between observations.
+                // Recheck immediately before stamping the immutable request.
+                Require(GetForegroundWindow() == hwnd && !fixture.HasExited && Native.IsWindowVisible(hwnd)
+                    && capture.ReadHealth().Healthy && captureStorage?.Stopped != true, "Controlled source is not valid at the save press.");
+                var pressBounds = Native.DisplayBounds(IntPtr.Zero);
+                Require(pressBounds.Width == 1920 && pressBounds.Height == 1080, "Display dimensions changed at save press.");
+                pressSourceChecked = Stopwatch.GetTimestamp();
+            }
+            long requestedQpc = Stopwatch.GetTimestamp();
+            var save = workerCase != null ? workerCase.Save() : cache.TrySave(id, requestedQpc, settings.OutputDirectory);
+            activeSubmission = save;
+            if (!save.Accepted && plan.CompositeQualification)
+            {
+                try
+                {
+                    var observed = capture.LastOutputSelection;
+                    var observedDemand = capture.LastOutputDemand;
+                    double pressEndAfterRejection = capture.SaveCutoffAt(requestedQpc);
+                    Write(Path.Combine(root, "admission-rejection.json"), new {
+                        requestedQpc, pressSourceChecked, contextQpc = Stopwatch.GetTimestamp(), rejection = save.Rejection,
+                        pressEndAfterRejection,
+                        lastSelectionMatchesFrozenPress = observed != null && observed.End == pressEndAfterRejection,
+                        selection = observed == null ? null : new {
+                            observed.Identity, observed.ExporterIdentity, observed.Destination, observed.Start, observed.End, observed.Closed,
+                            inputCount = observed.Inputs.Count,
+                            first = observed.Inputs.FirstOrDefault(), last = observed.Inputs.LastOrDefault(),
+                            duration = observed.End - observed.Start,
+                            headSpan = observed.Inputs.Count == 0 ? (double?)null : observed.End - observed.Inputs[0].Start,
+                            tailGap = observed.Inputs.Count == 0 ? (double?)null : observed.End - observed.Inputs[^1].End },
+                        observedDemand,
+                        interpretation = "Actual last estimator operands captured immediately after rejection, before drain. Match flag distinguishes any earlier estimate. The original press timestamp/end is unchanged; no retry, acceptance or publication is performed." });
+                }
+                catch (Exception diagnosticError)
+                { throw new IOException(save.Rejection, diagnosticError); } // Preserve rejection as primary cause.
+            }
             Require(save.Accepted, save.Rejection);
             Write(Path.Combine(root, "acceptance-demand.json"), save.AdmissionDemand);
+            if (pressSourceChecked != null) Write(Path.Combine(root, "press-source-check.json"), new {
+                checkedQpc = pressSourceChecked, requestedQpc,
+                interpretation = "Actual foreground/fixture/health/display rechecked immediately before TrySave timestamp; no file I/O between check and request." });
             if (label is "H02" or "H03") Require(save.AdmissionDemand?.CoversOpenTail == true
                 && save.AdmissionDemand.SnapshotPeakAllocatedBytes.HasValue, "Held-out live press did not exercise reserved unfinished-tail acceptance.");
             var saveClock = Stopwatch.StartNew();
             while (!save.Completion.IsCompleted)
             {
-                sampler.Check(); Require(saveClock.Elapsed.TotalSeconds < 130, "Export controller deadline.");
-                if (!((IReplaySessionSource)capture).Stopped
-                    && ((IReplaySessionSource)capture).SaveCutoffAt(Stopwatch.GetTimestamp()) >= (Exact14(plan) ? triggerAt + 10 : 310))
+                sampler.Check(); Require(saveClock.Elapsed.TotalSeconds < ExportControllerLimit(plan), "Export controller deadline.");
+                if (!plan.CompositeQualification && !((IReplaySessionSource)capture).Stopped
+                    && ((IReplaySessionSource)capture).SaveCutoffAt(Stopwatch.GetTimestamp()) >= (Exact14(plan) || plan.CompositeQualification ? triggerAt + 10 : 310))
                 {
                     sampler.MarkCaptureStop(label);
                     StopSource();
                 }
                 if (!((IReplaySessionSource)capture).Stopped)
-                { Require(GetForegroundWindow() == hwnd && !fixture.HasExited, "Source lost during live export."); nativeEvidence?.CaptureClosed(acquiring: true); cache?.Maintain(id); }
-                Thread.Sleep(100);
+                { Require(total.Elapsed.TotalSeconds < AcquisitionSeconds(plan), "Live acquisition exceeded its admitted deadline during save.");
+                    if (cadence == null || cadence.ObservationDue)
+                    {
+                        Require(GetForegroundWindow() == hwnd && !fixture.HasExited, "Source lost during live export.");
+                        nativeEvidence?.CaptureClosed(acquiring: true); cadence?.ObservationCompleted();
+                    }
+                    MaintainCapture(); }
+                Thread.Sleep(cadence != null && !((IReplaySessionSource)capture).Stopped ? cadence.DelayMilliseconds : 100);
             }
             var result = save.Completion.GetAwaiter().GetResult();
             sampler.MarkCaptureStop(label); StopSource();
@@ -1040,23 +1770,80 @@ internal static partial class ReplayCalibrationRun
             Require(captureStorage?.Stopped != true, "Production storage supervision stopped this held-out source; no qualification.");
             Require(result.Succeeded, result.Error);
             var selection = capture.LastOutputSelection;
-            Require(selection.Closed && selection.Inputs.Count >= 298 && capture.LastExport.Success, "Export selection/process incomplete.");
+            Require(selection.Closed && selection.Inputs.Count >= ReferenceSeconds(plan)-2
+                && (plan.CompositeQualification ? capture.LastManagedMux is { Closed: true, InputHashesComplete: true }
+                    && capture.LastExportProcesses.All(p => p.Success) : capture.LastExport?.Success == true), "Export selection/process incomplete.");
             double exportSeconds = result.Interval.Seconds;
-            Require(Math.Abs(exportSeconds - 300) <= 0.000001 && result.Validation?.Kind == "FullDecode" && capture.LastValidation?.Success == true,
-                "Requested-five-minute output interval or runtime validation is incomplete.");
+            Require(Math.Abs(exportSeconds - ReferenceSeconds(plan)) <= 0.000001
+                && (plan.CompositeQualification ? result.Validation is { Kind: ReplayOutputIntegrity.Kind, Frames: 0, PublicationIdentityBound: true }
+                    : result.Validation?.Kind == "FullDecode" && capture.LastValidation?.Success == true),
+                "Requested duration-specific output interval or runtime validation is incomplete.");
             var extent = ReplayStorage.Observe(result.File);
             using (var output = new StreamWriter(new FileStream(Path.Combine(root, "selection.jsonl"), FileMode.CreateNew, FileAccess.Write, FileShare.Read)))
                 foreach (var input in selection.Inputs)
                 {
                     string line = JsonSerializer.Serialize(input); Require(line.Length < 4096, "Selection evidence record too large."); output.WriteLine(line);
                 }
+            var outputPeaks = sampler.OutputAndWorkspacePeak(result.File);
             var sample = new Sample(label, capture.ReferenceScope, result.File, selection.Inputs.Sum(i => i.Extent.Length), result.Bytes,
                 extent.AllocatedBytes, sampler.Peak(result.File), selection.End, exportSeconds, selection.Identity,
-                capture.LastOutputDemand, SaveProcess(root, "main-export", capture.LastExport), capture.ExportArguments, result.Interval,
-                SaveProcess(root, "runtime-validation", capture.LastValidation), capture.ValidationArguments);
-            Write(Path.Combine(root, "runtime-validation-exit.json"), sample.RuntimeProcess);
+                capture.LastOutputDemand, capture.LastExport == null ? null : SaveProcess(root, "main-export", capture.LastExport), capture.ExportArguments, result.Interval,
+                capture.LastValidation == null ? null : SaveProcess(root, "runtime-validation", capture.LastValidation), capture.ValidationArguments,
+                outputPeaks.Combined, outputPeaks.Work, SaveProcesses(root, "main-export", capture), outputPeaks.Assembly, outputPeaks.Boundaries,
+                result.Validation, capture.LastManagedMux, capture.LastIndexBatch, result.Timing, Variant: plan.CompositeQualification ? "packet" : null,
+                AcquisitionSelectionHash: pairedInputs?.AcquisitionSelectionHash,
+                NativeExport: plan.CompositeQualification ? CompleteNativeExport(result.File, root, true) : null);
+            if (sample.RuntimeProcess != null) Write(Path.Combine(root, "runtime-validation-exit.json"), sample.RuntimeProcess);
+            if (sample.ManagedExport != null) Write(Path.Combine(root, "managed-export.json"), sample.ManagedExport);
+            if (plan.CompositeQualification)
+            {
+                // Preserve the completed primary before a paired failure can
+                // overwrite CaptureSession's last-result diagnostics. This is
+                // after CompletionReady and never inside the timed save.
+                PublishCreatorProofs(plan, root, label, "packet", capture, exports);
+                Write(Path.Combine(root, "primary-normal-sample.json"), new {
+                    qualification = "pending-paired-and-independent-inspections", sample });
+                Require(cache != null && workerCase == null && ((IReplaySessionSource)capture).Stopped,
+                    "Paired output collection requires the stopped original capture and its owned cache.");
+                string legacyRoot = Path.Combine(root, "legacy"); Directory.CreateDirectory(legacyRoot);
+                Require(pairedInputs != null, "Primary protected input ownership was not retained.");
+                pairedInputs.PrepareForReplay(capture, () => sampler.Check());
+                if (SameCaptureQualification(plan))
+                    pairedInputs.WriteCompletedProofMapping(Path.Combine(root, "completed-input-proof.json"), Path.Combine(root, "completed-input-mapping.json"), () => sampler.Check());
+                Write(Path.Combine(root, "paired-source-aliases.json"), new { pairedInputs.AcquisitionSelectionHash, aliases = pairedInputs.ReplayAliases }, maximumBytes: 1048576);
+                var legacyId = cache.RegisterSession(new ShortSource(capture, ReferenceSeconds(plan), result.Interval.End, exactFallback: true,
+                    protect: request => { ObserveNativeExport(request); pairedInputs.Verify(request, capture.ReferenceScope, () => sampler.Check()); },
+                    validationContext: validationContext, preserveEvidence: true, inspectPublication: RetainCheckedOutput,
+                    protectedSegments: pairedInputs.ReadSegments, qualificationDemand: ContextQualification(plan)
+                        ? selection => capture.LastOutputDemand = UnmodelledQualificationDemand(capture.LastOutputSelection = selection, plan, capture.ReferenceScope, capture.DirectoryPath) : null));
+                var legacySave = cache.TrySave(legacyId, Stopwatch.GetTimestamp(), settings.OutputDirectory);
+                activeSubmission = legacySave;
+                Require(legacySave.Accepted, legacySave.Rejection);
+                var legacyClock = Stopwatch.StartNew();
+                while (!legacySave.Completion.IsCompleted)
+                { sampler.Check(); Require(legacyClock.Elapsed.TotalSeconds < ExportControllerLimit(plan), "Paired exact-fallback deadline."); Thread.Sleep(100); }
+                var legacy = legacySave.Completion.GetAwaiter().GetResult();
+                Require(legacy.Succeeded && legacy.Validation is { Kind: "FullDecode", PublicationIdentityBound: true }
+                    && legacy.Timing.ExportRecipe == ReplayExactExport.Recipe && capture.LastValidation?.Success == true
+                    && capture.LastOutputSelection.Inputs.Sum(i => i.Extent.Length) == sample.InputBytes,
+                    "Paired fallback must preserve the original protected selection and complete its actual full normal decoder: " + legacy.Error);
+                var legacyExtent = ReplayStorage.Observe(legacy.File);
+                PublishCreatorProofs(plan, root, label, "legacy", capture, exports);
+                var legacyPeaks = sampler.OutputAndWorkspacePeak(legacy.File);
+                var paired = new Sample(label, capture.ReferenceScope, legacy.File, sample.InputBytes, legacy.Bytes, legacyExtent.AllocatedBytes,
+                    sampler.Peak(legacy.File), selection.End, legacy.Interval.Seconds, capture.LastOutputSelection.Identity, capture.LastOutputDemand,
+                    SaveProcess(legacyRoot, "main-export", capture.LastExport), capture.ExportArguments, legacy.Interval,
+                    SaveProcess(legacyRoot, "runtime-validation", capture.LastValidation), capture.ValidationArguments,
+                    legacyPeaks.Combined, legacyPeaks.Work, SaveProcesses(legacyRoot, "main-export", capture), legacyPeaks.Assembly, legacyPeaks.Boundaries,
+                    legacy.Validation, null, capture.LastIndexBatch, legacy.Timing, Variant: "legacy",
+                    AcquisitionSelectionHash: pairedInputs.AcquisitionSelectionHash,
+                    NativeExport: CompleteNativeExport(legacy.File, legacyRoot, false));
+                Write(Path.Combine(legacyRoot, "sample.json"), paired);
+                Write(Path.Combine(legacyRoot, "runtime-validation-exit.json"), paired.RuntimeProcess);
+                sample = sample with { LegacyOutput = paired };
+            }
             Write(Path.Combine(root, plan.RetainActiveOutputHandles ? "pre-release-sample.json" : "sample.json"), sample);
-            if (label == "T02" && !plan.ProductionQualification)
+            if (label == "T02" && !plan.ProductionQualification && !plan.CompositeQualification)
                 foreach (var control in new[] { (Seconds: 1, End: availableStart + 3), (Seconds: 2, End: availableStart + 6) })
                 {
                     sampler.Check(32_000_000);
@@ -1068,6 +1855,7 @@ internal static partial class ReplayCalibrationRun
                     var shortResult = submission.Completion.GetAwaiter().GetResult(); Require(shortResult.Succeeded, shortResult.Error);
                     Write(Path.Combine(root, "control-" + control.Seconds + ".json"), new { shortResult,
                         process = SaveProcess(root, "control-export-" + control.Seconds, capture.LastExport), arguments = capture.ExportArguments,
+                        processes = SaveProcesses(root, "control-export-" + control.Seconds, capture),
                         validation = SaveProcess(root, "control-runtime-" + control.Seconds, capture.LastValidation), validationArguments = capture.ValidationArguments });
                 }
             nativeEvidence?.Seal(result.File); successful = true; return sample;
@@ -1076,8 +1864,26 @@ internal static partial class ReplayCalibrationRun
         finally
         {
             RecorderRuntime.CaptureArgumentObserver = null; RecorderRuntime.ExportArgumentObserver = null;
+            ReplayPacketMuxExport.CompletedInputProofForChecks = null;
             var cleanupErrors = new List<Exception>();
             void Clean(Action action) { try { action(); } catch (Exception error) { cleanupErrors.Add(error); } }
+            // Request stop before reporting, owner disposal or cache drain can
+            // wait on the observer. Only later confirmed closure releases claims.
+            if (primaryFailure != null && capture != null)
+                Clean(() => sampler.RequestCaptureStop(label, capture.StopCapture));
+            Clean(() => Write(Path.Combine(root, "validation-observer-timings.json"), new {
+                qualificationOnly = true, frequency = Stopwatch.Frequency, timings = validationObserverTimings,
+                scope = "Actual synchronous qualification observer costs with joined cooperative same-product-guard coverage; all costs remain before decoder launch/publication." }));
+            Clean(() => {
+                if ((sampler.StopRequested || sampler.Failure != null) && !sampler.ObserverAbsent) ReplayPairedSelectionLease.RetainUntilControllerExit(pairedInputs);
+                else if (SameCaptureQualification(plan) && successful)
+                {
+                    Require(sameCaptureInputOwner == null, "Only one C00 input owner may transfer through manifest/acceptance closure.");
+                    sameCaptureInputOwner = pairedInputs;
+                }
+                else if (capture == null || ((IReplaySessionSource)capture).OutputProducerStopped) pairedInputs?.Dispose();
+                else ReplayPairedSelectionLease.RetainUntilControllerExit(pairedInputs);
+            });
             Clean(() => {
             bootstrapCancel.Cancel();
             if (capture == null && create != null)
@@ -1102,7 +1908,8 @@ internal static partial class ReplayCalibrationRun
             Clean(() => {
             if (captureStorage != null)
             {
-                captureStorage.CompleteCapture(capture?.CaptureProducerAbsent == true);
+                CompleteStoppedCaptureClaim(sampler, capture?.CaptureProducerAbsent == true,
+                    () => captureStorage.CompleteCapture(capture?.CaptureProducerAbsent == true));
                 if (successful) Require(!captureStorage.CapturePending && !captureStorage.Stopped && !captureLatch.Read().Held,
                     "Held-out capture claim/guard did not complete normally.");
                 captureStorage.Dispose();
@@ -1114,12 +1921,28 @@ internal static partial class ReplayCalibrationRun
             Clean(() => { if (!successful || cleanupErrors.Count != 0) { workerCase?.AbortCapture(); capture?.Dispose(); } });
             Clean(() => { if (workerCase != null) workerCase.Dispose(); else if (cache != null) cache.CloseAsync().GetAwaiter().GetResult(); else capture?.Dispose(); });
             Clean(() => {
+                if (primaryFailure == null && cleanupErrors.Count == 0) return;
+                // Actual state after the close/drain attempt. Late publication
+                // never reverses the original finite-controller failure.
+                var completion = activeSubmission?.Completion;
+                Write(Path.Combine(root, "failure-context-after-drain.json"), new {
+                    primaryFailure = primaryFailure?.ToString(), cleanupErrors = cleanupErrors.Select(e => e.ToString()).ToArray(),
+                    completionStatus = completion?.Status.ToString(),
+                    actualResult = completion?.IsCompletedSuccessfully == true ? completion.Result : null,
+                    producerStopped = capture == null ? (bool?)null : ((IReplaySessionSource)capture).OutputProducerStopped,
+                    timing = capture?.LastExportTiming, managed = capture?.LastManagedMux,
+                    index = capture?.LastIndexBatch, gate = capture?.LastIntegrityGate,
+                    interpretation = "Post-drain diagnostics only; missing/unconfirmed stages stay null. The primary failed experiment remains failed, including any late successful publication."
+                });
+            });
+            Clean(() => {
                 // A controller failure can race an active export. Its receipt is
                 // available only after that save has drained during close.
                 if (capture?.LastExport != null)
                 {
                     Write(Path.Combine(root, "last-export-exit.json"), SaveProcess(root, "last-export", capture.LastExport));
-                    Require(capture.LastExport.ProducerAbsent && capture.LastExport.ActualExitObserved,
+                    Write(Path.Combine(root, "last-export-processes.json"), SaveProcesses(root, "last-export", capture));
+                    Require(ConfirmedProducerAbsent(capture.LastExport),
                         "Export producer absence is unconfirmed; offline work is blocked.");
                 }
             });
@@ -1127,7 +1950,7 @@ internal static partial class ReplayCalibrationRun
                 if (capture?.LastValidation != null)
                 {
                     Write(Path.Combine(root, "last-validation-exit.json"), SaveProcess(root, "last-validation", capture.LastValidation));
-                    Require(capture.LastValidation.ProducerAbsent && capture.LastValidation.ActualExitObserved,
+                    Require(ConfirmedProducerAbsent(capture.LastValidation),
                         "Validation producer absence is unconfirmed; offline work is blocked.");
                 }
             });
@@ -1139,11 +1962,16 @@ internal static partial class ReplayCalibrationRun
                     bool forced = false;
                     if (!fixture.HasExited) { fixture.CloseMainWindow(); if (!fixture.WaitForExit(5000)) { forced = true; fixture.Kill(); Require(fixture.WaitForExit(5000), "Fixture exit unconfirmed."); } }
                     int code = fixture.ExitCode;
-                    var closure = new { role = "fixture-exit", label, pid = fixture.Id, exited = fixture.HasExited, exit = code, forced };
+                    var closure = new { role = "fixture-exit", label, pid = fixture.Id, startedUtc = fixture.StartTime.ToUniversalTime(), exited = fixture.HasExited, exit = code, forced };
                     processes.Add(closure); Write(Path.Combine(root, "fixture-exit.json"), closure); fixture.Dispose();
                     if (successful) Require(!forced && code == 0, "Fixture did not exit normally; source is not eligible.");
                 }
             });
+            if (cadence != null) Clean(() => Write(Path.Combine(root, "maintenance-cadence.json"), new {
+                frequency = Stopwatch.Frequency, completionDelayMilliseconds = 250, sourceObservationDelayMilliseconds = 100,
+                columns = new[] { "startedQpc", "completedQpc", "errorOrNull" },
+                intervals = maintenanceIntervals,
+                interpretation = "Qualification caller only;actual dispatch/completionQPC,completion+250ms/no catch-up;independent100ms source/foreground schedule and native Sampler guards retained. Not ordinary worker Saved latency." }, DurationQualification(plan) ? 4194304 : 131072));
             Clean(() => SetForegroundWindow(previous));
             // Preserve the triggering error after stopping owned producers. A
             // cleanup failure must not replace the original diagnostic.
@@ -1155,59 +1983,95 @@ internal static partial class ReplayCalibrationRun
     }
 
 
-    sealed record Inspection(ReplayExportProcessReceipt Process, int[] Ids, string[] Hashes, double AudioRmsDb);
+    sealed record Inspection(ReplayExportProcessReceipt Process, int[] Ids, string[] Hashes, double AudioRmsDb, ReplayFileExtent CheckedOutput = null);
 
     static ReplayCalibrationSourceReceipt QualificationSource(Sample sample, Inspection inspection, string root, Sampler sampler)
     {
-        var growth = sampler.CaptureMetrics(sample.Label);
-        double activeGap = sampler.MaximumActiveGap;
+        string acquisition = sample.Variant == "legacy" ? Path.GetDirectoryName(root) : root;
+        using var growth = JsonDocument.Parse(File.ReadAllText(Path.Combine(acquisition, "capture-growth.json")));
+        Require(growth.RootElement.GetProperty("ObservationMilliseconds").GetInt32() == ReplayCapacityPolicy.CoverageMilliseconds,
+            "Raw capture growth has no matching observation horizon.");
+        return QualificationSource(sample, inspection, root, sampler.CaptureMetrics(sample.Label), sampler.MaximumActiveGap,
+            growth.RootElement.GetProperty("MaximumCapacityGap").GetDouble());
+    }
+
+    static ReplayCalibrationSourceReceipt QualificationSource(Sample sample, Inspection inspection, string root,
+        (long PollGrowth, long StopGrowth, string Volume) growth, double activeGap, double capacityGap, ReplayCalibrationSourceReceipt original = null)
+    {
         string samplePath = Path.Combine(root, "sample.json");
-        string capturePath = Path.Combine(root, "capture-exit.json");
-        string sourcePath = Path.Combine(root, "fixture-exit.json");
-        using var capture = JsonDocument.Parse(File.ReadAllText(capturePath));
-        using var source = JsonDocument.Parse(File.ReadAllText(sourcePath));
-        var c = capture.RootElement; var f = source.RootElement;
+        string acquisitionRoot = sample.Variant == "legacy" ? Path.GetDirectoryName(root) : root;
+        string capturePath = Path.Combine(acquisitionRoot, "capture-exit.json");
+        string sourcePath = Path.Combine(acquisitionRoot, "fixture-exit.json");
+        using var capture = original == null ? JsonDocument.Parse(File.ReadAllText(capturePath)) : null;
+        using var source = original == null ? JsonDocument.Parse(File.ReadAllText(sourcePath)) : null;
+        var c = capture?.RootElement ?? default; var f = source?.RootElement ?? default;
+        if (original == null)
+        {
         Require(c.GetProperty("pid").GetInt32() > 0 && c.GetProperty("startedUtc").GetDateTime().Kind == DateTimeKind.Utc
             && c.GetProperty("startedUtc").GetDateTime() > DateTime.UnixEpoch
-            && Path.GetFullPath(c.GetProperty("sessionDirectory").GetString()).StartsWith(Path.Combine(root, "buffer") + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
+            && Path.GetFullPath(c.GetProperty("sessionDirectory").GetString()).StartsWith(Path.Combine(acquisitionRoot, "buffer") + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase),
             "Capture closure is missing its independent actual-process/session identity.");
         Require(c.GetProperty("exited").GetBoolean() && c.GetProperty("producersAbsent").GetBoolean() && c.GetProperty("exit").GetInt32() == 0
             && f.GetProperty("exited").GetBoolean() && f.GetProperty("exit").GetInt32() == 0 && !f.GetProperty("forced").GetBoolean(),
             "Reference producers did not exit normally before offline inspection.");
+        }
         var export = JsonSerializer.SerializeToElement(sample.Process);
         var runtime = JsonSerializer.SerializeToElement(sample.RuntimeProcess);
-        bool exportNormal = export.GetProperty("ProducerAbsent").GetBoolean() && export.GetProperty("ActualExitObserved").GetBoolean()
+        bool packet = sample.Variant == "packet";
+        bool exportNormal = packet && sample.ManagedExport is { Closed: true, InputHashesComplete: true }
+            || export.ValueKind == JsonValueKind.Object && export.GetProperty("ProducerAbsent").GetBoolean() && export.GetProperty("ActualExitObserved").GetBoolean()
             && export.GetProperty("ExitCode").GetInt32() == 0 && !export.GetProperty("TimedOut").GetBoolean()
             && !export.GetProperty("OutputLimitExceeded").GetBoolean() && export.GetProperty("CaptureComplete").GetBoolean();
-        bool runtimeNormal = runtime.GetProperty("ProducerAbsent").GetBoolean() && runtime.GetProperty("ActualExitObserved").GetBoolean()
+        bool runtimeNormal = packet && sample.NormalValidation is { Kind: ReplayOutputIntegrity.Kind, Frames: 0, PublicationIdentityBound: true }
+            || runtime.ValueKind == JsonValueKind.Object && runtime.GetProperty("ProducerAbsent").GetBoolean() && runtime.GetProperty("ActualExitObserved").GetBoolean()
             && runtime.GetProperty("ExitCode").GetInt32() == 0 && !runtime.GetProperty("TimedOut").GetBoolean()
             && !runtime.GetProperty("OutputLimitExceeded").GetBoolean() && runtime.GetProperty("CaptureComplete").GetBoolean()
             && runtime.GetProperty("ProcessId").GetInt32() != export.GetProperty("ProcessId").GetInt32();
         Require(exportNormal && runtimeNormal && inspection.Process.Success, "Export/runtime-validation/inspection process evidence is incomplete.");
-        int segments = File.ReadLines(Path.Combine(root, "selection.jsonl")).Count();
+        var children = ExportChildren(sample);
+        int segments = File.ReadLines(Path.Combine(acquisitionRoot, "selection.jsonl")).Count();
         var decode = inspection.Process;
-        return new(sample.Label, ReplayReferenceModel.Hash(new { sample.Scope, capture = HashFile(capturePath), source = HashFile(sourcePath) }),
+        ReplayCalibrationProcessReceipt runtimeReceipt = packet ? null : new(HashFile(Path.Combine(root, "runtime-validation-exit.json")),
+            runtime.GetProperty("ProducerAbsent").GetBoolean(), runtime.GetProperty("ActualExitObserved").GetBoolean(), runtime.GetProperty("ExitCode").GetInt32(),
+            runtime.GetProperty("TimedOut").GetBoolean(), runtime.GetProperty("OutputLimitExceeded").GetBoolean(), false,
+            runtime.GetProperty("ProcessId").GetInt32(), runtime.GetProperty("ProcessStartedUtc").GetDateTime().ToUniversalTime().Ticks);
+        ReplayCalibrationManagedReceipt managedReceipt = null;
+        if (packet)
+        {
+            var managed = sample.ManagedExport; var index = sample.IndexBatch; var timing = sample.Timing;
+            Require(index != null && timing != null, "Actual candidate indexing/lifetime evidence is absent.");
+            managedReceipt = new(HashFile(Path.Combine(root, "managed-export.json")), managed.ParentPid, managed.ParentStartedUtc.ToUniversalTime().Ticks,
+                managed.Closed, managed.InputHashesComplete, managed.State, managed.FinalOutput,
+                new(timing.ExportConstruction, timing.AsynchronousInputs, index.Workers, index.PeakActive,
+                    index.FinishedSources, index.UnsupportedSources, index.Joined, index.CancellableReads, index.ReadDeadlineMilliseconds,
+                    index.DeadlineExceeded, index.DrainError, timing.SourceHandlesClosed == true && timing.SourceCloseCompleted.HasValue,
+                    new(timing.PreparedOwnedInputs,timing.PreparedIndexHits,timing.PreparedIndexMisses,
+                        timing.IndexAcquisitionComplete,timing.IndexReadersStarted,timing.IndexReadersJoined)));
+        }
+        return new(sample.Label, original?.AcquisitionIdentity ?? ReplayReferenceModel.Hash(new { sample.Scope, capture = HashFile(capturePath), source = HashFile(sourcePath) }),
             HashFile(samplePath), sample.Scope, ReplayStorage.ObserveCapacity(root).Volume,
             ReplayStorage.ObserveCapacity(root).AllocationUnit, sample.InputBytes, sample.FinalBytes, sample.FinalAllocation,
             sample.PeakAllocation, sample.ExportSeconds, segments, true,
-            new(HashFile(capturePath), true, true, 0, false, false, false),
-            new(HashFile(sourcePath), true, true, 0, false, false, false),
-            new(HashFile(samplePath), true, true, 0, false, false, false),
+            original?.Capture ?? new(HashFile(capturePath), true, true, 0, false, false, false, c.GetProperty("pid").GetInt32(), c.GetProperty("startedUtc").GetDateTime().Ticks),
+            original?.Source ?? new(HashFile(sourcePath), true, true, 0, false, false, false, f.GetProperty("pid").GetInt32(),
+                f.TryGetProperty("startedUtc", out var fixtureBirth) ? fixtureBirth.GetDateTime().Ticks : null),
+            children.LastOrDefault(),
             new(HashFile(Path.Combine(root, Path.GetFileName(sample.File) + ".decode.json")),
-                decode.ProducerAbsent, decode.ActualExitObserved, decode.ExitCode ?? -1, decode.TimedOut, decode.OutputLimitExceeded, !decode.Success),
-            sample.SelectionIdentity, HashFile(Path.Combine(root, "capture-arguments.json")),
-            ReplayReferenceModel.Hash(sample.Arguments), HashFile(Path.Combine(root, Path.GetFileName(sample.File) + ".source-pictures.json")),
+                decode.ProducerAbsent, decode.ActualExitObserved, decode.ExitCode ?? -1, decode.TimedOut, decode.OutputLimitExceeded, !decode.Success,
+                decode.ProcessId, decode.ProcessStartedUtc?.ToUniversalTime().Ticks),
+            sample.AcquisitionSelectionHash ?? sample.SelectionIdentity, original?.CaptureArgumentsHash ?? HashFile(Path.Combine(acquisitionRoot, "capture-arguments.json")),
+            ReplayReferenceModel.Hash(sample.Arguments ?? []), HashFile(Path.Combine(root, Path.GetFileName(sample.File) + ".source-pictures.json")),
             true, true, true, true, true, activeGap, inspection.Ids, inspection.Hashes, inspection.AudioRmsDb,
             1920, 1080, 48000, 2, growth.PollGrowth, growth.StopGrowth, growth.Volume,
-            new(HashFile(Path.Combine(root, "runtime-validation-exit.json")), runtime.GetProperty("ProducerAbsent").GetBoolean(),
-                runtime.GetProperty("ActualExitObserved").GetBoolean(), runtime.GetProperty("ExitCode").GetInt32(),
-                runtime.GetProperty("TimedOut").GetBoolean(), runtime.GetProperty("OutputLimitExceeded").GetBoolean(), false),
-            ReplayReferenceModel.Hash(sample.RuntimeArguments), sample.Interval.Start, sample.Interval.End);
+            runtimeReceipt, packet ? null : ReplayReferenceModel.Hash(sample.RuntimeArguments), sample.Interval.Start, sample.Interval.End,
+            sample.CombinedPeakAllocation, sample.WorkPeakAllocation, sample.AssemblyPeakAllocation, sample.BoundaryPeakAllocations, children,
+            sample.NormalValidation, inspection.CheckedOutput, managedReceipt, sample.SelectionIdentity, sample.NativeExport,
+            ReplayCapacityPolicy.CoverageMilliseconds, capacityGap);
     }
 
     internal static int[] InspectionFrames(double seconds)
     {
-        Require(double.IsFinite(seconds) && seconds is >= 0.05 and <= 310, "Inspection duration cannot supply three reference frames.");
+        Require(double.IsFinite(seconds) && seconds is >= 0.05 and <= 1800, "Inspection duration cannot supply three reference frames.");
         int frames = (int)Math.Floor(seconds * 60), inset = Math.Min(15, frames / 4);
         int[] selected = [inset, frames / 2, Math.Min(frames - 1, frames - inset)];
         Require(selected[0] < selected[1] && selected[1] < selected[2] && selected[2] < frames,
@@ -1215,21 +2079,51 @@ internal static partial class ReplayCalibrationRun
         return selected;
     }
 
-    static Inspection Inspect(string engine, string root, string file, double seconds, string label, int timeoutSeconds)
+    static Inspection Inspect(string engine, string root, string file, double seconds, string label, int timeoutSeconds,
+        ReplayPublicationLease retainedOutput = null, CalibrationPlan creatorPlan = null)
     {
-        int[] frames = InspectionFrames(seconds);
-        string select = "select='" + string.Join("+", frames.Select(n => "eq(n," + n + ")")) + "'";
-        string evidence = Path.Combine(root, Path.GetFileName(file));
-        string barcode = evidence + ".barcodes.raw", pictures = evidence + ".pictures.raw";
-        string[] args = ["-hide_banner", "-loglevel", "info", "-nostdin", "-xerror", "-i", file,
-            "-map", "0:v:0", "-map", "0:a:0", "-af", "astats=metadata=0:reset=0", "-f", "null", "-",
-            "-map", "0:v:0", "-vf", select + ",crop=576:48:16:8,scale=24:2:flags=neighbor,format=gray", "-frames:v", "3", "-fps_mode", "passthrough", "-threads:v", "1", "-f", "rawvideo", barcode,
-            "-map", "0:v:0", "-vf", select + ",crop=1920:984:0:96,scale=64:36:flags=neighbor,format=rgb24", "-frames:v", "3", "-fps_mode", "passthrough", "-threads:v", "1", "-f", "rawvideo", pictures];
+        var input = new ReplayDecodeLease(file, retainedOutput); bool absent = true;
+        try
+        {
+        string[] args = InspectionArguments(root, file, seconds);
         Write(Path.Combine(root, Path.GetFileName(file) + ".decode-arguments.json"), args);
         AdmitNativeChild("offline-inspection:" + label);
-        var receipt = ReplayExportProcess.Run(engine, args, root, null, timeoutMilliseconds: checked(timeoutSeconds * 1000));
+        var receipt = ReplayExportProcess.Run(engine, args, root, null, producerStopped: stopped => absent = stopped,
+            timeoutMilliseconds: checked(timeoutSeconds * 1000), inputLease: input);
+        PublishInspectionCreatorProof(creatorPlan, root, label, Path.Combine(root, Path.GetFileName(file) + ".decode-arguments.json"), args, receipt);
         Write(Path.Combine(root, Path.GetFileName(file) + ".decode.json"), SaveProcess(root, Path.GetFileName(file) + ".decode", receipt));
+        object frameContract = null;
+        if (creatorPlan != null && creatorPlan.FreshCandidateAdmission is not (RetainedCoverageAdmission or SameCaptureRetainedAdmission))
+        {
+            string fixtureRoot = Path.Combine(creatorPlan.Root, label);
+            using var fixtureReady = CalibrationFixturePublication.Read(fixtureRoot);
+            var source = fixtureReady.RootElement;
+            frameContract = new { lifetimeSeconds = source.GetProperty("lifetimeSeconds").GetInt32(),
+                maximumAnimatedFrame = source.GetProperty("maximumAnimatedFrame").GetInt32(),
+                barcodeFrameDivisor = source.GetProperty("barcodeFrameDivisor").GetInt32(),
+                timerIntervalMilliseconds = source.GetProperty("timerIntervalMilliseconds").GetInt32(),
+                fixtureReadySha256 = HashFile(Path.Combine(fixtureRoot, CalibrationFixturePublication.ReadyName)) };
+        }
+        int sourceIdRange=creatorPlan?.FreshCandidateAdmission is SameCaptureContextAdmission or SameCaptureRetainedAdmission
+            ? CalibrationPattern.ReferenceSourceIdRange : CalibrationPattern.SourceIdRange;
+        return ReadInspectionEvidence(receipt, root, file, seconds, label, input.CheckedIdentity, true, input.VerifyUnchanged, frameContract,sourceIdRange);
+        }
+        finally { if (absent) input.Dispose(); }
+    }
+
+    // Re-read bound genuine decoder receipts/raw samples without inventing or
+    // launching a new decoder when continuing an interrupted training phase.
+    static Inspection ReadInspectionEvidence(ReplayExportProcessReceipt receipt, string root, string file, double seconds,
+        string label, ReplayFileExtent checkedOutput, bool persistPictures, Action verify = null, object frameContract = null,
+        int sourceIdRange=CalibrationPattern.SourceIdRange)
+    {
+        int[] frames = InspectionFrames(seconds);
+        string evidence = Path.Combine(root, Path.GetFileName(file));
+        string barcode = evidence + ".barcodes.raw", pictures = evidence + ".pictures.raw";
         Require(receipt.Success && receipt.StandardError.Contains("1920x1080") && receipt.StandardError.Contains("48000 Hz") && receipt.StandardError.Contains("stereo"), "All-track full decode or reference stream format failed.");
+        var decoded = ReplayExactExport.ReadValidation(receipt, new(0, seconds, Math.Max(1, (int)Math.Round(seconds))), 60);
+        Require(decoded.Frames == (long)Math.Round(seconds * 60), "Independent qualification requires the exact requested physical frame count.");
+        verify?.Invoke();
         Require(receipt.StandardError.Contains("RMS level dB:") && !receipt.StandardError.Contains("RMS level dB: -inf"), "Actual loopback audio is absent/silent; not an eligible reference source.");
         byte[] codes = File.ReadAllBytes(barcode), pixels = File.ReadAllBytes(pictures);
         Require(codes.Length == 144 && pixels.Length == 3 * 64 * 36 * 3, "Sampled source pictures missing.");
@@ -1244,16 +2138,16 @@ internal static partial class ReplayCalibrationRun
                 if (value >= 180) ids[sample] |= 1 << bit;
             }
             hashes[sample] = Convert.ToHexString(SHA256.HashData(pixels.AsSpan(sample * 6912, 6912)));
-            Require(ids[sample] >= baseId && ids[sample] < baseId + 25000, "Decoded source ID has wrong seed/workload lineage.");
+            Require(sourceIdRange is >0 and <=CalibrationPattern.ReferenceSourceIdRange && ids[sample] >= baseId && ids[sample] < baseId + sourceIdRange, "Decoded source ID has wrong seed/workload lineage.");
         }
         if (label.EndsWith('1')) Require(ids.All(id => id == baseId), "Static source changed its ID.");
         else Require(ids[0] < ids[1] && ids[1] < ids[2] && hashes.Distinct().Count() >= 2, "Motion/cut source samples did not progress.");
-        Write(evidence + ".source-pictures.json", new { ids, hashes, sampleFrames = frames,
+        if (persistPictures) Write(evidence + ".source-pictures.json", new { ids, hashes, sampleFrames = frames, frameContract,
             limits = "Three sampled source IDs/complement rows and coarse images; no full picture cadence or A/V alignment claim." });
         var audio = Regex.Matches(receipt.StandardError, @"RMS level dB:\s*([-+]?[0-9]+(?:\.[0-9]+)?)")
             .Select(m => double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture)).ToArray();
         Require(audio.Length > 0 && audio.All(double.IsFinite), "Reference RMS evidence is unavailable.");
-        return new(receipt, ids, hashes, audio.Max());
+        return new(receipt, ids, hashes, audio.Max(), checkedOutput);
     }
 
     internal static int InspectExisting(string path, string expectedPlanHash)
@@ -1307,24 +2201,37 @@ internal static partial class ReplayCalibrationRun
         }
     }
 
-    internal static int Run(string path, string expectedPlanHash)
+    internal static int Run(string path, string expectedPlanHash, CalibrationAdmissionMode admissionMode = CalibrationAdmissionMode.Capture)
     {
         var preflight = Stopwatch.StartNew();
-        Require(new FileInfo(path).Length <= 65536 && HashFile(path) == expectedPlanHash, "Reviewed plan identity mismatch.");
-        using var document = JsonDocument.Parse(File.ReadAllText(path));
-        var plan = document.RootElement.GetProperty("plan").Deserialize<CalibrationPlan>();
-        RequireExactExporterAdmission(plan);
-        ValidateResources(plan);
-        if (Exact14(plan)) plan = VerifyIssue14Execution(plan, document.RootElement);
-        foreach (var file in plan.Files) Require(HashFile(file.Key) == file.Value, "Runtime identity changed: " + file.Key);
-        Require(plan.Files.ContainsKey(Path.GetFullPath(typeof(ReplayCalibrationRun).Assembly.Location))
-            && plan.Files.ContainsKey(Path.GetFullPath(Environment.ProcessPath)), "Own assembly/host is not bound.");
-        string build = Path.GetDirectoryName(typeof(ReplayCalibrationRun).Assembly.Location);
-        foreach (string required in new[] { "F10Recorder.Windows.dll", "F10Recorder.Core.dll", "F10Recorder.WorkerChecks.deps.json", "F10Recorder.WorkerChecks.runtimeconfig.json" })
-            Require(plan.Files.ContainsKey(Path.GetFullPath(Path.Combine(build, required))), "Required runtime dependency is unbound.");
-        MediaDependency.RootDirectory = plan.EngineRoot;
-        string engine = MediaDependency.ResolveExecutable();
-        Require(plan.Files.GetValueOrDefault(Path.GetFullPath(engine)) == MediaDependency.ExecutableSha256.ToUpperInvariant(), "Managed engine identity missing.");
+        JsonDocument document;
+        CalibrationPlan plan;
+        string engine;
+        try
+        {
+            document = ReadFinalAdmission(path, expectedPlanHash);
+            try { plan = ValidateFinalAdmission(path, expectedPlanHash, document, out engine); }
+            catch { document.Dispose(); throw; }
+            if (admissionMode == CalibrationAdmissionMode.ValidateOnly)
+            {
+                using (document) WriteFinalAdmissionReceipt(path, expectedPlanHash, document);
+                return 0;
+            }
+            try { RequireFinalAdmissionReceipt(path, expectedPlanHash, document); }
+            catch { document.Dispose(); throw; }
+            if (admissionMode == CalibrationAdmissionMode.CheckLaunch)
+            {
+                document.Dispose();
+                Console.WriteLine("Passed launch admission; source/device/capture boundary was not entered.");
+                return 0;
+            }
+        }
+        catch (Exception error) { return ReportStartupFailure(path, expectedPlanHash, "final-plan-admission", error); }
+        using var documentOwner = document;
+        try { RequireRecordingAuthorization(path, expectedPlanHash, document); }
+        catch (Exception error) { return ReportStartupFailure(path, expectedPlanHash, "recording-authorization", error); }
+        try
+        {
         using (var currentEndpoint = new LoopbackAudio())
         {
             var prior = document.RootElement.GetProperty("environment");
@@ -1340,15 +2247,59 @@ internal static partial class ReplayCalibrationRun
                 && capacity.AllocationUnit == prior.GetProperty("capacity").GetProperty("AllocationUnit").GetInt64(), "Volume binding changed after review.");
             Require(new DriveInfo(Path.GetPathRoot(plan.Root)).DriveFormat == "NTFS", "Only local NTFS is qualified by this run.");
         }
-        using var engineLease = MediaDependency.OpenVerifiedExecutable(engine);
-        using var owned = PilotStorageObservation.Create(plan.Root);
-        Log.DirectoryPath = plan.Root;
-        Write(Path.Combine(plan.Root, "admitted-plan.json"), new { plan, planHash = expectedPlanHash, effects = Effects(plan), recipe = Recipe(plan), authorization = "External task approval is required; the plan hash alone is not execution authorization." });
-        using var sampler = new Sampler(plan with { RetainedElapsedSeconds = plan.RetainedElapsedSeconds + preflight.Elapsed.TotalSeconds }, active: false);
-        if (Exact14(plan)) { nativeChildRoot = plan.Root; nativeChildren = plan.RetainedChildren; nativeChildLimit = plan.MaximumChildren; AdmitNativeChild("collector"); }
+        }
+        catch (Exception error) { return ReportStartupFailure(path, expectedPlanHash, "current-display-audio-volume", error); }
+        MediaDependency.ExecutableLease engineLease = null;
+        PilotStorageObservation owned = null;
+        try
+        {
+            engineLease = MediaDependency.OpenVerifiedExecutable(engine);
+            owned = PilotStorageObservation.Create(plan.Root);
+            Log.DirectoryPath = plan.Root;
+            Write(Path.Combine(plan.Root, "admitted-plan.json"), new { plan, planHash = expectedPlanHash, effects = Effects(plan), recipe = Recipe(plan), authorization = "External task approval is required; the plan hash alone is not execution authorization." });
+        }
+        catch (Exception error)
+        {
+            try { owned?.Dispose(); } catch (Exception cleanup) { Console.Error.WriteLine("Root startup cleanup: " + cleanup.Message); }
+            try { engineLease?.Dispose(); } catch (Exception cleanup) { Console.Error.WriteLine("Engine lease cleanup: " + cleanup.Message); }
+            return ReportStartupFailure(path, expectedPlanHash, "collector-resource-startup", error);
+        }
+        using var engineOwner = engineLease;
+        using var rootOwner = owned;
+        Sampler sampler;
+        try { sampler = new Sampler(plan with { RetainedElapsedSeconds = plan.RetainedElapsedSeconds + preflight.Elapsed.TotalSeconds }, active: false); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            Write(Path.Combine(plan.Root, "failure.json"), new { result = "failed-no-retry", phase = "pre-capture-history-admission",
+                error = error.ToString(), planHash = expectedPlanHash, mediaChildren = 0, captureStarted = false, seconds = preflight.Elapsed.TotalSeconds });
+            Console.Error.WriteLine(error.Message + " Evidence: " + plan.Root); return 1;
+        }
+        using var samplerOwner = sampler;
+        if (Exact14(plan) || plan.CompositeQualification) { nativeChildRoot = plan.Root; nativeChildren = plan.RetainedChildren; nativeChildLimit = plan.MaximumChildren; AdmitNativeChild("collector"); }
         var samples = new List<Sample>(); var processes = new List<object>();
         var qualifications = new List<ReplayCalibrationSourceReceipt>();
+        var legacyQualifications = new List<ReplayCalibrationSourceReceipt>();
+        SameOracleResult sameOracle = null;
+        var qualificationOutputs = new Dictionary<string, ReplayPublicationLease>(StringComparer.OrdinalIgnoreCase);
+        ReplayPublicationLease TakeOutput(string file)
+        {
+            if (!plan.CompositeQualification) return null;
+            Require(qualificationOutputs.Remove(file, out var lease), "Independent decoder lost continuous normal-output ownership.");
+            return lease;
+        }
         ReplayReferenceModel model = null;
+        var contextFreeze = ContextQualification(plan) ? ReadContextFreeze(plan) : null;
+        DateTime confirmationStarted = DateTime.UtcNow;
+        if (CapacityTrainingContinuation(plan) || DurationTrainingContinuation(plan))
+        {
+            var retained = DurationTrainingContinuation(plan) ? ReadCompleteDurationTraining(plan) : ReadCompleteCapacityTraining(plan);
+            samples.AddRange(retained.Samples); qualifications.AddRange(retained.Primary); legacyQualifications.AddRange(retained.Legacy);
+            model = retained.Model;
+            File.Copy(Path.Combine(plan.CompositeTrainingRoot, "frozen-training-model.json"), Path.Combine(plan.Root, "frozen-training-model.json"));
+        }
+        else if (plan.CompositeTrainingRoot != null)
+            foreach (var retained in ReadCompositeTraining(plan))
+            { samples.Add(retained.Sample); qualifications.Add(retained.Primary); legacyQualifications.Add(retained.Legacy); }
         if (plan.ProductionTrainingRoot != null)
             foreach (var retained in ReadProductionTraining(plan.ProductionTrainingRoot, plan.Root))
             { samples.Add(retained.Sample); qualifications.Add(retained.Receipt); }
@@ -1424,12 +2375,12 @@ internal static partial class ReplayCalibrationRun
                     };
                 }
                 sampler.BeginActive();
-                var sample = Collect(plan, label, sampler, model, processes, focus);
+                var sample = Collect(plan, label, sampler, model, processes, focus, qualificationOutputs);
                 if (sampler.ActiveCoverage) sampler.EndActive();
                 var captureGrowth = sampler.CaptureMetrics(label);
                 Write(Path.Combine(plan.Root, label, "capture-growth.json"), new {
                     captureGrowth.PollGrowth, captureGrowth.StopGrowth, captureGrowth.Volume,
-                    sampler.MaximumActiveGap,
+                    sampler.MaximumActiveGap, sampler.MaximumCapacityGap, ObservationMilliseconds = ReplayCapacityPolicy.CoverageMilliseconds,
                     meaning = "Completed per-source allocation observations, persisted before later inspection/report assembly. Not qualification by itself." });
                 if (plan.RetainActiveOutputHandles)
                 {
@@ -1458,10 +2409,10 @@ internal static partial class ReplayCalibrationRun
                     sampler.EndOffline();
                 }
                 samples.Add(sample);
-                sampler.BeginOffline("inspection", 32_000_000, MainInspectionSeconds);
+                sampler.BeginOffline("inspection", 32_000_000, MainInspectionLimit(plan));
                 // Capture has stopped before decoding. Held-out observations never fit the model.
                 string caseRoot = Path.Combine(plan.Root, label);
-                var inspection = Inspect(engine, caseRoot, sample.File, sample.ExportSeconds, label, MainInspectionSeconds - InspectionCleanupSeconds);
+                var inspection = Inspect(engine, caseRoot, sample.File, sample.ExportSeconds, label, MainInspectionLimit(plan) - InspectionCleanupSeconds, TakeOutput(sample.File), plan);
                 sampler.EndOffline();
                 foreach (string control in Directory.GetFiles(caseRoot, "control-?.json"))
                 {
@@ -1475,10 +2426,23 @@ internal static partial class ReplayCalibrationRun
                 }
                 qualifications.Add(QualificationSource(sample, inspection, caseRoot, sampler));
                 Write(Path.Combine(caseRoot, "qualification-source.json"), qualifications[^1]);
+                if (plan.CompositeQualification)
+                {
+                    var legacy = sample.LegacyOutput ?? throw new IOException("Paired legacy sample is missing.");
+                    sampler.BeginOffline("legacy-inspection", 32_000_000, MainInspectionLimit(plan));
+                    string legacyRoot = Path.Combine(caseRoot, "legacy");
+                    var legacyInspection = Inspect(engine, legacyRoot, legacy.File, legacy.ExportSeconds, label, MainInspectionLimit(plan) - InspectionCleanupSeconds, TakeOutput(legacy.File), plan);
+                    sampler.EndOffline();
+                    legacyQualifications.Add(QualificationSource(legacy, legacyInspection, legacyRoot, sampler));
+                    Write(Path.Combine(legacyRoot, "qualification-source.json"), legacyQualifications[^1]);
+                }
+                if (SameCaptureQualification(plan))
+                    sameOracle = CollectSameOracle(plan, engine, [qualifications[^1],legacyQualifications[^1]],
+                        [sample,sample.LegacyOutput], sampler,caseRoot,createSource:true,contextFreeze.Context);
                 // All source/export/inspection children of this case have exited.
                 // Keep complete snapshot bytes and provenance in verified archives
                 // before retiring only these new duplicate directory entries.
-                foreach (string snapshot in Exact14(plan) ? [] : Directory.GetDirectories(Path.Combine(caseRoot, "buffer"), "save-*", SearchOption.AllDirectories))
+                foreach (string snapshot in Exact14(plan) || plan.CompositeQualification ? [] : Directory.GetDirectories(Path.Combine(caseRoot, "buffer"), "save-*", SearchOption.AllDirectories))
                 {
                     sampler.BeginOffline("archive", 1_068_194_304, ArchiveSeconds);
                     var archived = ReplayCalibrationArchive.Create(caseRoot, snapshot, bytes => sampler.Check(bytes), sampler.Gate);
@@ -1489,48 +2453,100 @@ internal static partial class ReplayCalibrationRun
                 {
                     Require(samples.Select(s => s.Scope).Distinct().Count() == 1, "Training source/endpoint/recipe changed.");
                     var target = ReplayStorage.ObserveCapacity(caseRoot);
-                    long residual = Math.Max(0, samples.Max(s => s.FinalBytes - s.InputBytes));
-                    long extra = Math.Max(0, samples.Max(s => s.PeakAllocation - ReplayReferenceModel.Round(s.FinalBytes, target.AllocationUnit)));
-                    string[] receipts = Order.Take(3).Select(l => HashFile(Path.Combine(
+                    var outputTraining = plan.CompositeQualification ? samples.SelectMany(s => new[] { s, s.LegacyOutput }).ToArray() : samples.ToArray();
+                    long residual = Math.Max(0, outputTraining.Max(s => s.FinalBytes - s.InputBytes));
+                    long extra = Math.Max(0, outputTraining.Max(s => s.PeakAllocation - ReplayReferenceModel.Round(s.FinalBytes, target.AllocationUnit)));
+                    string[] receipts = plan.CompositeQualification ? Enumerable.Range(0, 3).Select(n =>
+                        ReplayCalibrationCatalog.PairHash(qualifications[n], legacyQualifications[n])).ToArray()
+                        : Order.Take(3).Select(l => HashFile(Path.Combine(
                         plan.ProductionTrainingRoot != null && l is "T01" or "T02" ? plan.ProductionTrainingRoot : plan.Root, l, "sample.json"))).ToArray();
                     var training = qualifications.Take(3).ToArray();
                     Require(training.All(q => q.CaptureVolume == target.Volume), "Capture/output volume is outside the first reference cell.");
                     var headroom = new ReplayCaptureHeadroom(sample.Scope, target.Volume, target.AllocationUnit,
                         ReplayReferenceModel.CaptureAllowance(training.Max(q => q.CapturePollGrowthBytes.Value), target.AllocationUnit),
-                        ReplayReferenceModel.CaptureAllowance(training.Max(q => q.CaptureStopGrowthBytes.Value), target.AllocationUnit));
-                    string revision = ReplayCalibrationCatalog.ModelRevision(sample.Scope, target.Volume, target.AllocationUnit, residual, extra, receipts, captureHeadroom: headroom);
-                    model = new(revision, sample.Scope, target.Volume, target.AllocationUnit, residual, extra, receipts, headroom);
+                        ReplayReferenceModel.CaptureAllowance(training.Max(q => q.CaptureStopGrowthBytes.Value), target.AllocationUnit),
+                        ReplayCapacityPolicy.CoverageMilliseconds);
+                    string revision = ReplayCalibrationCatalog.ModelRevision(sample.Scope, target.Volume, target.AllocationUnit, residual, extra, receipts, captureHeadroom: headroom,replayMinutes:plan.ReplayMinutes);
+                    model = new(revision, sample.Scope, target.Volume, target.AllocationUnit, residual, extra, receipts, headroom,plan.ReplayMinutes);
                     Write(Path.Combine(plan.Root, "frozen-training-model.json"), model);
                 }
-                else if (label.StartsWith('H'))
+                else if (label.StartsWith('H') && !ContextQualification(plan))
                 {
                     Require(sample.Scope == model.Scope && sample.Demand.Kind == ReplayOutputEvidenceKind.CalibratedEstimate, "Held-out real provider was unmeasured.");
                     var captureMetrics = qualifications[^1];
                     Require(captureMetrics.CaptureVolume == model.Volume && captureMetrics.CapturePollGrowthBytes <= model.CaptureHeadroom.PollGrowthBytes
                         && captureMetrics.CaptureStopGrowthBytes <= model.CaptureHeadroom.StopGrowthBytes, "Held-out capture growth exceeds the frozen headroom; no refit.");
-                    Require(model.CoversObservations(sample.InputBytes, sample.FinalBytes, sample.FinalAllocation, sample.PeakAllocation),
+                    Require(model.CoversObservations(sample.InputBytes, sample.FinalBytes, sample.FinalAllocation, sample.CombinedPeakAllocation)
+                        && sample.WorkPeakAllocation <= ReplaySaveExport.WorkDemand(sample.InputBytes, model.AllocationUnit).Total,
                         "Held-out exceedance rejects frozen model; no refit.");
+                    if (plan.CompositeQualification)
+                    {
+                        var legacy = sample.LegacyOutput;
+                        Require(legacy.Demand.Kind == ReplayOutputEvidenceKind.CalibratedEstimate
+                            && model.CoversObservations(legacy.InputBytes, legacy.FinalBytes, legacy.FinalAllocation, legacy.CombinedPeakAllocation)
+                            && legacy.WorkPeakAllocation <= ReplaySaveExport.WorkDemand(legacy.InputBytes, model.AllocationUnit).Total,
+                            "Held-out fallback exceeds the frozen union model; no refit.");
+                    }
                 }
                 sampler.SealClosedCase(label);
-                if (Exact14(plan) && File.Exists(Path.Combine(plan.Root, "stop-after-case.request.json")))
+                if ((Exact14(plan) || plan.CompositeQualification) && File.Exists(Path.Combine(plan.Root, "stop-after-case.request.json")))
                     throw new OperationCanceledException("Operator requested a stop after this closed case; preserve evidence and admit no next acquisition.");
             }
             sampler.StopAndCheck();
             Write(Path.Combine(plan.Root, "qualification-sources.json"), qualifications.ToArray());
             Write(Path.Combine(plan.Root, "observation-summary.json"), new { sampler.MaximumActiveGap, sampler.MaximumOfflineGap, sampler.MaximumGap,
-                sampler.Used, sampler.PeakUsed, sampler.MaximumFiles, sampler.MaximumDirectories, offlineSeconds = sampler.OfflineSeconds });
+                sampler.CapacityObservations, sampler.MaximumCapacityGap, sampler.MaximumCapacityObservationMilliseconds,
+                sampler.Used, sampler.PeakUsed, sampler.MaximumFiles, sampler.MaximumDirectories,
+                metadataOperations = sampler.MetadataOperationTimings, offlineSeconds = sampler.OfflineSeconds });
             double maximumActive = Math.Max(sampler.MaximumActiveGap, qualifications.Max(q => q.MaximumActiveGapMs));
-            if (plan.ProductionTrainingRoot != null)
+            string partialTrainingRoot = plan.CompositeTrainingRoot ?? plan.ProductionTrainingRoot;
+            if (partialTrainingRoot != null && !CapacityTrainingContinuation(plan) && !DurationTrainingContinuation(plan))
             {
-                using var retainedFailure = JsonDocument.Parse(File.ReadAllText(Path.Combine(plan.ProductionTrainingRoot, "failure.json")));
+                using var retainedFailure = JsonDocument.Parse(File.ReadAllText(Path.Combine(partialTrainingRoot, "failure.json")));
                 maximumActive = Math.Max(maximumActive, retainedFailure.RootElement.GetProperty("MaximumActiveGap").GetDouble());
             }
-            string observationHash = plan.ProductionTrainingRoot != null ? ReplayReferenceModel.Hash(new {
-                retained = HashFile(Path.Combine(plan.ProductionTrainingRoot, "storage.csv")), current = HashFile(Path.Combine(plan.Root, "storage.csv")) })
+            string observationHash = partialTrainingRoot != null ? ReplayReferenceModel.Hash(new {
+                retained = HashFile(Path.Combine(partialTrainingRoot, "storage.csv")), current = HashFile(Path.Combine(plan.Root, "storage.csv")) })
                 : ExactContinuation14(plan) ? ReplayReferenceModel.Hash(new { retained = HashFile(Path.Combine(plan.ExactContinuationRoot, "storage.csv")),
                 heldout = ExactFinalWorker14(plan) ? HashFile(Path.Combine(plan.ExactHeldoutContinuationRoot, "storage.csv")) : null, current = HashFile(Path.Combine(plan.Root, "storage.csv")) })
                 : HashFile(Path.Combine(plan.Root, "storage.csv"));
-            var qualification = ReplayCalibrationCatalog.CreateReceipt(model, qualifications.ToArray(), maximumActive, observationHash, expectedPlanHash);
+            if (ContextQualification(plan))
+            {
+                var confirmation = new ReplayCoverageConfirmation("C00-current-5m-pair", contextFreeze.FreezeHash,
+                    ReplayReferenceModel.ExporterIdentity, ReplayCalibrationCatalog.CaptureHostFacts(), confirmationStarted, DateTime.UtcNow,
+                    expectedPlanHash, observationHash, null, null, qualifications.Single(), legacyQualifications.Single(), null);
+                confirmation = confirmation with { ConfirmationHash = ReplayCalibrationCatalog.ConfirmationHash(confirmation) };
+                var parents = ReplayCalibrationCatalog.ValidateFreeze(contextFreeze, confirmation.Host.Identity);
+                ReplayCalibrationCatalog.ValidateConfirmation(confirmation, contextFreeze, parents[1], "C00-current-5m-pair");
+                Write(Path.Combine(plan.Root, "context-confirmation.json"), confirmation);
+                if (SameCaptureQualification(plan))
+                {
+                    string cell = Path.Combine(plan.Root, "H03");
+                    var inputs = JsonSerializer.Deserialize<ReplayCompletedInputDigest[]>(File.ReadAllBytes(Path.Combine(cell, "completed-input-mapping.json")));
+                    var reference = new { policy = HashFile(Path.Combine(cell, "source-reference-policy.json")),
+                        audio = HashFile(Path.Combine(cell, "source-render-clock.csv")), video = HashFile(Path.Combine(cell, "source-paints.csv")),
+                        costs = HashFile(Path.Combine(cell,"source-reference-costs.json")),
+                        presentation=PresentationPlanBinding.For(plan)==null?null:CalibrationPresentationIntegration.HashBinding(cell) };
+                    Write(Path.Combine(cell, "source-reference-binding.json"), reference);
+                    var manifest = new ReplaySameCaptureManifest(ReplayCalibrationCatalog.SameCaptureRevision, confirmation.ConfirmationHash,
+                        confirmation.Packet.AcquisitionIdentity, confirmation.Packet.SelectionHash, confirmation.Packet.OutputStart,
+                        confirmation.Packet.OutputEnd, HashFile(Path.Combine(cell, "source-clock.json")),
+                        HashFile(Path.Combine(cell, "source-reference-binding.json")), inputs, null);
+                    manifest = manifest with { ManifestHash = ReplayCalibrationCatalog.SameManifestHash(manifest) };
+                    ReplayCalibrationCatalog.ValidateSameManifest(manifest, confirmation);
+                    Write(Path.Combine(plan.Root, "C00-input-manifest.json"), manifest, 524288);
+                    Require(sameOracle != null, "Concrete C00 source/reference oracle must exist before acceptance review.");
+                    Write(Path.Combine(plan.Root,"independent-acceptance-data.json"), new {
+                        confirmationHash=confirmation.ConfirmationHash,manifestHash=manifest.ManifestHash,oraclePolicy=CalibrationSourceReference.Policy,
+                        oracleEvidenceHash=sameOracle.ReportHash,outputs=sameOracle.Outputs,
+                        status="awaiting-named-independent-review",ordinarySavedSamples=0 });
+                }
+                Write(Path.Combine(plan.Root, "result.json"), new { result = "passed-C00-frozen-union-no-refit-pending-independent-acceptance",
+                    confirmation.ConfirmationHash, contextFreeze.FreezeHash, ordinarySavedSamples = 0, modelActivated = false, samples });
+                return 0;
+            }
+            var qualification = ReplayCalibrationCatalog.CreateReceipt(model, qualifications.ToArray(), maximumActive, observationHash, expectedPlanHash,
+                legacyOutputs: plan.CompositeQualification ? legacyQualifications.ToArray() : null);
             Write(Path.Combine(plan.Root, "qualified-reference.json"), qualification);
             Write(Path.Combine(plan.Root, "result.json"), new { result = "passed-finite-reference-calibration", samples, model,
                 limits = "Empirical six-source cell; sampled peak is not a physical upper bound. Held-out captures/exports join a task-private production ledger; unfinished-tail acceptance reserves the complete input/output envelope. No account catalog activation, speed/A-V/game/release acceptance.",
@@ -1539,10 +2555,12 @@ internal static partial class ReplayCalibrationRun
         }
         catch (Exception ex)
         {
-            Write(Path.Combine(plan.Root, "failure.json"), new { result = "failed-no-retry", error = ex.ToString(), samples, model, processes, sampler.Used, sampler.MaximumGap,
+            WriteFailure(plan.Root, ex, new { result = "failed-no-retry", error = ex.ToString(), samples, model, processes, sampler.Used, sampler.MaximumGap,
                 sampler.MaximumActiveGap, sampler.SlowestLeafPath, sampler.SlowestLeafMilliseconds, sampler.LastObservation,
-                outputOperations = sampler.OutputOperationTimings, offlineSeconds = sampler.OfflineSeconds });
-            Console.Error.WriteLine(ex.Message + " Evidence: " + plan.Root); return 1;
+                outputOperations = sampler.OutputOperationTimings, metadataOperations = sampler.MetadataOperationTimings,
+                offlineSeconds = sampler.OfflineSeconds });
+            return 1;
         }
+        finally { try { sameCaptureInputOwner?.Dispose(); } finally { try {sameCapturePresentationOwner?.Dispose();}finally{sameCapturePresentationOwner=null;sameCaptureInputOwner = null; foreach (var lease in qualificationOutputs.Values) lease.Dispose();} } }
     }
 }

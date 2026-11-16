@@ -54,7 +54,7 @@ function Call-Worker([string]$command = 'status', [bool]$value = $false, [long]$
     $pipe = New-Object IO.Pipes.NamedPipeClientStream('.',('F10Recorder.v1.'+$scope),[IO.Pipes.PipeDirection]::InOut,[IO.Pipes.PipeOptions]::Asynchronous)
     try {
         $pipe.Connect(5000)
-        $request = @{Version=3;Command=$command;Value=$value;AfterEvent=$after} | ConvertTo-Json -Compress
+        $request = @{Version=8;Command=$command;Value=$value;AfterEvent=$after} | ConvertTo-Json -Compress
         $bytes = [Text.Encoding]::UTF8.GetBytes($request)
         $header = [BitConverter]::GetBytes([int]$bytes.Length)
         $pipe.Write($header,0,4); $pipe.Write($bytes,0,$bytes.Length); $pipe.Flush()
@@ -62,7 +62,7 @@ function Call-Worker([string]$command = 'status', [bool]$value = $false, [long]$
         $length = [BitConverter]::ToInt32($replyHeader,0)
         if ($length -le 0 -or $length -gt 1048576) { throw 'Invalid worker reply length.' }
         $reply = [Text.Encoding]::UTF8.GetString((Read-Bytes $pipe $length)) | ConvertFrom-Json
-        if ($reply.Version -ne 3) { throw 'Recorder protocol version mismatch.' }
+        if ($reply.Version -ne 8) { throw 'Recorder protocol version mismatch.' }
         if ($reply.Error) { throw $reply.Error }
         return $reply.Status
     } finally { $pipe.Dispose() }
@@ -89,10 +89,14 @@ if ($Action -eq 'Start') {
     if (Test-Path -LiteralPath $data) { throw 'Use a fresh isolated data directory for Start.' }
     New-Item -ItemType Directory -Path $data -Force | Out-Null
     @{ReplayMinutes=1;FramesPerSecond=120;BitrateMbps=20;VideoCodec='h264_nvenc';SystemAudio=$true;DisplayIndex=-1;OutputDirectory=(Join-Path $data 'clips');ScreenshotDirectory=(Join-Path $data 'screenshots');SaveKey=117;SaveModifiers=7;OverlayKey=118;OverlayModifiers=7;ScreenshotKey=119;ScreenshotModifiers=7} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $data 'settings.json') -Encoding UTF8
-    $worker = Start-Process -FilePath (Join-Path $root 'bin\avalonia\F10Recorder.Desktop.exe') -ArgumentList @('--recorder-worker','--paused','--data-dir',('"'+$data+'"')) -WindowStyle Hidden -PassThru
-    $worker.Id | Set-Content -LiteralPath (Join-Path $evidence 'worker-pid.txt')
-    Start-Sleep -Seconds 2
-    Call-Worker | ConvertTo-Json -Depth 8
+    $launcher = Start-Process -FilePath (Join-Path $root 'bin\avalonia\F10Recorder.Desktop.exe') -ArgumentList @('--pause','--data-dir',('"'+$data+'"')) -WindowStyle Hidden -PassThru
+    try {
+        if (-not $launcher.WaitForExit(20000) -or $launcher.ExitCode -ne 0) { throw 'Paused recorder launch failed.' }
+        $state = Call-Worker
+        if (-not $state.Paused -or $state.Metrics.CaptureProcessId -ne 0) { throw 'Recorder did not start paused.' }
+        $state.WorkerProcessId | Set-Content -LiteralPath (Join-Path $evidence 'worker-pid.txt')
+        $state | ConvertTo-Json -Depth 8
+    } finally { $launcher.Dispose() }
     exit
 }
 if ($Action -eq 'Status') { Call-Worker | ConvertTo-Json -Depth 8; exit }

@@ -6,6 +6,34 @@ under ignored `artifacts/`. The controller still owns game/source setup, desktop
 authorization and restoration; these scripts do not launch a game or change
 NVIDIA settings.
 
+## Before new recordings
+
+For replay qualification and performance work, first map the unanswered acceptance
+claim to the relevant code change and existing evidence. Reuse reports and
+retained inputs within their original product, recipe, duration, workload and
+provenance limits. Propose the smallest missing check with a finite stop rule,
+explaining why cheaper retained evidence cannot answer it. An active recording
+hold remains in force until the user explicitly lifts it; guidance edits and
+evidence review do not authorize capture.
+
+Assess how changed product/helper hashes or host paths affect each claim before
+repeating qualification or the full duration matrix. Review duration-specific
+[storage calibration rules](../docs/storage-admission.md) and retained-data
+alternatives before repeating acquisitions. Distinguish runtime safety requirements
+from the chosen empirical sampling policy. Propose an evidence-contract amendment
+explicitly, identifying its affected requirement and approval; existing acceptance
+and runtime storage/catalog requirements remain in force until an agreed change
+is implemented and verified.
+
+Replay is configurable from one to thirty minutes. Five minutes is the primary
+optimization, detailed-quality and repeated-performance benchmark under the
+[beta numerical gates](../docs/beta-spec.md#accepted-numerical-gates). Check the
+one- and thirty-minute endpoints for correct footage, A/V alignment, continued
+capture and resource/storage scaling. Five-minute timings establish no latency
+guarantee for other durations. This review applies before proposing collection;
+the JSON schema below is specifically the game-benchmark admission protocol.
+Other collectors retain their own declared plans and bounds.
+
 ## Required plan inputs
 
 | Field | Meaning |

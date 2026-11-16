@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <!-- The frozen product grants its existing test assembly access. -->
+    <AssemblyName>F10Recorder.MigrationTests</AssemblyName>
+  </PropertyGroup>
+  <Target Name="RequireFrozenProduct" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(QualificationProductDirectory)' == ''" Text="A frozen QualificationProductDirectory is required; this harness never builds product projects." />
+  </Target>
+  <ItemGroup>
+    <Reference Include="$(QualificationProductDirectory)/F10Recorder.Desktop.dll" />
+    <Reference Include="$(QualificationProductDirectory)/F10Recorder.Windows.dll" />
+    <Reference Include="$(QualificationProductDirectory)/F10Recorder.Core.dll" />
+    <Reference Include="$(QualificationProductDirectory)/Avalonia*.dll" />
+    <Reference Include="$(QualificationProductDirectory)/SkiaSharp.dll" />
+    <Reference Include="$(QualificationProductDirectory)/HarfBuzzSharp.dll" />
+    <Reference Include="$(QualificationProductDirectory)/MicroCom.Runtime.dll" />
+    <None Include="$(QualificationProductDirectory)/runtimes/win-x64/native/**/*.dll">
+      <!-- Direct frozen assembly references do not import the product's native
+           runtimeTargets into this harness's deps.json. Use the app-directory
+           native probing location; every DLL is still byte-bound to the product. -->
+      <Link>%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+</Project>

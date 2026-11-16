@@ -138,3 +138,77 @@ Portable CoreChecks continue to exercise selection and clock rules. Windows CI
 runs this suite without capture. The worker, window, audio-clock and migration
 suites remain separate native/hardware acceptance checks; this suite does not
 establish playable output, perceptual A/V alignment or gaming performance.
+
+## Launch effects
+
+These route-specific declarations are indexed by [test-effects.md](test-effects.md).
+Read the selected route's complete effects and bounds before execution.
+
+### F10Recorder.WorkerChecks --replay-retirement
+
+`F10Recorder.WorkerChecks --replay-retirement <fresh-root>` exercises the real
+supervisor retirement method with tiny nonmedia files and an isolated account
+authority. The production supervisor stays paused. A controlled export thread
+waits while source metadata/diagnostic closure fails, then verifies accepted
+work drains, failed inputs remain and a hold is reported. A healthy control
+still retires its inputs. No capture-session constructor, engine child, audio,
+GPU, account model, user profile/startup write or installation runs.
+The native notice check also starts from current held state without a preceding
+notification event; it covers initial attachment, dismissal and later holds.
+
+### WorkerChecks --replay-producer-recovery
+
+`WorkerChecks --replay-producer-recovery <fresh-root>` uses four bounded nonmedia
+fixture children (two leaders and two waiting children), current-user protected
+tiny files and native named process jobs. It terminates only its exact owned
+leaders, deliberately retains a job handle to keep a child alive for the negative
+control, then closes it and observes that exact child exit. Each child self-bounds
+at 15 seconds; startup/exit waits are bounded. Reports and failure files remain.
+There is no recorder/engine/probe, GPU, capture/audio, visible UI, shortcut,
+startup, installed-recorder or vendor action. Native job and hard-link routes
+need an ordinary Windows token when a restricted sandbox denies those operations.
+
+### --replay-construction-closure-checks
+
+`--replay-construction-closure-checks` uses controlled disposable owners and
+in-memory request/receipt state. It checks that diagnostic presence or erasure
+cannot create or release producer ownership, failed closes stay uncertain, and
+guard-only failures do not conceal confirmed closure. It creates no files,
+profiles, devices, UI or child processes. `--replay-worker-pilot-manifest-checks`
+parses bounded synthetic byte arrays through the actual pilot manifest reader;
+it checks same-buffer hash binding, complete member sets, case-insensitive
+duplicate rejection and size limits. It opens no runtime files or devices and
+does not qualify the real runtime or a recording candidate.
+
+### --replay-decode-lease-retention
+
+WorkerChecks `--replay-decode-lease-retention <fresh-root>` is a separate bounded
+nonmedia process-lifetime control. It launches one private-event child with a
+ten-second self deadline and checks real immutable/no-delete file leases across
+GC and exact child exit. Parent limits are25seconds,512MiB and1024handles; child
+limits are256MiB and256handles, with a2MB output cap and60GB free floor. Use a
+fresh reviewed hash-bound plan and30second outer controller. It opens no media,
+capture, playback, device, UI, worker, catalog, startup or vendor-preference route.
+This exercises retained ownership, without manufacturing an unkillable decoder
+or claiming coverage of an actual failed native kill.
+
+### ./tests/replay-ownership.ps1 -Plan
+
+`./tests/replay-ownership.ps1 -Plan` previews the dedicated replay ownership
+route without building or writing evidence. Running it exercises the same replay
+module interface used by capture supervision, with local manifest/file fixtures
+and controlled export outcomes. It opens no windows, registers no shortcuts,
+launches no recording engine, uses no GPU, captures no pixels/audio, changes no
+startup setting and installs nothing. Fixture output is not playable media and
+does not establish live capture, A/V alignment or performance acceptance.
+
+The same replay route checks known input-copy/concat capacity through controlled
+volume/allocation/free-byte observations and tiny ordinary file/export fixtures.
+Its production observer smoke reads actual local volume identity, allocation
+unit and caller-available bytes for a task-owned directory, a lexical `.` alias
+and absent child paths; observation does not create those children. It also
+rejects a task-owned regular-file ancestor. No mount, reparse or ACL mutation,
+physical second-volume test, real disk exhaustion, recorder/engine process or
+startup action is added. Capacity is a point-in-time necessary input condition;
+it is not output/finalization/tail sufficiency or protection against later
+capture/external growth. See [known-input capacity checks](replay-ownership.md).

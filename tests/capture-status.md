@@ -53,3 +53,18 @@ Only local verification reports are written. These deterministic checks do not
 exercise native worker integration, acquisition, process draining, source discovery,
 playable output, A/V alignment, hardware performance or installed-state acceptance.
 Those suites retain their separate authorization and acceptance requirements.
+
+## Launch effects
+
+These route-specific declarations are indexed by [test-effects.md](test-effects.md).
+Read the selected route's complete effects and bounds before execution.
+
+### ./tests/capture-status.ps1 -Plan
+
+`./tests/capture-status.ps1 -Plan` previews deterministic capture-status checks.
+The dedicated `--capture-status` route exits before recorder initialization and
+uses the production status/owner-dispatch modules with controlled process liveness
+and delayed queue delivery. It creates no windows, shortcuts, recorder or encoder;
+it captures no pixels/audio, uses no GPU, changes no startup setting and installs
+nothing. Its only runtime output is a local verification report. See
+[capture status checks](capture-status.md) for coverage and limits.

@@ -99,6 +99,12 @@ jobs:
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-foreground-checks artifacts/replay-resource-ci
       - name: Verify independent capture closure evidence without media
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-capture-evidence-checks artifacts/replay-capture-evidence-ci
+      - name: Verify worker pilot ownership and normal closure without processes
+        run: ./tests/replay-worker-latency-controller-checks.ps1
+      - name: Verify reserved staging admission and workspace without media
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-staging-admission-checks artifacts/replay-staging-admission-ci
+      - name: Verify staged process guards and readiness without native processes
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --staged-process-checks
       - name: Verify calibration startup diagnostics without media or power effects
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-startup-checks artifacts/replay-startup-ci
       - name: Verify cross-process fixture readiness publication without media
@@ -115,6 +121,8 @@ jobs:
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-timing-checks artifacts/replay-sampler-timing-ci
       - name: Verify reference output estimate arithmetic without capture or GPU
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-model-checks artifacts/replay-model-ci
+      - name: Verify duration-specific qualification admission without native or media
+        run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-duration-admission-checks
       - name: Verify qualified reference catalog with controlled host metadata
         run: dotnet run --project projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-build -- --replay-calibration-catalog-checks artifacts/replay-catalog-ci
       - name: Verify shared volume reservations without capture or GPU

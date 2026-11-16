@@ -14,7 +14,7 @@ internal static class ReplaySamplerPublicationChecks
         Directory.CreateDirectory(profile); Directory.CreateDirectory(cache);
         var capacity = ReplayStorage.ObserveCapacity(root);
         string scope = new('C', 64), owner = Guid.NewGuid().ToString("N");
-        var headroom = new ReplayCaptureHeadroom(scope, capacity.Volume, capacity.AllocationUnit, 4096, 8192);
+        var headroom = new ReplayCaptureHeadroom(scope, capacity.Volume, capacity.AllocationUnit, 4096, 8192, ReplayCapacityPolicy.CoverageMilliseconds);
         var model = new ReplayReferenceModel("controlled-publication", scope, capacity.Volume, capacity.AllocationUnit, 0, 0, [], headroom);
         var files = new ReplayFiles();
         var claims = new ReplayVolumeReservations(authority, ReplayStorageSafety.MinimumBytes);

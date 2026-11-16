@@ -18,7 +18,7 @@ internal static class ReplayCalibrationPhaseChecks
             catch (Exception ex) { failed++; results.Add(new { name, passed = false, error = ex.ToString() }); }
         }
         CalibrationPlan Plan(string path) => new(path, "unused-no-engine", "nonmedia-phase-control",
-            new(), [], [], 0, 0, BudgetBytes: 3_000_000_000, StopBytes: 2_500_000_000, FloorBytes: 0, DeadlineSeconds: 30);
+            new(), ["T01"], [], 0, 0, BudgetBytes: 3_000_000_000, StopBytes: 2_500_000_000, FloorBytes: 0, DeadlineSeconds: 30);
 
         Check("anchored-inventory-attributes-enforce-media-policy", path =>
         {
@@ -75,19 +75,42 @@ internal static class ReplayCalibrationPhaseChecks
             sampler.EndActive();
             Require(Volatile.Read(ref sampler.Observations) > before,
                 "A terminal observation must start after producer absence, not reuse an older row.");
-            Require(sampler.MaximumActiveGap is > 0 and <= 500, "Active coverage did not retain the unchanged limit.");
+            Require(sampler.MaximumActiveGap > 0 && sampler.MaximumActiveGap <= ReplayCapacityPolicy.CoverageMilliseconds,
+                "Active evidence did not fit the explicit candidate growth horizon.");
             Require(sampler.Peak(output) >= ReplayStorage.Observe(output).AllocatedBytes,
                 "Terminal output allocation was omitted from the observed peak.");
             sampler.StopAndCheck();
         });
-        Check("active-650ms-delay-rejects", path =>
+        Check("active-650ms-inventory-delay-is-measurement", path =>
         {
             using var sampler = new ReplayCalibrationRun.Sampler(Plan(path), active: false);
             sampler.BeginActive();
             lock (sampler.Gate) Thread.Sleep(650);
-            Exception rejection = null;
-            try { sampler.EndActive(); } catch (IOException ex) { rejection = ex; }
-            Require(rejection != null, "The same delay while a producer can grow must reject the active interval.");
+            sampler.EndActive(); sampler.StopAndCheck();
+            Require(sampler.MaximumActiveGap >= 650 && sampler.MaximumActiveGap <= ReplayCapacityPolicy.CoverageMilliseconds,
+                "A covered inventory delay must remain measured without becoming a separate product heartbeat.");
+        });
+        Check("offline-capacity-monitor-runs-without-caller", path =>
+        {
+            using var sampler = new ReplayCalibrationRun.Sampler(Plan(path), active: false);
+            sampler.BeginOffline("inspection-no-callback", 0, 5);
+            Thread.Sleep(2200);
+            sampler.EndOffline(); sampler.StopAndCheck();
+            Require(sampler.Failure == null && sampler.ObserverAbsent,
+                "An admitted offline inspection must preserve genuine capacity observations without caller callbacks and join every observer.");
+        });
+        Check("missing-growth-evidence-cannot-qualify", path =>
+        {
+            string cell = Path.Combine(path, "T01"); Directory.CreateDirectory(cell);
+            File.WriteAllBytes(Path.Combine(cell, "chunk-000000001.ts"), new byte[4096]);
+            using var sampler = new ReplayCalibrationRun.Sampler(Plan(path), active: false);
+            sampler.BeginActive();
+            lock (sampler.Gate) Thread.Sleep(ReplayCapacityPolicy.CoverageMilliseconds + 50);
+            sampler.MarkCaptureStop("T01"); sampler.EndActive();
+            bool rejected = false;
+            try { sampler.CaptureMetrics("T01"); } catch (IOException) { rejected = true; }
+            Require(rejected, "Missing inventory evidence outside the declared growth horizon must remain inconclusive.");
+            sampler.StopAndCheck();
         });
         Check("offline-allocation-shortage-before-admission", path =>
         {
@@ -243,8 +266,8 @@ internal static class ReplayCalibrationPhaseChecks
             while (sampler.Observations < before + 3)
             { sampler.Check(); Require(wait.ElapsedMilliseconds < 3000, "Proposed inventory observation did not progress."); Thread.Sleep(5); }
             sampler.EndActive(); sampler.StopAndCheck();
-            Require(sampler.MaximumDirectories == 72 && sampler.MaximumFiles == 5120 && sampler.MaximumActiveGap <= 500,
-                "Proposed full inventory did not meet the unchanged active observation gate.");
+            Require(sampler.MaximumDirectories == 72 && sampler.MaximumFiles == 5120 && sampler.MaximumActiveGap <= ReplayCapacityPolicy.CoverageMilliseconds,
+                "Proposed full inventory did not supply complete evidence inside the explicit growth horizon.");
             Require(!sampler.RetainsMetadata(Path.Combine(cell, "chunk-000000000.ts")), "Current payload handle was retained.");
         });
         File.WriteAllText(Path.Combine(root, "phase-checks.json"), JsonSerializer.Serialize(new {

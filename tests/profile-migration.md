@@ -354,3 +354,76 @@ reply fixture into a legitimate matching completion: exactly that rejection
 assertion must fail. Windows CI runs and validates both routes. These checks
 create only local reports; no native windows, shortcuts, pipes, recorder, engine,
 GPU, capture or startup writes occur.
+
+## Launch effects
+
+These route-specific declarations are indexed by [test-effects.md](test-effects.md).
+Read the selected route's complete effects and bounds before execution.
+
+### ./tests/profile-migration.ps1 -Plan
+
+`./tests/profile-migration.ps1 -Plan` previews isolated paused/blocked migration
+workers and hidden Ctrl+Alt+Shift+F4–F6 shortcuts. It sends task-owned hidden-window
+Save/Screenshot messages without physical input and checks ownership/reconnect,
+exact input/media-sentinel preservation and owned-process cleanup. `-DesktopOnly
+-SnapshotsPath <worker-output>/worker-snapshots.json` uses offscreen Settings
+controls and a controlled capability response. Neither route opens visible or
+capture-excluded UI, launches an engine, uses a GPU, captures pixels/audio, writes
+startup settings or touches the installed recorder. See
+[profile migration checks](profile-migration.md) for format, commands and limits.
+The worker/Desktop routes include large Unicode and near-limit opaque preferences,
+with bounded status/correction replies and original-byte preservation.
+`-StatusTransportOnly -Plan` previews the separate CI projection/protocol/headless
+client checks. That route opens no native recorder/windows/shortcuts/pipes and
+uses no GPU/capture/startup behavior; only local fixture/report files are created.
+The early `--apply-acknowledgements <output>` WorkerChecks route likewise uses
+only the production headless client and controlled replies, with local reports.
+Its optional `--sensitivity-control` changes one response fixture, not production.
+The existing offscreen Desktop profile route additionally exercises failed or
+unconfirmed correction, retained drafts and an acknowledged retry, using no
+platform Window, capture affinity, real engine or startup writer.
+`./tests/profile-migration.ps1 -EntryOnly -Plan` previews the separate controlled
+profile-entry route. It constructs persistent Settings controls and the headless
+production client only, invokes the same one-time entry method consumed by the
+attachment handler, and observes fake transport commands. Held/unsafe entries
+send none; a separate trusted ordinary non-held entry exercises the retained
+legacy one-time probe through a controlled reply. No native Window/App, worker,
+pipe, real engine/probe/GPU, capture, startup write or vendor action occurs.
+Snapshots, reports and bounded attention text renders are local artifacts.
+The Windows CI entry step builds MigrationTests but invokes only this early
+route, twice: normal and fixture sensitivity. Fresh per-invocation GUID output
+roots retain distinct reports. `verify-profile-entry-report.ps1` only reads the
+specified JSON and validates its exit/result/boolean flag and exact 27-check
+contract; it does not launch anything or modify the report. The sensitivity
+fixture must fail its sole named existing-context assertion. Hosted/offscreen
+checks do not establish native attachment, button geometry, media or release
+acceptance.
+
+### ./tests/profile-migration.ps1 -RealWorkerCorrection -EngineSource
+
+`./tests/profile-migration.ps1 -RealWorkerCorrection -EngineSource <retained-approved-engine> -EngineRoot <task-private-shared-root> -Plan`
+previews the separate seven-case actual-worker correction route. It stages at
+most one hash-pinned task copy, verifies its private ACL/hash without executing
+it, and uses paused/activation-held workers, current-user named pipes and hidden
+Ctrl+Alt+Shift+F4-F6 shortcuts. Ownership, engine and fixture profiles are isolated.
+Only status/Apply/Quit are sent. An existing startup callback records/optionally
+rejects fixture intent; the user's actual startup value/kind is read and compared
+without writing. No engine probe/launch, capture, GPU, visible/excluded UI,
+download, repair, installation or vendor changes occur. Controlled file-write,
+backup and callback failures retain originals and incomplete paths. Review the
+explicit source/root/output plan and serialize native ownership before running.
+
+### -RealWorkerCorrection -BudgetApplyOnly
+
+`-RealWorkerCorrection -BudgetApplyOnly` is the focused P05 extension of that
+existing worker route. Save its explicit `-Plan`: it lists the fixed retained
+profile, serial empty-cache profile, ownership/build/engine paths and a temporary
+task-owned F7 helper in addition to F4-F6. It verifies/reuses an existing task
+engine read-only, never provisioning it. One ordinary45,000,000-byte fixture is
+reused with hashes and allocation identity; a hard-link alias adds no second
+payload, and one tiny copy is explicitly removed as fixture setup. Every run
+keeps unique small input/result snapshots, checks real startup hashes and normal
+worker/helper cleanup, and refuses reset after failed cleanup. It remains
+paused/held: no engine/probe/GPU/capture, visible/excluded UI, physical input,
+real startup or installed-recorder changes. See the P05 section of
+[profile migration checks](profile-migration.md#budget-reduction-preflight-p05).

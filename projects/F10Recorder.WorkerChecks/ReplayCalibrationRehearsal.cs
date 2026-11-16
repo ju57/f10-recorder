@@ -27,6 +27,7 @@ internal static class ReplayCalibrationRehearsal
         internal override void DeleteDirectory(string path) { } // Only verified archival retires dummy duplicates.
         internal override void DeleteFile(string path) { }
         internal override void Publish(string partial, string final) { lock (sampler.Gate) base.Publish(partial, final); }
+        internal override void Publish(ReplayExportRequest request, string final) { lock (sampler.Gate) base.Publish(request, final); }
     }
     sealed class DummySource(string session, int seconds, double cutoff, Action<IReadOnlyList<string>, string> export, int bitrate = 20) : IReplaySessionSource
     {

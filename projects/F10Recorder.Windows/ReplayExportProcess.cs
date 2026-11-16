@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Text;
+using System.Runtime.InteropServices;
 
 namespace F10Recorder;
 
@@ -21,6 +22,12 @@ internal sealed class ReplayExportProcessReceipt
     public long ElapsedMilliseconds { get; internal set; }
     public double LastStorageCheckWorkMilliseconds { get; internal set; }
     public double LastStorageCheckIdleMilliseconds { get; internal set; }
+    public double? CpuMilliseconds { get; internal set; }
+    public long? SampledPeakWorkingSetBytes { get; internal set; }
+    public ulong? ReadBytes { get; internal set; }
+    public ulong? WriteBytes { get; internal set; }
+    public bool ResourcesFinal { get; internal set; }
+    public string ResourceError { get; internal set; }
     public string Failure { get; internal set; }
     public string Error { get; internal set; }
     public bool Success => Failure == null && ProducerAbsent && ActualExitObserved && ExitCode == 0 && CaptureComplete;
@@ -35,8 +42,12 @@ internal static class ReplayExportProcess
 
     internal static ReplayExportProcessReceipt Run(string executable, IReadOnlyList<string> arguments, string workingDirectory,
         Native.ProcessJob job, Action<Process> started = null, Action<bool> producerStopped = null,
-        int timeoutMilliseconds = 120000, int outputLimitBytes = MaximumOutputBytes, Action checkStorage = null)
+        int timeoutMilliseconds = 120000, int outputLimitBytes = MaximumOutputBytes, Action checkStorage = null,
+        IDisposable inputLease = null)
     {
+        // inputLease is borrowed during normal execution. Only an unconfirmed
+        // stop transfers strong ownership to the exact-child exit registry;
+        // the caller must then retain it rather than dispose on return/failure.
         ArgumentNullException.ThrowIfNull(arguments);
         if (timeoutMilliseconds <= 0) throw new ArgumentOutOfRangeException(nameof(timeoutMilliseconds));
         if (outputLimitBytes <= 0 || outputLimitBytes > MaximumOutputBytes) throw new ArgumentOutOfRangeException(nameof(outputLimitBytes));
@@ -65,6 +76,18 @@ internal static class ReplayExportProcess
                 storageObservationFinished = Stopwatch.GetTimestamp();
                 receipt.LastStorageCheckWorkMilliseconds = Stopwatch.GetElapsedTime(storageObservationStarted, storageObservationFinished).TotalMilliseconds;
             }
+            if (process != null)
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        if (GetProcessMemoryInfo(process.SafeHandle.DangerousGetHandle(), out var memory, (uint)Marshal.SizeOf<MemoryCounters>()))
+                            receipt.SampledPeakWorkingSetBytes = Math.Max(receipt.SampledPeakWorkingSetBytes ?? 0, (long)memory.PeakWorkingSet);
+                        else receipt.ResourceError = "Process memory query failed: " + Marshal.GetLastWin32Error();
+                    }
+                }
+                catch (Exception error) when (ExpectedFailure(error))
+                { receipt.ResourceError = ReplayOutputDemand.Bounded(error.Message, 512); }
         }
         void ObservedWork(Action work)
         {
@@ -189,6 +212,16 @@ internal static class ReplayExportProcess
                     catch (Exception observation) when (ExpectedFailure(observation)) { }
                 }
                 receipt.ProducerAbsent = receipt.ActualExitObserved;
+                try
+                {
+                    receipt.CpuMilliseconds = process.TotalProcessorTime.TotalMilliseconds;
+                    if (GetProcessIoCounters(process.SafeHandle.DangerousGetHandle(), out var io))
+                    { receipt.ReadBytes = io.ReadBytes; receipt.WriteBytes = io.WriteBytes; }
+                    else receipt.ResourceError = "Process I/O query failed: " + Marshal.GetLastWin32Error();
+                    receipt.ResourcesFinal = receipt.ActualExitObserved;
+                }
+                catch (Exception error) when (ExpectedFailure(error))
+                { receipt.ResourceError = ReplayOutputDemand.Bounded(error.Message, 512); }
                 if (!receipt.ProducerAbsent)
                 {
                     receipt.Failure = "producer-absence-unverified";
@@ -212,7 +245,7 @@ internal static class ReplayExportProcess
                 process?.Dispose();
                 lease?.Dispose();
             }
-            else RetainUntilExit(process, lease);
+            else RetainUntilExit(process, lease, inputLease);
             try { producerStopped?.Invoke(receipt.ProducerAbsent); }
             catch (Exception error) when (ExpectedFailure(error))
             {
@@ -238,16 +271,52 @@ internal static class ReplayExportProcess
 
     static bool ExpectedFailure(Exception error) => error is IOException or UnauthorizedAccessException or Win32Exception
         or InvalidOperationException or ArgumentException or NotSupportedException or OperationCanceledException;
+    [StructLayout(LayoutKind.Sequential)]
+    struct IoCounters { internal ulong ReadOperations, WriteOperations, OtherOperations, ReadBytes, WriteBytes, OtherBytes; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct MemoryCounters { internal uint Size, PageFaults; internal nuint PeakWorkingSet, WorkingSet, PeakPagedPool, PagedPool, PeakNonPagedPool, NonPagedPool, Pagefile, PeakPagefile; }
+    [DllImport("kernel32.dll", EntryPoint = "K32GetProcessMemoryInfo", SetLastError = true)]
+    static extern bool GetProcessMemoryInfo(IntPtr process, out MemoryCounters counters, uint size);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetProcessIoCounters(IntPtr process, out IoCounters counters);
+    internal static bool TryWorkingSet(Process process, out long current)
+    {
+        current = 0;
+        if (!GetProcessMemoryInfo(process.SafeHandle.DangerousGetHandle(), out var counters, (uint)Marshal.SizeOf<MemoryCounters>())
+            || (ulong)counters.WorkingSet > long.MaxValue) return false;
+        current = (long)counters.WorkingSet; return true;
+    }
     static string JoinError(string before, string next) => string.IsNullOrEmpty(before) ? next : before + " " + next;
 
     // An unconfirmed stop must keep the verified file pinned. Keep a strong root
     // even if event registration fails; releasing the lease requires owned exit
     // evidence. No delayed callback may overwrite a subsequent export's state.
     static readonly object pendingGate = new();
-    static readonly Dictionary<Process, IDisposable> pending = new();
-    static void RetainUntilExit(Process process, IDisposable lease)
+    static readonly Dictionary<Process, IDisposable[]> pending = new();
+    static readonly List<IDisposable> uncertainClosures = [];
+    internal static bool RetainsFailedLeaseForChecks(IDisposable lease)
+    { lock(pendingGate) return uncertainClosures.Any(item => ReferenceEquals(item, lease)); }
+    internal static void CloseRetainedLeases(IEnumerable<IDisposable> leases)
     {
-        lock (pendingGate) pending.Add(process, lease);
+        foreach (var lease in leases)
+        {
+            if (lease == null) continue;
+            // Exit proves producer absence, not successful handle closure.
+            // Root the owner BEFORE Dispose and keep it on every exception,
+            // including a composite input lease's AggregateException.
+            lock(pendingGate) uncertainClosures.Add(lease);
+            try { lease.Dispose(); }
+            catch (Exception error) { Log.Write("Exited replay child retained uncertain input closure: " + ReplayOutputDemand.Bounded(error.Message, 512)); continue; }
+            lock(pendingGate)
+            {
+                int index = uncertainClosures.FindIndex(item => ReferenceEquals(item, lease));
+                if (index >= 0) uncertainClosures.RemoveAt(index);
+            }
+        }
+    }
+    internal static void RetainUntilExit(Process process, params IDisposable[] leases)
+    {
+        lock (pendingGate) pending.Add(process, leases);
         void ReleaseIfExited(object sender, EventArgs args)
         {
             lock (pendingGate)
@@ -258,8 +327,7 @@ internal static class ReplayExportProcess
                 pending.Remove(process);
                 try { process.Dispose(); }
                 catch (Exception error) when (ExpectedFailure(error)) { }
-                try { lease?.Dispose(); }
-                catch (Exception error) when (ExpectedFailure(error)) { }
+                CloseRetainedLeases(leases);
             }
         }
         try

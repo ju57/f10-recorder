@@ -1,5 +1,7 @@
 F10 Recorder: replay controls and passive notices
 
+Historical prototype UI contract. The observations and branch descriptions below retain their original scope. Accepted beta behavior is owned by docs/beta-spec.md and approved visual direction by docs/brand-guidelines.md. Use docs/architecture.md for runtime mechanisms and tests/test-effects.md for current verification routes. This prototype record is not an instruction to reopen settled design or launch capture.
+
 Purpose
 Make capture state, recent-footage actions and recording policies clear while
 keeping buffering/export independent of the UI. This Windows composition UI

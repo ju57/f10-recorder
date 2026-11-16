@@ -4,6 +4,13 @@ using System.Text.Json;
 namespace F10Recorder;
 
 internal enum ReplayOutputEvidenceKind { Unmeasured, CalibratedEstimate, SourceBound }
+// Readiness grants no storage credit. It identifies the same fully checked
+// model while one initial request waits for completed-segment metadata.
+internal sealed record ReplayOutputReadiness(string ModelIdentity, bool AwaitingCompletedTail);
+internal sealed record ReplayOutputScratchDemand(long AssemblyPeakAllocatedBytes, long BoundaryPeakAllocatedBytes)
+{
+    internal long Total => checked(AssemblyPeakAllocatedBytes + 2 * BoundaryPeakAllocatedBytes);
+}
 internal sealed record ReplayOutputInput(string Path, double Start, double End, ReplayFileExtent Extent);
 internal sealed record ReplayOutputSelection(string Identity, string ExporterIdentity, string Destination,
     double End, bool Closed, IReadOnlyList<ReplayOutputInput> Inputs, double Start = 0)
@@ -25,7 +32,8 @@ internal sealed record ReplayOutputSelection(string Identity, string ExporterIde
 // numeric evidence. Production stays explicitly unmeasured until calibration.
 internal sealed record ReplayOutputDemand(ReplayOutputEvidenceKind Kind, string Revision, string SelectionIdentity,
     string ExporterIdentity, string Volume, long AllocationUnit, long PeakAllocatedBytes, bool CoversOpenTail, string Reason,
-    long? SnapshotPeakAllocatedBytes = null)
+    long? SnapshotPeakAllocatedBytes = null, ReplayOutputScratchDemand Scratch = null, ReplayOutputReadiness Readiness = null,
+    int ConcatMaximumBytes = 65536)
 {
     internal void WriteMetrics(RecorderMetrics metrics)
     {

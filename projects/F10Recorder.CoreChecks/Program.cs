@@ -1,9 +1,22 @@
 using F10Recorder;
 using System.Text.Json;
+if(args is ["--prepared-index-only"]){ReplayPreparedIndexChecks.Run();return;}
 
+if (args.Length == 1 && args[0] == "--planning-guard-only") { ReplayPlanningGuardChecks.Run(); return; }
+if (args.Length == 1 && args[0] == "--capacity-observation-only") { ReplayCapacityObservationChecks.Run(); ReplayCapacityCadenceChecks.Run(); return; }
+if (args.Length == 1 && args[0] == "--capacity-cadence-only")
+{ try { ReplayCapacityCadenceChecks.Run(); } catch (Exception error) { Console.Error.WriteLine(error.Message); Environment.ExitCode = 1; } return; }
+if (args.Length == 1 && args[0] == "--boundary-projection-only") { ReplayHybridPlanChecks.Run(); ReplayBoundaryProjectionChecks.Run(); return; }
+if (args.Length == 3 && args[0] == "--transport-fixtures") { ReplayTransportChecks.RunFixtures(args[1], args[2]); return; }
+if (args.Length == 3 && args[0] == "--mp4-evidence-fixtures") { ReplayMp4Checks.RunFixtures(args[1], args[2]); return; }
+if (args.Length == 3 && args[0] == "--packet-file-attribution") { ReplayPacketAttribution.Run(args[1], args[2]); return; }
+if (args.Length == 3 && args[0] == "--mp4-video-source-fixture") { ReplayMp4SourceProofChecks.Run(args[1], args[2]); return; }
 string data = args.Length > 0 ? Path.GetFullPath(args[0]) : Path.Combine(Path.GetTempPath(), "F10Recorder-CoreChecks-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(data); Log.DirectoryPath = data;
+if (args.Contains("--transport-only")) { ReplayTransportChecks.Run(); ReplayHybridPlanChecks.Run(); ReplayBoundaryProjectionChecks.Run(); ReplayMp4Checks.Run(); ReplayAacCopyPlanChecks.Run(); ReplayMp4PacketWriterChecks.Run(); ReplayTransportPacketSampleChecks.Run(); ReplayTransportBatchChecks.Run(); ReplayWorkerLifetimeChecks.Run(); return; }
 if (args.Contains("--storage-budget-only")) { StorageBudgetChecks.Run(Path.Combine(data, "storage-budget")); return; }
+if (args.Contains("--storage-observation-only")) { ReplayStorageObservationChecks.Run(); return; }
+if (args.Contains("--index-lease-only")) { ReplayIndexLeaseReplacement.RunChecks(Path.Combine(data, "index-leases")); return; }
 try
 {
     ProfileMigrationChecks.Run(Path.Combine(data, "profile-migration"), args.Contains("--profile-sensitivity"));
@@ -16,7 +29,20 @@ catch (Exception ex)
 }
 if (args.Contains("--profile-only")) return;
 PortableReplayStorageSafetyChecks.Run();
+ReplayCapacityObservationChecks.Run();
+ReplayStorageObservationChecks.Run();
+ReplayCapacityCadenceChecks.Run();
+ReplayPlanningGuardChecks.Run();
 ReplayPrecisionSelectionChecks.Run();
+ReplayTransportChecks.Run();
+ReplayHybridPlanChecks.Run();
+ReplayBoundaryProjectionChecks.Run();
+ReplayMp4Checks.Run();
+ReplayAacCopyPlanChecks.Run();
+ReplayMp4PacketWriterChecks.Run();
+ReplayTransportPacketSampleChecks.Run();
+ReplayTransportBatchChecks.Run(); ReplayWorkerLifetimeChecks.Run();
+ReplayPreparedIndexChecks.Run();
 void Require(bool condition, string message) { if (!condition) throw new Exception(message); }
 var preferences = new Settings { OutputDirectory = Path.Combine(data, "clips", "..", "clips"), ScreenshotDirectory = Path.Combine(data, "screenshots") };
 preferences.Validate();

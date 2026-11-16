@@ -11,16 +11,46 @@ internal class ReplayInventoryReader : ReplayFiles, IDisposable
     readonly Func<string, bool> mayRetain;
     readonly bool reuseRenamedOutputs;
     internal Action<string, string, double> OperationTimed;
+    internal Action<CalibrationFileOperationTiming> OperationObserved;
+    internal Action<SafeFileHandle, string> InventoryOpenedForChecks;
+    internal string TimingFailure { get; private set; }
     internal Action<string, ReplayFileExtent> OutputObserved;
     internal ReplayInventoryReader(IEnumerable<string> metadataHandleRoots, Func<string, bool> mayRetain = null, bool reuseRenamedOutputs = false)
     { roots = metadataHandleRoots.Select(r => Path.GetFullPath(r).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar).ToList(); this.mayRetain = mayRetain; this.reuseRenamedOutputs = reuseRenamedOutputs; }
     T Timed<T>(string path, string operation, Func<T> action)
     {
+        bool detailed = OperationObserved != null && (path.EndsWith(".ts", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase));
+        CalibrationOperationClock.Reading context = default;
+        if (detailed)
+            try { context = CalibrationOperationClock.Read(); }
+            catch (Exception ex) { TimingFailure ??= ex.GetType().Name; detailed = false; }
+        bool succeeded = false;
         long at = System.Diagnostics.Stopwatch.GetTimestamp();
-        try { return action(); }
-        finally { if (path.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)) OperationTimed?.Invoke(path, operation, System.Diagnostics.Stopwatch.GetElapsedTime(at).TotalMilliseconds); }
+        try { var result = action(); succeeded = true; return result; }
+        finally
+        {
+            // Diagnostics must not replace a primary error or prevent an opened
+            // handle from reaching its owner. Sampler invalidates qualification
+            // after the scan; a failed native operation keeps its own exception.
+            try
+            {
+                if (path.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase))
+                    OperationTimed?.Invoke(path, operation, System.Diagnostics.Stopwatch.GetElapsedTime(at).TotalMilliseconds);
+                if (detailed) OperationObserved(CalibrationOperationClock.Complete(context, path, operation, succeeded));
+            }
+            catch (Exception ex) { TimingFailure ??= ex.GetType().Name; }
+        }
     }
     void Close(string path, Entry entry) => Timed(path, "close", () => { entry.Handle.Dispose(); return true; });
+    SafeFileHandle Open(string path) => Timed(path, "open", () =>
+    {
+        var handle = ReplayStorage.OpenInventory(path);
+        if (!handle.IsInvalid) return handle;
+        int error = System.Runtime.InteropServices.Marshal.GetLastPInvokeError();
+        handle.Dispose();
+        throw new System.ComponentModel.Win32Exception(error);
+    });
     ReplayFileExtent Report(string path, ReplayFileExtent extent)
     { if (path.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)) OutputObserved?.Invoke(path, extent); return extent; }
     internal bool Retains(string path) => handles.ContainsKey(path);
@@ -47,8 +77,12 @@ internal class ReplayInventoryReader : ReplayFiles, IDisposable
         if (!roots.Any(r => full.StartsWith(r, StringComparison.OrdinalIgnoreCase)) || mayRetain?.Invoke(path) == false)
         {
             if (handles.Remove(path, out var old)) Close(path, old);
-            var handle = Timed(path, "open", () => ReplayStorage.OpenInventory(path)); OpenCount++;
-            try { return Report(path, Timed(path, "observe", () => ReplayStorage.ObserveInventory(handle, enumerated))); }
+            var handle = Open(path); OpenCount++;
+            try
+            {
+                InventoryOpenedForChecks?.Invoke(handle, path);
+                return Report(path, Timed(path, "observe", () => ReplayStorage.ObserveInventory(handle, enumerated)));
+            }
             finally { Timed(path, "close", () => { handle.Dispose(); return true; }); }
         }
         if (handles.TryGetValue(path, out var previous)
@@ -64,7 +98,7 @@ internal class ReplayInventoryReader : ReplayFiles, IDisposable
         }
         if (!handles.TryGetValue(path, out var entry))
         {
-            var handle = Timed(path, "open", () => ReplayStorage.OpenInventory(path)); OpenCount++;
+            var handle = Open(path); OpenCount++;
             try
             {
                 var observed = Timed(path, "observe", () => ReplayStorage.ObserveInventory(handle, enumerated));
