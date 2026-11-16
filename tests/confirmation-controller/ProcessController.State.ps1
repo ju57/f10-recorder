@@ -1,0 +1,9 @@
+$owned=$null;$birth=$null;$failure=$null;$exitCode=$null;$peakRam=0L;$peakHandles=0;$queryMaximumMs=0.0;$lastQuery=-1.0;$lastPreparation=-1.0;$phaseBytes=0L
+$tracked=@{};$children=@{};$rawChildren=[Collections.Generic.List[object]]::new();$rawBytes=0L;$rawWritten=0;$rawComplete=$false
+$handoffs=[Collections.Generic.List[object]]::new();$released=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal);$reported=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+$childClosure=@();$outFile=$null;$errFile=$null;$outCopy=$null;$errCopy=$null;$managedRows=0
+$pendingControlImages=@{}
+$pendingCreatorImages=@{}
+$lookupAbsentChildren=@{}
+$observedInstances=@{}
+$finalObservationError=$null;$collectorCleanupError=$null
