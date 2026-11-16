@@ -43,7 +43,7 @@ internal static class ReplayCalibrationPhaseChecks
 
         Check("inspection-frame-positions-match-rounded-duration", path =>
         {
-            foreach (double seconds in new[] { 0.05, 0.1, 0.2, 0.249, 0.5, 1.0, 1.2, 2.0, 298.0, 299.2341926, 300.1 })
+            foreach (double seconds in new[] { 0.05, 0.1, 0.2, 0.249, 0.5, 1.0, 1.2, 2.0, 298.0, 299.2341926, 300.1, 311.0, 1800.0 })
             {
                 int[] frames = ReplayCalibrationRun.InspectionFrames(seconds);
                 Require(frames.Length == 3 && frames[0] < frames[1] && frames[1] < frames[2] && frames[0] >= 0 && frames[2] < Math.Floor(seconds * 60),
@@ -51,7 +51,7 @@ internal static class ReplayCalibrationPhaseChecks
                 if (seconds >= 1) Require(frames.SequenceEqual(new[] { 15, (int)(seconds * 30), (int)(seconds * 60) - 15 }), "Main/ordinary inspection positions drifted.");
             }
             Require(ReplayCalibrationRun.InspectionFrames(0.2).SequenceEqual(new[] { 3, 6, 9 }), "T02 twelve-frame regression was not covered.");
-            foreach (double seconds in new[] { double.NaN, double.PositiveInfinity, -1.0, 0.0, 0.049, 311.0 })
+            foreach (double seconds in new[] { double.NaN, double.PositiveInfinity, -1.0, 0.0, 0.049, Math.BitIncrement(1800.0) })
             {
                 bool rejected = false; try { ReplayCalibrationRun.InspectionFrames(seconds); } catch (IOException) { rejected = true; }
                 Require(rejected, "Invalid or insufficient inspection duration was admitted.");
@@ -124,12 +124,28 @@ internal static class ReplayCalibrationPhaseChecks
         });
         Check("offline-deadline-remains-enforced", path =>
         {
-            using var sampler = new ReplayCalibrationRun.Sampler(Plan(path), active: false);
-            sampler.BeginOffline("archive-control", 0, 1);
-            Thread.Sleep(1150);
-            bool rejected = false;
-            try { sampler.Check(); } catch (IOException) { rejected = true; }
-            Require(rejected, "An offline phase outside its own deadline must block further work.");
+            const string deadlineFailure = "Offline storage phase deadline exceeded.";
+            var sampler = new ReplayCalibrationRun.Sampler(Plan(path), active: false);
+            bool disposalRejected = false;
+            try
+            {
+                sampler.BeginOffline("archive-control", 0, 1);
+                Require(SpinWait.SpinUntil(() => sampler.Failure != null, TimeSpan.FromSeconds(5)) && sampler.Failure == deadlineFailure,
+                    "The storage observer did not retain the offline deadline failure.");
+                bool rejected = false;
+                try { sampler.Check(); } catch (IOException error) when (error.Message == deadlineFailure) { rejected = true; }
+                Require(rejected, "An offline phase outside its own deadline must block further work.");
+            }
+            finally
+            {
+                try { sampler.Dispose(); }
+                catch (IOException error) when (error.InnerException is AggregateException aggregate &&
+                    aggregate.InnerExceptions is [IOException failure] && failure.Message == deadlineFailure)
+                {
+                    disposalRejected = true;
+                }
+            }
+            Require(disposalRejected && sampler.ObserverAbsent, "Disposal must close the observers and retain the offline deadline failure.");
         });
         Check("offline-cumulative-full-phase-admission", path =>
         {
