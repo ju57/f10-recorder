@@ -233,6 +233,7 @@ internal static partial class ReplayCalibrationRun
             Require(sameCapturePresentationOwner.AllocatedBytes<=32_000_000,"Native reference metadata reserve32MB");
         }
         var presentation=presentationBinding==null?null:CalibrationPresentationReference.ReadClosed(sourceCell,epoch,frequency,presentationBinding.Hash,presentationBinding.Spec);
+        string presentationMethod=presentationBinding?.Spec.Method??"GDI-Refresh-DwmFlush-v1";
         if(presentation!=null)
         {
             var requested=CalibrationPresentationReference.ReadJson<PresentationStart>(Path.Combine(sourceCell,CalibrationPresentationReference.RequestName));
@@ -261,11 +262,12 @@ internal static partial class ReplayCalibrationRun
             double actual=source.FirstVideo+n/60d, low=(paint[1]-epoch)/frequency, high=(paint[2]-epoch)/frequency;
             visualHalf=Math.Max(visualHalf,(high-low)/2);
             uncertainty=SameReferenceUncertainty(presentation!=null,bridge,clockBracket,visualHalf,interpolationHalf,frequency);
-            double residual=actual-(presentation==null?(low+high)/2:(presentation.Birth(source.Ids[n]).Present-epoch)/frequency);
-            sourceVisualError=Math.Max(sourceVisualError,Math.Abs(residual));
-            visualMinimum=Math.Min(visualMinimum,residual);visualMaximum=Math.Max(visualMaximum,residual);
+            double gdiResidual=actual-(low+high)/2;
+            var (minimum,maximum)=presentation==null?(gdiResidual,gdiResidual):presentation.Birth(source.Ids[n]).ResidualBounds(actual,epoch,frequency);
+            sourceVisualError=Math.Max(sourceVisualError,Math.Max(Math.Abs(minimum),Math.Abs(maximum)));
+            visualMinimum=Math.Min(visualMinimum,minimum);visualMaximum=Math.Max(visualMaximum,maximum);
         }
-        Write(Path.Combine(oracle,"source-presentation-diagnostic.json"),new{primaryMethod=presentation==null?"GDI-Refresh-DwmFlush-v1":PresentationMethod.Identity,
+        Write(Path.Combine(oracle,"source-presentation-diagnostic.json"),new{primaryMethod=presentationMethod,
             gdiProxyFailedFrames,meaning="Original GDI proxy results retained;native presentation is a new independent content reference,not recorder acquire-time attribution or old-C00 acceptance."});
         var sourcePcm=SamePcm(source.AudioPath); var checks=new List<ReplaySameCaptureOutputCheck>();
         sampler.EndOffline();sourcePhase=false;
@@ -320,7 +322,7 @@ internal static partial class ReplayCalibrationRun
                 conservativeRelativeAvBound=SameAvBound(visualMinimum,visualMaximum,audioMinimum,audioMaximum,uncertainty)});
             } finally { sampler.EndOffline(); }
         }
-        Write(Path.Combine(oracle,"report.json"),new{policy=CalibrationSourceReference.Policy,relativeAvMethod=SameRelativeAvMethod,presentationMethod=presentation==null?"GDI-Refresh-DwmFlush-v1":PresentationMethod.Identity,source.Root,source.EvidenceHash,leadingZeroPositionRows=leadingZero,outputs=checks,seconds=watch.Elapsed.TotalSeconds,
+        Write(Path.Combine(oracle,"report.json"),new{policy=CalibrationSourceReference.Policy,relativeAvMethod=SameRelativeAvMethod,presentationMethod,source.Root,source.EvidenceHash,leadingZeroPositionRows=leadingZero,outputs=checks,seconds=watch.Elapsed.TotalSeconds,
             meaning="Measured source render-clock and compositor relation, then all-output source identity and absolute unique audio IDs. No fitted output offset, physical DAC/scanout, soak, game or ordinary Saved acceptance."});
         return new(source.Root,source.EvidenceHash,checks.ToArray(),watch.Elapsed.TotalSeconds,HashFile(Path.Combine(oracle,"report.json")));
         } finally { if(sourcePhase)sampler.EndOffline(); }

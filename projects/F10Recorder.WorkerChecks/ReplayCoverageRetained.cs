@@ -119,7 +119,7 @@ internal static partial class ReplayCalibrationRun
             using var reference=JsonDocument.Parse(File.ReadAllBytes(Path.Combine(sourceCell,"source-reference-binding.json")));
             if(presentationBinding!=null)
             {
-                CalibrationPresentationIntegration.ValidateBinding(sourceCell,reference.RootElement.GetProperty("presentation"));
+                CalibrationPresentationIntegration.ValidateBinding(sourceCell,reference.RootElement.GetProperty("presentation"),presentationBinding.Spec);
                 CalibrationPresentationIntegration.ValidateRetainedMethod(presentationBinding,
                     CalibrationPresentationReference.ReadJson<PresentationClosure>(Path.Combine(sourceCell,CalibrationPresentationReference.ClosureName)));
             }

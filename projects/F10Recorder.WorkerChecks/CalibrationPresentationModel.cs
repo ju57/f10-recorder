@@ -5,7 +5,11 @@ using System.Text.Json;
 namespace F10Recorder;
 
 record PresentationRow(long Ordinal,int Id,long Present,long Before,long After,uint Accumulated,bool Coalesced,bool Protected,bool Released);
-record PresentationBirth(int Id,long Present);
+record PresentationBirth(int Id,long Present,long EarliestPresent)
+{
+    internal (double Minimum,double Maximum) ResidualBounds(double actual,double epoch,double frequency)
+        =>(actual-(Present-epoch)/frequency,actual-(EarliestPresent-epoch)/frequency);
+}
 
 // Future production caller must feed only rows created while owning the SAME
 // DXGI frame-info/texture and release it before committing the row. Pure here.
@@ -14,14 +18,19 @@ sealed class PresentationTimeline
     readonly Dictionary<int,PresentationBirth> births=[];
     readonly Dictionary<int,PresentationBirth> nextBirths=[];
     readonly long frequency;
+    readonly bool allowAdjacentTransition;
     long ordinal,present,lastAfter;
     int? id;
     int transitions;
     bool failed,complete;
     public bool Ready=>!failed&&transitions>=2;
     public PresentationBirth Birth(int value)=>births[value];
-    public PresentationTimeline(long frequency)
-    { if(frequency<=0)throw new IOException("Positive native QPC frequency required");this.frequency=frequency; }
+    public PresentationTimeline(long frequency,bool allowAdjacentTransition=false)
+    {
+        if(frequency<=0)throw new IOException("Positive native QPC frequency required");
+        this.frequency=frequency;
+        this.allowAdjacentTransition=allowAdjacentTransition;
+    }
     void Require(bool condition,string error)
     { if(!condition){failed=true;throw new IOException(error);} }
     public void Add(PresentationRow row)
@@ -42,14 +51,13 @@ sealed class PresentationTimeline
             births.Clear();nextBirths.Clear();transitions=0;
             id=row.Id;present=row.Present;return;
         }
-        // v5 is restricted to the pinned forward-only/no-wrap fixture: equal IDs
-        // cannot hide a marker transition. Keep its ORIGINAL birth and next link.
-        Require(bootstrap||row.Accumulated==1||row.Id==id,"Unobserved/coalesced marker transition cannot qualify");
+        // The pinned forward-only/no-wrap fixture cannot hide another marker
+        // between adjacent IDs. The two observed presents bound the new birth.
+        bool boundedTransition=allowAdjacentTransition&&Ready&&row.Accumulated==2&&id.HasValue&&row.Id==id.Value+1;
+        Require(bootstrap||row.Accumulated==1||row.Id==id||boundedTransition,"Unobserved/coalesced marker transition cannot qualify");
         if(!bootstrap&&row.Id!=id)
         {
-            var birth=new PresentationBirth(row.Id,row.Present);
-            // A paint may never be presented. Native AccumulatedFrames==1
-            // proves no missed DESKTOP image; link to next ACTUAL observed ID.
+            var birth=new PresentationBirth(row.Id,row.Present,boundedTransition?present:row.Present);
             if(births.ContainsKey(id!.Value))nextBirths.Add(id.Value,birth);
             births.Add(row.Id,birth);transitions++;
         }
@@ -65,7 +73,9 @@ sealed class PresentationTimeline
         Require(haveCurrent&&haveNext,"Current and next independently observed presentation required");
         double tolerance=frequency*(1d/60+bridgeSeconds);
         Require(double.IsFinite(tolerance),"Finite original one-frame+bridge tolerance required");
-        Require(sourceQpc>=current!.Present-tolerance&&sourceQpc<=next!.Present+tolerance,"Source picture outside unchanged one-frame+bridge presentation bounds");
+        // Use the most restrictive edge of each birth interval so the original
+        // tolerance holds for every possible presentation time in the interval.
+        Require(sourceQpc>=current!.Present-tolerance&&sourceQpc<=next!.EarliestPresent+tolerance,"Source picture outside unchanged one-frame+bridge presentation bounds");
     }
 }
 

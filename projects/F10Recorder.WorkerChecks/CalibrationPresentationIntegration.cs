@@ -58,16 +58,16 @@ internal static class CalibrationPresentationIntegration
         while(!System.IO.File.Exists(readyPath))
         {health();if(exited()||watch.Elapsed.TotalSeconds>binding.Spec.ReadySeconds||GetForegroundWindow()!=hwnd)throw new IOException("Independent presentation Ready deadline/foreground failure before recorder start");Thread.Sleep(25);}
         var ready=CalibrationPresentationReference.ReadJson<PresentationReady>(readyPath);
-        if(ready.Request!=request||ready.MethodHash!=binding.Hash||ready.Method!=PresentationMethod.Identity||ready.Frequency!=Stopwatch.Frequency
+        if(ready.Request!=request||ready.MethodHash!=binding.Hash||ready.Method!=binding.Spec.Method||ready.Frequency!=Stopwatch.Frequency
             ||ready.ReadyQpc<request.RequestedQpc||ready.ReadyQpc>Stopwatch.GetTimestamp()||ready.DeviceName!=binding.Spec.DeviceName
             ||ready.Left!=binding.Spec.Left||ready.Top!=binding.Spec.Top||ready.Width!=binding.Spec.Width||ready.Height!=binding.Spec.Height)
             throw new IOException("Independent presentation Ready identity/output/clock mismatch");
     }
-    internal static object HashBinding(string sourceCell)
-        =>new {method=PresentationMethod.Identity,files=Files.ToDictionary(n=>n,n=>Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(CalibrationPresentationReference.ReadBounded(System.IO.Path.Combine(sourceCell,n),n==CalibrationPresentationReference.TraceName?20971520:16384))))};
-    internal static void ValidateBinding(string sourceCell,JsonElement binding)
+    internal static object HashBinding(string sourceCell,PresentationMethod spec)
+        =>new {method=spec.Method,files=Files.ToDictionary(n=>n,n=>Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(CalibrationPresentationReference.ReadBounded(System.IO.Path.Combine(sourceCell,n),n==CalibrationPresentationReference.TraceName?20971520:16384))))};
+    internal static void ValidateBinding(string sourceCell,JsonElement binding,PresentationMethod spec)
     {
-        if(binding.GetProperty("method").GetString()!=PresentationMethod.Identity)throw new IOException("Native presentation binding method mismatch");
+        if(binding.GetProperty("method").GetString()!=spec.Method)throw new IOException("Native presentation binding method mismatch");
         var files=binding.GetProperty("files");
         if(!files.EnumerateObject().Select(p=>p.Name).ToHashSet().SetEquals(Files))throw new IOException("Exact immutable presentation reference readset required");
         foreach(var name in Files)

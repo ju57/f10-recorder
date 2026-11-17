@@ -143,6 +143,12 @@ internal static partial class ReplayCalibrationRun
         foreach(double frequency in new[]{1000000d,10000000d,1000000000d})
             Check("native-U-retains-one-full-QPC-tick-"+frequency,Math.Abs(SameReferenceUncertainty(true,ub,uc,0,ui,frequency)-SameReferenceUncertainty(false,ub,uc,0,ui,frequency)-1d/frequency)<1e-16);
         double currentU=NativeU(.0125);
+        var boundedBirth=new PresentationBirth(103,10080000,10000000);
+        var (minimumResidual,maximumResidual)=boundedBirth.ResidualBounds(1+.05-currentU+.001,0,uf);
+        double estimatedResidual=(minimumResidual+maximumResidual)/2;
+        Check("adjacent-presentation-residual-preserves-50ms-av-bound",
+            SameAvBound(estimatedResidual,estimatedResidual,0,0,currentU)<.05
+            &&SameAvBound(minimumResidual,maximumResidual,0,0,currentU)>.05);
         Check("native-U-retains-bridge",Math.Abs(SameReferenceUncertainty(true,ub+.001,uc,.0125,ui,uf)-currentU-.001)<1e-16);
         Check("native-U-retains-render-clock-bracket",Math.Abs(SameReferenceUncertainty(true,ub,uc+.001,.0125,ui,uf)-currentU-.001)<1e-16);
         Check("native-U-retains-interpolation",Math.Abs(SameReferenceUncertainty(true,ub,uc,.0125,ui+.001,uf)-currentU-.001)<1e-16);

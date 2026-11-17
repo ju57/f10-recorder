@@ -138,7 +138,39 @@ internal static class CalibrationPresentationMetadataChecks
         methodNode=JsonSerializer.SerializeToNode(spec).AsObject();methodNode.Remove("MarkerTransitionScope");ReadMethod(methodNode,false,"v5-method-reader-rejects-missing-transition-policy");
         methodNode["MarkerTransitionScope"]="arbitrary-content;any-gap";ReadMethod(methodNode,false,"v5-method-reader-rejects-wrong-transition-policy");
         methodNode=JsonSerializer.SerializeToNode(spec).AsObject();methodNode["Method"]="independent-desktop-presentation-interval-v4";ReadMethod(methodNode,false,"v5-method-reader-rejects-v4");
-        Reset();Bound();var result=new{kind="generated-v5-fixed-fixture-closed-reference-parser-controls-v1",count=cases.Count,cases,
+        var adjacent=spec with{Method=PresentationMethod.AdjacentIntervalIdentity,MarkerTransitionScope=PresentationMethod.AdjacentIntervalMarkerScope};
+        var adjacentNode=JsonSerializer.SerializeToNode(adjacent).AsObject();
+        ReadMethod(adjacentNode,true,"v6-method-reader-requires-explicit-interval-policy");
+        string adjacentHash=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(methodPath)));
+        ReadMethod(JsonSerializer.SerializeToNode(adjacent with{MarkerTransitionScope=spec.MarkerTransitionScope}).AsObject(),false,"v6-cannot-use-v5-policy");
+        ReadMethod(JsonSerializer.SerializeToNode(spec with{MarkerTransitionScope=adjacent.MarkerTransitionScope}).AsObject(),false,"v5-cannot-use-v6-policy");
+        string adjacentTrace=trace.Replace("1301,1,0,1,1","1301,2,0,1,1",StringComparison.Ordinal);
+        Reset();Trace(adjacentTrace);
+        Need("v5-closed-reader-rejects-adjacent-ac2",Reject(()=>CalibrationPresentationReference.ReadClosed(root,1260,1000,hash,spec)));
+        Change(CalibrationPresentationReference.RequestName,n=>n["MethodHash"]=adjacentHash);
+        foreach(string name in new[]{CalibrationPresentationReference.ReadyName,CalibrationPresentationReference.ClosureName})
+            Change(name,n=>{n["Method"]=adjacent.Method;n["MethodHash"]=adjacentHash;n["Request"]["MethodHash"]=adjacentHash;});
+        var bounded=CalibrationPresentationReference.ReadClosed(root,1260,1000,adjacentHash,adjacent);
+        Need("v6-closed-reader-bounds-adjacent-birth",bounded.Birth(103) is {EarliestPresent:1200,Present:1300});
+        double tolerance=1000*(1d/60+.002);
+        bounded.CheckFrame(102,1200+tolerance,.002);
+        bounded.CheckFrame(103,1300-tolerance,.002);
+        Need("v6-picture-edges-are-inclusive",true);
+        Need("v6-previous-picture-rejects-one-tick-after-earliest-next-plus-tolerance",Reject(()=>bounded.CheckFrame(102,1201+tolerance,.002)));
+        var earlierPicture=CalibrationPresentationReference.ReadClosed(root,1260,1000,adjacentHash,adjacent);
+        Need("v6-new-picture-rejects-one-tick-before-latest-current-minus-tolerance",Reject(()=>earlierPicture.CheckFrame(103,1299-tolerance,.002)));
+        Need("v6-ready-and-closure-cannot-be-read-as-v5",Reject(()=>CalibrationPresentationReference.ReadClosed(root,1260,1000,adjacentHash,spec)));
+        var referenceBinding=JsonSerializer.SerializeToElement(CalibrationPresentationIntegration.HashBinding(root,adjacent));
+        CalibrationPresentationIntegration.ValidateBinding(root,referenceBinding,adjacent);
+        Need("v6-closed-reference-binding-does-not-validate-as-v5",Reject(()=>CalibrationPresentationIntegration.ValidateBinding(root,referenceBinding,spec)));
+        var closedAdjacent=CalibrationPresentationReference.ReadJson<PresentationClosure>(Path.Combine(root,CalibrationPresentationReference.ClosureName));
+        Need("v6-retained-method-matches-original-only",!Reject(()=>CalibrationPresentationIntegration.ValidateRetainedMethod(new("generated-only",adjacentHash,adjacent),closedAdjacent))
+            &&Reject(()=>CalibrationPresentationIntegration.ValidateRetainedMethod(new("generated-only",adjacentHash,spec),closedAdjacent)));
+        Trace(adjacentTrace.Replace("1301,2,0,1,1","1301,3,0,1,1",StringComparison.Ordinal));
+        Need("v6-closed-reader-rejects-changed-ac3",Reject(()=>CalibrationPresentationReference.ReadClosed(root,1260,1000,adjacentHash,adjacent)));
+        Trace(adjacentTrace.Replace("4,103,","4,104,",StringComparison.Ordinal));
+        Need("v6-closed-reader-rejects-skipped-ac2",Reject(()=>CalibrationPresentationReference.ReadClosed(root,1260,1000,adjacentHash,adjacent)));
+        Reset();Bound();var result=new{kind="generated-fixed-fixture-closed-reference-parser-controls-v2",count=cases.Count,cases,
             seconds=watch.Elapsed.TotalSeconds,fixtureFiles=baseline.Count,fixtureBytes=baseline.Values.Sum(x=>x.Length),children=0,
             deviceCalls=0,gpuCalls=0,uiCalls=0,audioCalls=0,codecCalls=0,captures=0,nativeFileSinkCalls=0,
             generatedOnly=true,mediaAcceptance=false,guardPlacement="RetainedCoveragePair validates accepted native closure method immediately after reference binding, before selection copying/export/decode"};

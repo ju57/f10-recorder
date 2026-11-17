@@ -35,18 +35,20 @@ internal static class WorkerChecks
         if(args is ["--replay-presentation-offline-checks",var presentationChecks])return CalibrationPresentationChecks.Run(presentationChecks);
         if(args is ["--replay-presentation-protection-plan"]){Console.WriteLine("Generated v5 fixed-monotonic-H03 same-ID/protection-policy controls only;30s/256MiB/2048handles/1MiB fresh report;no native/device/desktop/audio/UI/codec/children. --replay-presentation-protection-checks <fresh-report>.");return 0;}
         if(args is ["--replay-presentation-protection-checks",var protectionChecks])return CalibrationPresentationChecks.RunProtection(protectionChecks);
-        if(args is ["--replay-presentation-metadata-plan"]){Console.WriteLine("Generated v5 fixed-fixture flagged metadata fixtures through actual ReadClosed parser, explicit method reader and early retained method guard;one helper30s/512MiB,zero children/GPU/UI/audio/codec/capture,<=1MiB/64files fresh ignored root. Reads its generated9-file reference plus generated method policy,never original media;no NativeFileSink/native ownership test. --replay-presentation-metadata-checks <fresh-root>. Exact source/route review before invocation.");return 0;}
+        if(args is ["--replay-presentation-metadata-plan"]){Console.WriteLine("Generated v5/v6 fixed-fixture metadata through actual ReadClosed parser, explicit method reader and early retained method guard;one helper30s/512MiB,zero children/GPU/UI/audio/codec/capture,<=1MiB/64files fresh ignored root. Reads its generated9-file reference plus generated method policy,never original media;no NativeFileSink/native ownership test. --replay-presentation-metadata-checks <fresh-root>. Exact source/route review before invocation.");return 0;}
         if(args is ["--replay-presentation-metadata-checks",var presentationMetadata])return CalibrationPresentationMetadataChecks.Run(presentationMetadata);
         if(args is ["--replay-presentation-files-plan"]){Console.WriteLine("Separate NOT-YET-ADMITTED native FILE fixtures:one helper30swork/60swhole,512MiB/4096handles,<=1MiB fresh ignored output,60GBfloor;guarded trace write/flush/hash,write/rename denial,real partial-publish polling with delete-sharing observer. Zero desktop/device/UI/audio/codec/capture. --replay-presentation-files-checks <fresh-root>. Independent exact source/effects/launcher review required before execution.");return 0;}
         if(args is ["--replay-presentation-files-checks",var presentationFiles])return CalibrationPresentationFileChecks.Run(presentationFiles);
         if(args is ["--replay-presentation-method-plan",var methodPath,var methodHash])
         {
             var method=PresentationMethod.Read(methodPath,methodHash);
-            Console.WriteLine(JsonSerializer.Serialize(new{method,methodSha256=methodHash,primaryFreshness=PresentationMethod.Identity,
+            Console.WriteLine(JsonSerializer.Serialize(new{method,methodSha256=methodHash,primaryFreshness=method.Method,
                 gdi="Retained diagnostic comparisons;not old-C00 acceptance",extraThreads=1,extraD3D11Devices=1,extraDuplicationClients=1,
                 roiWidth=576,roiHeight=48,bytesPerReadback=110592,maximumRoiBytes=16588800000L,maximumTraceBytes=20971520,immutableReferenceFiles=25,
                 referenceReserveBytes=32000000,originalEndpointFrames=1,avBoundSeconds=.05,sharedUncertaintiesRetained=true,extraNativeQpcTicks=1,
-                nativeReferenceUncertainty="One full QPC tick;GDI midpoint half-width diagnostic only;legacy GDI retains its width",
+                nativeReferenceUncertainty=method.AllowsAdjacentTransition
+                    ?"Conservative visual residual endpoints for uncertain births, plus one full QPC tick; GDI midpoint width is diagnostic"
+                    :"One full QPC tick;GDI midpoint half-width diagnostic only;legacy GDI retains its width",
                 referenceQualificationPhase=CalibrationReferencePhase.Identity,preAdmissionDiagnosticMaximumBytes=2113536,audioStartupInsideReadySeconds=5,
                 previewNativeCalls=0,mediaAdmitted=false,extraAcquisitionNeedsDecision=true}));return 0;
         }

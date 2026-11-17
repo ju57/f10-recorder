@@ -10,8 +10,11 @@ internal sealed record PresentationMethod(string Method,uint OutputIndex,string 
     int MaximumRows=150000,long MaximumBytes=20971520,int ReadySeconds=10,int JoinMilliseconds=5000,int LifetimeSeconds=700)
 {
     internal const string Identity="independent-desktop-presentation-interval-v5",Role="source-presentation-method";
+    internal const string AdjacentIntervalIdentity="independent-desktop-presentation-interval-v6";
     internal const string MarkerProtectionScope="fixture-marker-roi;global-mask-diagnostic-v1";
     internal const string MonotonicMarkerScope="fixed-H03-source-reference;forward-only-no-divisor-no-wrap;coalesced-same-id-only-v1";
+    internal const string AdjacentIntervalMarkerScope="fixed-H03-source-reference;forward-only-no-divisor-no-wrap;coalesced-adjacent-two-interval-v1";
+    internal bool AllowsAdjacentTransition=>Method==AdjacentIntervalIdentity;
     internal static PresentationMethod Read(string path,string hash)
     {
         byte[] bytes=CalibrationPresentationReference.ReadBounded(path,8192);
@@ -21,7 +24,8 @@ internal sealed record PresentationMethod(string Method,uint OutputIndex,string 
     }
     internal static void Validate(PresentationMethod p)
     {
-        if(p==null||p.Method!=Identity||p.ProtectionScope!=MarkerProtectionScope||p.MarkerTransitionScope!=MonotonicMarkerScope||p.OutputIndex!=0||string.IsNullOrWhiteSpace(p.DeviceName)||!p.DeviceName.StartsWith(@"\\.\DISPLAY",StringComparison.Ordinal)
+        if(p==null||(p.Method,p.MarkerTransitionScope) is not ((Identity,MonotonicMarkerScope) or (AdjacentIntervalIdentity,AdjacentIntervalMarkerScope))
+            ||p.ProtectionScope!=MarkerProtectionScope||p.OutputIndex!=0||string.IsNullOrWhiteSpace(p.DeviceName)||!p.DeviceName.StartsWith(@"\\.\DISPLAY",StringComparison.Ordinal)
             ||p.Left!=0||p.Top!=0||p.Width!=1920||p.Height!=1080||p.MaximumRows!=150000||p.MaximumBytes!=20971520||p.ReadySeconds!=10||p.JoinMilliseconds!=5000||p.LifetimeSeconds!=700)
             throw new IOException("Exact finite presentation method/output required");
     }
@@ -31,7 +35,7 @@ internal sealed record PresentationMethod(string Method,uint OutputIndex,string 
         if(label!="H03"||!sourceReference||lifetimeSeconds!=expectedLifetime
             ||CalibrationPattern.MaximumAnimatedFrame(lifetimeSeconds)>=CalibrationPattern.ReferenceSourceIdRange
             ||checked(24680*256+CalibrationPattern.MaximumAnimatedFrame(lifetimeSeconds))>=0x1000000)
-            throw new IOException("V5 requires the fixed monotonic H03/no-divisor/no-wrap source-reference fixture");
+            throw new IOException("The independent presentation method requires the fixed monotonic H03/no-divisor/no-wrap source-reference fixture");
     }
 }
 internal sealed record PresentationStart(string MethodHash,string Label,int Pid,long Hwnd,string Nonce,long RequestedQpc);
@@ -109,7 +113,7 @@ internal sealed class CalibrationPresentationReference:IDisposable
         try
         {
             initialCpu=metrics().Cpu;if(!double.IsFinite(initialCpu)||initialCpu<0)throw new IOException("Initial fixture CPU counter invalid");initialMetrics=true;
-            reader=factory();sink=sinkFactory();var timeline=new PresentationTimeline(Stopwatch.Frequency);
+            reader=factory();sink=sinkFactory();var timeline=new PresentationTimeline(Stopwatch.Frequency,spec.AllowsAdjacentTransition);
             while(!stop)
             {
                 if(seconds()>spec.LifetimeSeconds)throw new IOException("Presentation reference lifetime exceeded");
@@ -185,19 +189,19 @@ internal sealed class CalibrationPresentationReference:IDisposable
         var actualRelease=handoff.RootElement.GetProperty("release").Deserialize<CalibrationForegroundRelease>();
         if(c.MethodHash!=expectedMethodHash||start.MethodHash!=expectedMethodHash||c.Request!=start||ready.Request!=start||ready.MethodHash!=expectedMethodHash
             ||start.Pid!=foreground.Pid||start.Hwnd!=foreground.Hwnd||start.Label!=foreground.Label||start.Nonce!=foreground.Nonce||start.Label!="H03"||string.IsNullOrWhiteSpace(start.Nonce)
-            ||ready.Method!=PresentationMethod.Identity||start.Pid<=0||start.Hwnd<=0||start.RequestedQpc<=0||start.RequestedQpc>ready.ReadyQpc||c.ReadyQpc!=ready.ReadyQpc||ready.Frequency!=frequency||ready.DeviceName!=spec.DeviceName||c.DeviceName!=spec.DeviceName
+            ||ready.Method!=spec.Method||start.Pid<=0||start.Hwnd<=0||start.RequestedQpc<=0||start.RequestedQpc>ready.ReadyQpc||c.ReadyQpc!=ready.ReadyQpc||ready.Frequency!=frequency||ready.DeviceName!=spec.DeviceName||c.DeviceName!=spec.DeviceName
             ||c.Left!=spec.Left||c.Top!=spec.Top||c.Width!=spec.Width||c.Height!=spec.Height||ready.Left!=spec.Left||ready.Top!=spec.Top||ready.Width!=spec.Width||ready.Height!=spec.Height
             ||fixture.RootElement.GetProperty("pid").GetInt32()!=start.Pid||fixture.RootElement.GetProperty("hwnd").GetInt64()!=start.Hwnd||actualRelease!=foreground
             ||admission.RootElement.GetProperty("fixturePid").GetInt32()!=start.Pid||admission.RootElement.GetProperty("hwnd").GetInt64()!=start.Hwnd
             ||!admission.RootElement.GetProperty("visible").GetBoolean()||!admission.RootElement.GetProperty("foreground").GetBoolean()
             ||exited.RootElement.GetProperty("pid").GetInt32()!=start.Pid||!exited.RootElement.GetProperty("exited").GetBoolean()||exited.RootElement.GetProperty("forced").GetBoolean()||exited.RootElement.GetProperty("exit").GetInt32()!=0)
             throw new IOException("Pinned presentation method/output/foreground/Ready identity changed");
-        if(c.Method!=PresentationMethod.Identity||!c.Successful||c.Error!=null||c.Errors is not {Length:0}||c.ResourceError!=null||c.ResourceMeaning!=ResourceMeaning||c.ProcessCpuMilliseconds is not >=0||!double.IsFinite(c.ProcessCpuMilliseconds.Value)||c.ProcessPeakWorkingSetBytes is not >0||!double.IsFinite(c.Seconds)||c.Seconds<0||c.Seconds>700||!c.NativeOwnersClosed||!c.WriterClosed||!c.ThreadBodyCompleted||!c.ThreadJoined||c.Frequency!=frequency||c.ReadyQpc>epoch
+        if(c.Method!=spec.Method||!c.Successful||c.Error!=null||c.Errors is not {Length:0}||c.ResourceError!=null||c.ResourceMeaning!=ResourceMeaning||c.ProcessCpuMilliseconds is not >=0||!double.IsFinite(c.ProcessCpuMilliseconds.Value)||c.ProcessPeakWorkingSetBytes is not >0||!double.IsFinite(c.Seconds)||c.Seconds<0||c.Seconds>700||!c.NativeOwnersClosed||!c.WriterClosed||!c.ThreadBodyCompleted||!c.ThreadJoined||c.Frequency!=frequency||c.ReadyQpc>epoch
             ||c.Acquired!=c.Released||c.Acquired!=c.Produced||c.Produced!=c.Committed||c.Committed!=c.Rows||c.Rows<=2||c.Rows>150000||c.Bytes<=0||c.Bytes>20971520)
             throw new IOException("Actual presentation closure/clock/row completeness required");
         string path=Path.Combine(sourceCell,TraceName);byte[] bytes=ReadBounded(path,20971520);
         if(bytes.Length!=c.Bytes||Convert.ToHexString(SHA256.HashData(bytes))!=c.TraceHash)throw new IOException("Independent presentation trace bytes changed");
-        var t=new PresentationTimeline(c.Frequency);var lines=Encoding.UTF8.GetString(bytes).Split('\n',StringSplitOptions.RemoveEmptyEntries);
+        var t=new PresentationTimeline(c.Frequency,spec.AllowsAdjacentTransition);var lines=Encoding.UTF8.GetString(bytes).Split('\n',StringSplitOptions.RemoveEmptyEntries);
         if(lines.Length!=c.Rows+1||lines[0]!="ordinal,id,present,before,after,accumulated,coalesced,protected,released")throw new IOException("Exact native trace rowset");
         foreach(var line in lines.Skip(1))
         {

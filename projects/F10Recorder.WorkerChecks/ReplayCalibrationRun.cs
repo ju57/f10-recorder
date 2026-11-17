@@ -2523,10 +2523,11 @@ internal static partial class ReplayCalibrationRun
                 {
                     string cell = Path.Combine(plan.Root, "H03");
                     var inputs = JsonSerializer.Deserialize<ReplayCompletedInputDigest[]>(File.ReadAllBytes(Path.Combine(cell, "completed-input-mapping.json")));
+                    var presentationBinding = PresentationPlanBinding.For(plan);
                     var reference = new { policy = HashFile(Path.Combine(cell, "source-reference-policy.json")),
                         audio = HashFile(Path.Combine(cell, "source-render-clock.csv")), video = HashFile(Path.Combine(cell, "source-paints.csv")),
                         costs = HashFile(Path.Combine(cell,"source-reference-costs.json")),
-                        presentation=PresentationPlanBinding.For(plan)==null?null:CalibrationPresentationIntegration.HashBinding(cell) };
+                        presentation=presentationBinding==null?null:CalibrationPresentationIntegration.HashBinding(cell,presentationBinding.Spec) };
                     Write(Path.Combine(cell, "source-reference-binding.json"), reference);
                     var manifest = new ReplaySameCaptureManifest(ReplayCalibrationCatalog.SameCaptureRevision, confirmation.ConfirmationHash,
                         confirmation.Packet.AcquisitionIdentity, confirmation.Packet.SelectionHash, confirmation.Packet.OutputStart,

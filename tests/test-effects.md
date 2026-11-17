@@ -20,11 +20,23 @@ raw row/counter/flag remains. This is a prospective method amendment: offline
 preparation does not authorize v5 native use, another acquisition or relabeling
 failed v4 evidence.
 
+The prospective v6 method uses the distinct identity
+`independent-desktop-presentation-interval-v6` with
+`MarkerTransitionScope=fixed-H03-source-reference;forward-only-no-divisor-no-wrap;coalesced-adjacent-two-interval-v1`.
+For a post-Ready adjacent marker change with two accumulated desktop updates,
+the previous and current native presentation timestamps bound the transition.
+Each source picture must pass the existing one-frame-plus-bridge test for every
+time in that interval. The signed A/V calculation includes both residual
+endpoints and keeps the existing uncertainty terms and 50 ms threshold. The
+same fixture, protection scope, readset, and pre-Ready bootstrap apply. The
+method identity and hash bind the live observer, closed reader, and retained
+validation.
+
 The preserved pre-Ready bootstrap permits a coalesced image before computed Ready to
 restart only the unproved bootstrap after all ownership, ordinal, native-clock
 and backward-ID guards pass. All raw rows/flags remain. Two clean observed ID
-transitions must then prove Ready within the unchanged 10s deadline. Any
-changed-ID coalescence after Ready still fails. The closed parser replays this logic and
+transitions must then prove Ready within the unchanged 10s deadline. Under v5,
+changed-ID coalescence after Ready fails. The closed parser replays this logic and
 requires every prefix row's After at/before declared Ready and every subsequent
 row's Before at/after it. Prefix IDs without births cannot qualify source or
 output pictures; no captured frames are trimmed or substituted.
