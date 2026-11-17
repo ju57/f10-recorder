@@ -196,9 +196,7 @@ internal sealed class CalibrationPresentationReference:IDisposable
             ||!admission.RootElement.GetProperty("visible").GetBoolean()||!admission.RootElement.GetProperty("foreground").GetBoolean()
             ||exited.RootElement.GetProperty("pid").GetInt32()!=start.Pid||!exited.RootElement.GetProperty("exited").GetBoolean()||exited.RootElement.GetProperty("forced").GetBoolean()||exited.RootElement.GetProperty("exit").GetInt32()!=0)
             throw new IOException("Pinned presentation method/output/foreground/Ready identity changed");
-        if(c.Method!=spec.Method||!c.Successful||c.Error!=null||c.Errors is not {Length:0}||c.ResourceError!=null||c.ResourceMeaning!=ResourceMeaning||c.ProcessCpuMilliseconds is not >=0||!double.IsFinite(c.ProcessCpuMilliseconds.Value)||c.ProcessPeakWorkingSetBytes is not >0||!double.IsFinite(c.Seconds)||c.Seconds<0||c.Seconds>700||!c.NativeOwnersClosed||!c.WriterClosed||!c.ThreadBodyCompleted||!c.ThreadJoined||c.Frequency!=frequency||c.ReadyQpc>epoch
-            ||c.Acquired!=c.Released||c.Acquired!=c.Produced||c.Produced!=c.Committed||c.Committed!=c.Rows||c.Rows<=2||c.Rows>150000||c.Bytes<=0||c.Bytes>20971520)
-            throw new IOException("Actual presentation closure/clock/row completeness required");
+        ValidateClosure(c,spec,expectedMethodHash,epoch,frequency);
         string path=Path.Combine(sourceCell,TraceName);byte[] bytes=ReadBounded(path,20971520);
         if(bytes.Length!=c.Bytes||Convert.ToHexString(SHA256.HashData(bytes))!=c.TraceHash)throw new IOException("Independent presentation trace bytes changed");
         var t=new PresentationTimeline(c.Frequency,spec.AllowsAdjacentTransition);var lines=Encoding.UTF8.GetString(bytes).Split('\n',StringSplitOptions.RemoveEmptyEntries);
@@ -213,6 +211,16 @@ internal sealed class CalibrationPresentationReference:IDisposable
             t.Add(new(x[0],checked((int)x[1]),x[2],x[3],x[4],checked((uint)x[5]),x[6]==1,x[7]==1,x[8]==1));
         }
         t.Complete(true,true,true);return t;
+    }
+    internal static void ValidateClosure(PresentationClosure c,PresentationMethod spec,string expectedMethodHash,double epoch,double frequency)
+    {
+        if(c==null||c.Method!=spec.Method||c.MethodHash!=expectedMethodHash||!c.Successful||c.Error!=null||c.Errors is not {Length:0}
+            ||c.ResourceError!=null||c.ResourceMeaning!=ResourceMeaning||c.ProcessCpuMilliseconds is not >=0||!double.IsFinite(c.ProcessCpuMilliseconds.Value)
+            ||c.ProcessPeakWorkingSetBytes is not >0||!double.IsFinite(c.Seconds)||c.Seconds<0||c.Seconds>spec.LifetimeSeconds
+            ||!c.NativeOwnersClosed||!c.WriterClosed||!c.ThreadBodyCompleted||!c.ThreadJoined||c.Frequency!=frequency||c.ReadyQpc<=0||c.ReadyQpc>epoch
+            ||c.Acquired!=c.Released||c.Acquired!=c.Produced||c.Produced!=c.Committed||c.Committed!=c.Rows||c.Rows<=2||c.Rows>spec.MaximumRows
+            ||c.Bytes<=0||c.Bytes>spec.MaximumBytes)
+            throw new IOException("Actual presentation closure/clock/row completeness required");
     }
     static void ValidateFixtureEvidence(JsonElement fixture)
     {

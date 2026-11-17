@@ -10,6 +10,18 @@ internal static class CalibrationReferencePhase
 {
     internal const string Identity="after-validated-foreground-request-v1";
     internal const long PreAdmissionMaximumBytes=2097152;
+    internal static void RequireNormalFixtureExit((bool Forced,int Code) exit)
+    {
+        if(exit.Forced||exit.Code!=0)
+            throw new IOException("Fixture did not exit normally; source is not eligible.");
+    }
+    internal static void CloseBeforePairedExport(bool captureProducersAbsent,Func<(bool Forced,int Code)> close,Action verifyReference)
+    {
+        if(!captureProducersAbsent)
+            throw new IOException("Capture and audio must be drained before closing the source fixture.");
+        RequireNormalFixtureExit(close());
+        verifyReference();
+    }
     internal static byte[] DiagnosticSummaryBytes(object value)
     {byte[] bytes=JsonSerializer.SerializeToUtf8Bytes(value);if(bytes.Length>16384)throw new IOException("Diagnostic summary16KiB bound before write");return bytes;}
     internal sealed class TextBudget(long maximum)

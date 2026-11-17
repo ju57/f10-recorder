@@ -1314,12 +1314,36 @@ internal static partial class ReplayCalibrationRun
         Task<CaptureSession> create = null;
         bool runtimeOffline = false; int runtimePhases = 0; NativeEvidence nativeEvidence = null;
         bool captureClaimClosed = false;
+        bool fixtureForced = false;
         ReplayPairedSelectionLease pairedInputs = null;
         var cadence = plan.CompositeQualification ? new CalibrationMaintenanceCadence(TimeProvider.System) : null;
         var maintenanceIntervals = new List<object[]>();
         var validationContext = new CalibrationValidationWork.GuardContext();
         var validationObserverTimings = new List<CalibrationValidationWorkTiming>();
         var nativeRequests = new Dictionary<string, (ReplayExportRequest Request, bool Eligible, int Thread, long Started,int Linked,int Prepared)>(StringComparer.OrdinalIgnoreCase);
+        (bool Forced, int Code) CloseFixture()
+        {
+            var owned = fixture ?? throw new IOException("Owned source fixture is unavailable for closure.");
+            if (!owned.HasExited)
+            {
+                owned.CloseMainWindow();
+                if (!owned.WaitForExit(5000))
+                {
+                    fixtureForced = true;
+                    owned.Kill();
+                    Require(owned.WaitForExit(5000), "Fixture exit unconfirmed.");
+                }
+            }
+            int code = owned.ExitCode;
+            try
+            {
+                var closure = new { role = "fixture-exit", label, pid = owned.Id, startedUtc = owned.StartTime.ToUniversalTime(), exited = owned.HasExited, exit = code, forced = fixtureForced };
+                processes.Add(closure);
+                Write(Path.Combine(root, "fixture-exit.json"), closure);
+            }
+            finally { fixture = null; owned.Dispose(); }
+            return (fixtureForced, code);
+        }
         void ObserveNativeExport(ReplayExportRequest request)
         {
             Require(request.NativeFiles != null && request.NativeFiles.Eligible,
@@ -1805,8 +1829,18 @@ internal static partial class ReplayCalibrationRun
                     qualification = "pending-paired-and-independent-inspections", sample });
                 Require(cache != null && workerCase == null && ((IReplaySessionSource)capture).Stopped,
                     "Paired output collection requires the stopped original capture and its owned cache.");
-                string legacyRoot = Path.Combine(root, "legacy"); Directory.CreateDirectory(legacyRoot);
                 Require(pairedInputs != null, "Primary protected input ownership was not retained.");
+                if (independentPresentation != null)
+                {
+                    // Keep the live fixture through the primary save and recorder drain.
+                    // The paired export uses already protected source inputs.
+                    var clock = capture.AcquisitionClock;
+                    CalibrationReferencePhase.CloseBeforePairedExport(capture.CaptureProducerAbsent, CloseFixture, () =>
+                        CalibrationPresentationReference.ValidateClosure(
+                            CalibrationPresentationReference.ReadJson<PresentationClosure>(Path.Combine(root, CalibrationPresentationReference.ClosureName)),
+                            independentPresentation.Spec, independentPresentation.Hash, clock.QpcEpoch, clock.QpcFrequency));
+                }
+                string legacyRoot = Path.Combine(root, "legacy"); Directory.CreateDirectory(legacyRoot);
                 pairedInputs.PrepareForReplay(capture, () => sampler.Check());
                 if (SameCaptureQualification(plan))
                     pairedInputs.WriteCompletedProofMapping(Path.Combine(root, "completed-input-proof.json"), Path.Combine(root, "completed-input-mapping.json"), () => sampler.Check());
@@ -1959,12 +1993,8 @@ internal static partial class ReplayCalibrationRun
             Clean(() => {
                 if (fixture != null)
                 {
-                    bool forced = false;
-                    if (!fixture.HasExited) { fixture.CloseMainWindow(); if (!fixture.WaitForExit(5000)) { forced = true; fixture.Kill(); Require(fixture.WaitForExit(5000), "Fixture exit unconfirmed."); } }
-                    int code = fixture.ExitCode;
-                    var closure = new { role = "fixture-exit", label, pid = fixture.Id, startedUtc = fixture.StartTime.ToUniversalTime(), exited = fixture.HasExited, exit = code, forced };
-                    processes.Add(closure); Write(Path.Combine(root, "fixture-exit.json"), closure); fixture.Dispose();
-                    if (successful) Require(!forced && code == 0, "Fixture did not exit normally; source is not eligible.");
+                    var exit = CloseFixture();
+                    if (successful) CalibrationReferencePhase.RequireNormalFixtureExit(exit);
                 }
             });
             if (cadence != null) Clean(() => Write(Path.Combine(root, "maintenance-cadence.json"), new {

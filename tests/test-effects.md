@@ -32,6 +32,13 @@ same fixture, protection scope, readset, and pre-Ready bootstrap apply. The
 method identity and hash bind the live observer, closed reader, and retained
 validation.
 
+For a same-source confirmation with independent presentation, the controller
+joins the fixture after the primary save and confirmed capture/audio drain.
+Normal fixture exit and a complete observer closure precede the paired exact
+export. The 25 ms paint check runs through fixture closure, and the closed
+source oracle still checks current/next marker and audio coverage over the
+full selected inputs.
+
 The preserved pre-Ready bootstrap permits a coalesced image before computed Ready to
 restart only the unproved bootstrap after all ownership, ordinal, native-clock
 and backward-ID guards pass. All raw rows/flags remain. Two clean observed ID

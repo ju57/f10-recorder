@@ -180,6 +180,28 @@ internal static partial class ReplayCalibrationRun
         Check("phase-audio-failure-prevents-native",Rejected(()=>StartPhase(phaseRequest,()=> (true,true),()=>throw new IOException("Generated audio startup failure")))&&nativeStarts==0);
         int stateCalls=0;
         Check("phase-post-audio-foreground-loss-prevents-native",Rejected(()=>StartPhase(phaseRequest,()=> (true,++stateCalls==1)))&&nativeStarts==0&&stateCalls==2);
+        var fixtureSteps=new List<string>();
+        void StagePairedExport(bool drained,(bool Forced,int Code) exit,bool referenceClosed=true)
+        {
+            CalibrationReferencePhase.CloseBeforePairedExport(drained,
+                ()=>{fixtureSteps.Add("fixture exit");return exit;},
+                ()=>{fixtureSteps.Add("reference closure");if(!referenceClosed)throw new IOException("Generated incomplete source reference.");});
+            fixtureSteps.Add("paired export");
+        }
+        Check("paired-export-cannot-close-fixture-before-capture-and-audio-drain",
+            Rejected(()=>StagePairedExport(false,(false,0)))&&fixtureSteps.Count==0);
+        StagePairedExport(true,(false,0));
+        Check("paired-export-follows-normal-fixture-exit-and-reference-closure",
+            fixtureSteps.SequenceEqual(new[]{"fixture exit","reference closure","paired export"}));
+        foreach(var exit in new[]{(Forced:true,Code:0),(Forced:false,Code:1)})
+        {
+            fixtureSteps.Clear();
+            Check("paired-export-blocked-by-forced-or-failed-fixture-exit-"+exit,
+                Rejected(()=>StagePairedExport(true,exit))&&fixtureSteps.SequenceEqual(new[]{"fixture exit"}));
+        }
+        fixtureSteps.Clear();
+        Check("paired-export-blocked-by-incomplete-reference",
+            Rejected(()=>StagePairedExport(true,(false,0),false))&&fixtureSteps.SequenceEqual(new[]{"fixture exit","reference closure"}));
         var prePaint=new StringWriter();CalibrationReferencePhase.WritePaint(prePaint,1,1000,1026,1000,false);
         Check("wide-pre-admission-paint-retained-unqualified",prePaint.ToString().Contains("1,1000,1026",StringComparison.Ordinal));
         string budgetHeader="id,before_qpc,after_qpc"+Environment.NewLine,budgetRow="1,1000,1026"+Environment.NewLine;
