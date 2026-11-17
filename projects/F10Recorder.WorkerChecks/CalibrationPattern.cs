@@ -89,7 +89,11 @@ internal static class CalibrationPattern
             Bounds = Forms.Screen.PrimaryScreen.Bounds; TopMost = true; DoubleBuffered = true;
             Text = "F10 bounded storage calibration " + label;
             seed = label.StartsWith('T') ? 13579 : 24680;
-            texture = new Drawing.Bitmap(320, 180);
+            // The opaque v6 H03 texture painted faster in this format while
+            // producing identical pixels through the existing scaled draws.
+            texture = presentationBinding?.Spec.AllowsAdjacentTransition == true
+                ? new Drawing.Bitmap(320, 180, Drawing.Imaging.PixelFormat.Format32bppPArgb)
+                : new Drawing.Bitmap(320, 180);
             var random = new Random(seed);
             for (int y = 0; y < texture.Height; y++) for (int x = 0; x < texture.Width; x++)
                 texture.SetPixel(x, y, Drawing.Color.FromArgb(random.Next(256), random.Next(256), random.Next(256)));
