@@ -82,8 +82,18 @@ internal sealed class ReplayGuardDirectory : IDisposable
     static void Status(int value){if(value<0)throw new Win32Exception(checked((int)RtlNtStatusToDosError(value)));}
     static string Volume(SafeFileHandle file)
     {
-        var name=new StringBuilder(32768);uint count=GetFinalPathNameByHandle(file,name,(uint)name.Capacity,1);
-        if(count==0||count>=name.Capacity)throw new Win32Exception();
+        const int maxCapacity = 32768;
+        var name = new StringBuilder(256);
+        while (true)
+        {
+            uint count = GetFinalPathNameByHandle(file, name, (uint)name.Capacity, 1);
+            if (count == 0) throw new Win32Exception();
+            if (count < name.Capacity) break;
+            // An insufficient-buffer result includes the NUL. Retain the original path limit.
+            if (count > maxCapacity || name.Capacity == maxCapacity)
+                throw new Win32Exception(206); // ERROR_FILENAME_EXCED_RANGE
+            name = new StringBuilder(Math.Max((int)count, Math.Min(name.Capacity * 2, maxCapacity)));
+        }
         string path=name.ToString();int end=path.IndexOf("}\\",StringComparison.Ordinal);
         if(!path.StartsWith(@"\\?\Volume{",StringComparison.OrdinalIgnoreCase)||end<0)throw new IOException("Unknown native volume name.");
         return path[..(end+2)];

@@ -26,6 +26,20 @@ internal static class RootedOperationChecks
         using var file=CreateFile(path,0x40000000,7,IntPtr.Zero,3,0x02200000,IntPtr.Zero);if(file.IsInvalid||!DeviceIoControl(file,0x900AC,data,8,IntPtr.Zero,0,out _,IntPtr.Zero))throw new Win32Exception();
     }
     static ReplayGuardDirectory Root(string path)=>new(path,Native.DirectoryIdentity(path),ReplayStorage.ObserveCapacity(path).Volume);
+    internal static void CheckLongVolumePath(string root)
+    {
+        string nested = Path.Combine(root, new string('a', 120), new string('b', 120), "long-volume-path");
+        Directory.CreateDirectory(nested);
+        string file = Path.Combine(nested, "source.bin");
+        File.WriteAllBytes(file, [1, 2, 3]);
+        var expected = ReplayStorage.Observe(file);
+        using var directory = Root(nested);
+        using var input = directory.OpenRead("source.bin", expected);
+        Need(input.Observe().Extent == expected, "Long path changed the observed file or volume.");
+        Rejected(() => directory.OpenRead("missing.bin", expected).Dispose(), "Missing long-path input was accepted.");
+        Rejected(() => new ReplayGuardDirectory(nested, directory.Identity,
+            @"\\?\Volume{00000000-0000-0000-0000-000000000000}\").Dispose(), "Wrong long-path volume was accepted.");
+    }
     static void Rejected(Action action,string message){bool failed=false;try{action();}catch(Exception e)when(e is IOException or Win32Exception or ObjectDisposedException or UnauthorizedAccessException){failed=true;}Need(failed,message);}
     internal static int Run(string planFile,string expectedSha)
     {
@@ -45,6 +59,7 @@ internal static class RootedOperationChecks
             string a=Make("source"),b=Make("target"),f=Make("foreign");File.WriteAllBytes(Path.Combine(a,"source.bin"),payload);File.WriteAllBytes(Path.Combine(f,"source.bin"),foreign);
             string foreignHash=Hash(Path.Combine(f,"source.bin"));var original=ReplayStorage.Observe(Path.Combine(a,"source.bin"));
             using var source=Root(a);using var target=Root(b);
+            CheckLongVolumePath(root);Passed("long-path-volume-and-file-binding");
             Rejected(()=>new ReplayGuardDirectory(a,"00000000:0000000000000000",original.Volume).Dispose(),"Wrong directory ID accepted.");
             Rejected(()=>new ReplayGuardDirectory(a,source.Identity,@"\\?\Volume{00000000-0000-0000-0000-000000000000}\").Dispose(),"Wrong volume accepted.");Passed("directory-and-volume-binding");
             using(var input=source.OpenRead("source.bin",original))
