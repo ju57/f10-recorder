@@ -1,6 +1,0 @@
-<Project>
-  <!-- Qualification receipts bind exact assembly bytes across checkout locations. -->
-  <PropertyGroup Condition="'$(F10QueueEnginePath)' != ''">
-    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
-  </PropertyGroup>
-</Project>
