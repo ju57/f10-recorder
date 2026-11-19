@@ -36,7 +36,7 @@ function Test-LookupAbsenceSnapshot($Fact,[DateTime]$ParentBirth,[bool]$ParentSt
 
 function Test-ControlReceipt($Document,[string]$Name,[int]$ChildPid,[DateTime]$ChildBirth,[int]$ChildExit){
  $expected=@(switch -CaseSensitive ($Name){
-  'version'{@('-version')};'nonzero'{@('-this-option-is-not-real')};'timeout'{@('-hide_banner','-nostdin','-re','-f','lavfi','-i','anullsrc','-t','10','-f','null','-')};'output-limit'{@('-version')};default{throw 'Unknown control proof name'}
+  'version'{@('-version')};'nonzero'{@('-this-option-is-not-real')};'timeout'{@('-hide_banner','-nostdin','-re','-f','lavfi','-i','sine','-t','10','-f','null','-')};'output-limit'{@('-version')};default{throw 'Unknown control proof name'}
  })
  $r=$Document.receipt
  if($r.ProcessId-ne$ChildPid-or([DateTimeOffset]$r.ProcessStartedUtc).UtcDateTime-ne$ChildBirth){return $false}
@@ -81,7 +81,9 @@ function Resolve-PendingControlImages {
   $proof=if($unheld){Read-UnheldControlImageProof $pending}else{Read-ControlImageProof $key}
   if((Get-ControllerPolicyMilliseconds)-$started-ge1000){throw 'Closed control image proof exceeded work-inclusive1second deadline'}
   if($proof){$children[$key].path=$engine[0];$children[$key].creatorReceiptVerified=$true;$children[$key].imageEvidence='verified-creation-receipt';$children[$key].creatorProof=$proof;
-   if($unheld){$children[$key].imageEvidence='verified-unheld-closed-control-receipt';$lookupAbsentChildren[$key].verifiedImage=$engine[0];$lookupAbsentChildren[$key].creatorProof=$proof;$lookupAbsentChildren[$key].closureEvidence='typed-local-lookup-absence-plus-control-creator-proof'}
+   if($pending -is [Collections.IDictionary] -and $pending.handleExit){
+    $children[$key].closureEvidence='creator-confirmed-exit-before-handle'
+   }elseif($unheld){$children[$key].imageEvidence='verified-unheld-closed-control-receipt';$lookupAbsentChildren[$key].verifiedImage=$engine[0];$lookupAbsentChildren[$key].creatorProof=$proof;$lookupAbsentChildren[$key].closureEvidence='typed-local-lookup-absence-plus-control-creator-proof'}
    $pendingControlImages.Remove($key)}
  }
 }
@@ -119,7 +121,8 @@ function Observe-Children {
    $process=$null
    $lookupAbsent=$lookupAbsentChildren.ContainsKey($key)
    $lookupPid=[int]$fact.ProcessId
-   if(-not$lookupAbsent){try{$process=Open-ControllerProcess $lookupPid}catch [ArgumentException]{
+   $exitAtHandle=$children.ContainsKey($key) -and $children[$key].exitAtHandle
+   if(-not($lookupAbsent -or $exitAtHandle)){try{$process=Open-ControllerProcess $lookupPid}catch [ArgumentException]{
     $actualType=$_.Exception.GetType().FullName
     # PowerShell wraps static method exceptions; only its exact inner ArgumentException qualifies.
     if($_.Exception.InnerException){$actualType=$_.Exception.InnerException.GetType().FullName}
@@ -135,8 +138,28 @@ function Observe-Children {
     if($pendingCreatorImages.ContainsKey($key)){$lookupAbsentChildren[$key].imageEvidence='blank-image-awaiting-retrospective-proof'}
     if($pendingControlImages.ContainsKey($key)){$lookupAbsentChildren[$key].imageEvidence='blank-image-awaiting-control-creator-proof'}
    }}
-   if($lookupAbsent){
-    if($lookupAbsentChildren[$key].path-ine$fact.ExecutablePath){throw 'Previously absent instance image snapshot changed'}
+   if($process){
+    try{$actualHandle=Read-ControllerHandle $process}
+    catch{
+     $handleFailure=$_
+     $failedAt=Get-ControllerPolicyMilliseconds
+     Dispose-ControllerProcess $process
+     $process=$null
+     if(!(Test-ControlExitAtHandle $handleFailure.Exception $fact)){throw $handleFailure}
+     $exitAtHandle=$true
+     $pendingControlImages[$key]=@{unheld=$true;handleExit=$true;fact=$fact;started=$failedAt}
+     $children[$key]=[ordered]@{pid=$lookupPid;birth=$created;path=$fact.ExecutablePath;commandLine=$fact.CommandLine;
+      parentPid=$owned.Id;exitAtHandle=$true;heldHandleAcquired=$false;heldImageObserved=$false;creatorReceiptVerified=$false;
+      imageEvidence='complete-cim-snapshot';closureEvidence='pending-exit-before-handle';consoleSupport=$false;peakWorkingSet=[long]$fact.WorkingSetSize}
+    }
+   }
+   if($lookupAbsent -or $exitAtHandle){
+    if($exitAtHandle){
+     $seen=$children[$key]
+     if($seen.path -ine $fact.ExecutablePath -or $seen.commandLine -cne $fact.CommandLine -or $seen.parentPid -ne $fact.ParentProcessId -or $fact.Name -cne 'ffmpeg.exe'){
+      throw 'Exited control snapshot changed'
+     }
+    }elseif($lookupAbsentChildren[$key].path-ine$fact.ExecutablePath){throw 'Previously absent instance image snapshot changed'}
     $console=$fact.ExecutablePath-ieq$consoleImage
     if($console){$support++}else{$media++}
     if(-not$children.ContainsKey($key)){$children[$key]=[ordered]@{pid=$fact.ProcessId;birth=$created;path=$fact.ExecutablePath;heldImageObserved=$false;creatorReceiptVerified=$false;imageEvidence='complete-cim-snapshot';consoleSupport=$console;peakWorkingSet=[long]$fact.WorkingSetSize;closureEvidence='local-typed-lookup-absence'}}
@@ -146,7 +169,6 @@ function Observe-Children {
     continue
    }
    try{
-    $actualHandle=Read-ControllerHandle $process
     $startTime=Read-ControllerBirth $process
     if($null-eq$startTime-or$null-eq$actualHandle-or$actualHandle.IsInvalid-or$actualHandle.IsClosed){throw 'Child birth/handle unavailable; no PID-only ownership'}
     $actual=$startTime.ToUniversalTime()

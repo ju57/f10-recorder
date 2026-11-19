@@ -9,7 +9,7 @@ internal sealed record PresentationPlanBinding(string Path,string Hash,Presentat
     internal static PresentationPlanBinding For(CalibrationPlan plan)
     {
         if(plan.EvidenceRoles?.TryGetValue(PresentationMethod.Role,out string path)!=true)return null;
-        if(plan.FreshCandidateAdmission is not ReplayCalibrationRun.SameCaptureContextAdmission and not ReplayCalibrationRun.SameCaptureRetainedAdmission
+        if(plan.FreshCandidateAdmission is not ReplayCalibrationRun.SameCaptureContextAdmission and not ReplayCalibrationRun.FiveMinuteStorageAdmission and not ReplayCalibrationRun.SameCaptureRetainedAdmission
             ||!plan.Files.TryGetValue(path,out string hash))throw new IOException("Presentation reference only belongs to pinned same-C00 qualification");
         return new(path,hash,PresentationMethod.Read(path,hash));
     }
@@ -52,7 +52,7 @@ internal static class CalibrationPresentationIntegration
         var release=CalibrationPresentationReference.ReadJson<CalibrationForegroundRelease>(System.IO.Path.Combine(root,CalibrationForegroundRelease.FileName));
         if(release.Pid!=pid||release.Hwnd!=hwnd.ToInt64()||release.Label!="H03"||!release.IsReleased(root)||GetForegroundWindow()!=hwnd)
             throw new IOException("Verified controlled foreground release required");
-        var request=new PresentationStart(binding.Hash,"H03",pid,hwnd.ToInt64(),release.Nonce,Stopwatch.GetTimestamp());
+        var request=new PresentationStart(binding.Hash,"H03",pid,hwnd.ToInt64(),release.Nonce,Stopwatch.GetTimestamp(),QualifySavedPictures:true);
         CalibrationPresentationReference.WriteJson(System.IO.Path.Combine(root,CalibrationPresentationReference.RequestName),request);
         var watch=Stopwatch.StartNew();string readyPath=System.IO.Path.Combine(root,CalibrationPresentationReference.ReadyName);
         while(!System.IO.File.Exists(readyPath))

@@ -24,9 +24,11 @@ internal static class ReplayCacheFileOperations
         }
     }
 
-    internal static void DeleteTree(string path)
+    internal static void DeleteTree(string path, string workspacePartial = null)
     {
         path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        if (workspacePartial != null && !path.Equals(Path.GetFullPath(workspacePartial) + ".work", StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Replay scratch directory differs from its owning output.");
         if (!Directory.Exists(path)) return;
         using var parent = OpenDirectory(Path.GetDirectoryName(path));
         string leaf = Path.GetFileName(path), identity = Native.DirectoryIdentity(path);
@@ -39,7 +41,7 @@ internal static class ReplayCacheFileOperations
             foreach (var entry in entries)
             {
                 string name = Path.GetFileName(entry.Path);
-                bool known = snapshot
+                bool known = workspacePartial != null ? ReplayOutputWorkspace.Classify(workspacePartial, entry.Path) != null : snapshot
                     ? name == "concat.txt" || System.Text.RegularExpressions.Regex.IsMatch(name, "^[0-9]{6}\\.(ts|mkv)$", System.Text.RegularExpressions.RegexOptions.CultureInvariant)
                     : name is "segments.csv" or "segments.csv.tmp" || System.Text.RegularExpressions.Regex.IsMatch(name, "^chunk-[0-9]{9}\\.(ts|mkv)$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
                 if (!known || (entry.Attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)

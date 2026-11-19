@@ -102,7 +102,8 @@ internal static class ReplayProducerRecoveryChecks
                     CloseHandle(retainedJob); retainedJob = IntPtr.Zero;
                     Require(child.WaitForExit(5000), "Closing the last owned job handle did not confirm child exit.");
                     Require(latch.ProducerAbsenceConfirmed() == sealedLaunch, "Only a sealed, exited producer group can establish recovery proof.");
-                    Require(store.ObserveUnreserved(profile, new Files()).Bytes == (sealedLaunch ? 9_000_000_000 : 8_999_995_904), "Recovery released the wrong future obligation.");
+                    Require(store.ObserveUnreserved(profile, new Files()).Bytes == 8_999_995_904,
+                        "A periodic capacity read must keep charging the claim until explicit recovery.");
                     Require(latch.Read().Held && File.ReadAllText(sentinel) == "protected fixture footage", "Recovery must preserve the stop and retained material.");
                     string scope = new('A', 64);
                     var headroom = new ReplayCaptureHeadroom(scope, Volume, 4096, 4096, 8192, ReplayCapacityPolicy.CoverageMilliseconds);
@@ -111,6 +112,8 @@ internal static class ReplayProducerRecoveryChecks
                     if (sealedLaunch)
                     {
                         coordinator.RequireResume(profile, profile);
+                        Require(store.ObserveUnreserved(profile, new Files()).Bytes == 9_000_000_000,
+                            "Resume did not release the previous producer's future obligation after confirming its exit.");
                         Require(latch.Read().Held, "Successful safe checks alone must not clear the stop.");
                         coordinator.BeginCapture(scope, profile, profile, () => { }, explicitResume: true);
                         Require(!coordinator.Hold.Held, "Explicit safe Resume must arm a fresh owned capture guard.");

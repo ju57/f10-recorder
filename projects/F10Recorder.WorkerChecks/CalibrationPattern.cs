@@ -132,7 +132,8 @@ internal static class CalibrationPattern
                     Marshal.ThrowExceptionForHR(DwmFlush()); long after = Stopwatch.GetTimestamp();
                     bool qualified=!nativeReference||reference!=null;
                     var output=qualified?paints:prePaints;
-                    CalibrationReferencePhase.WritePaint(output,seed*256+frame,before,after,Stopwatch.Frequency,qualified,qualified?null:preBudget);
+                    CalibrationReferencePhase.WritePaint(output,seed*256+frame,before,after,Stopwatch.Frequency,
+                        qualified && presentation?.QualifySavedPictures!=true,qualified?null:preBudget);
                     if(!qualified){preRows++;preMaximumSeconds=Math.Max(preMaximumSeconds,(after-before)/(double)Stopwatch.Frequency);
                         if(preRows>40000)throw new IOException("Pre-admission diagnostic row bound");}
                     if (frame % 60 == 0) output.Flush();

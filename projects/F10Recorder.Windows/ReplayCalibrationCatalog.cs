@@ -238,7 +238,7 @@ internal static partial class ReplayCalibrationCatalog
     static bool Gap(double value) => double.IsFinite(value) && value > 0 && value <= ReplayCapacityPolicy.CoverageMilliseconds;
     static bool Process(ReplayCalibrationProcessReceipt process) => process != null && Hash(process.EvidenceHash)
         && process.ProducerAbsent && process.ActualExitObserved && process.ExitCode == 0 && !process.TimedOut && !process.OutputLimitExceeded && !process.ForcedTermination;
-    static bool IdentifiedProcess(ReplayCalibrationProcessReceipt process) => Process(process)
+    internal static bool IdentifiedProcess(ReplayCalibrationProcessReceipt process) => Process(process)
         && process.ProcessId > 0 && process.StartedUtcTicks > DateTime.UnixEpoch.Ticks && process.StartedUtcTicks <= DateTime.MaxValue.Ticks;
 
     internal static string PairHash(ReplayCalibrationSourceReceipt packet, ReplayCalibrationSourceReceipt legacy) =>
@@ -334,7 +334,7 @@ internal static partial class ReplayCalibrationCatalog
         _ = model.PeakBytes(model.InputByteLimit); // reject representational overflow in the whole declared range
     }
 
-    static void ValidateOutput(ReplayCalibrationSourceReceipt source, ReplayReferenceModel model, double maximumActiveGapMs)
+    internal static void ValidateOutput(ReplayCalibrationSourceReceipt source, ReplayReferenceModel model, double maximumActiveGapMs)
     {
             Require(Hash(source.AcquisitionIdentity) && Hash(source.SampleHash) && Hash(source.SelectionHash) && Hash(source.RequestSelectionHash)
                 && Hash(source.CaptureArgumentsHash) && Hash(source.ExportArgumentsHash) && Hash(source.SourcePicturesHash)

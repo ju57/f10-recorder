@@ -12,7 +12,7 @@ internal static partial class ReplayCalibrationRun
     internal const string DurationAdmission = "issue83-duration-reference-fresh-v1";
     internal const string DurationTrainingAdmission = "issue83-duration-30m-three-fresh-heldouts-v1";
     internal const string DurationRetainedHistoryAdmission = "issue83-duration-1m-5m-fresh-retained-history-v1";
-    static bool DurationAdmissionKind(string kind) => kind is DurationAdmission or DurationTrainingAdmission or DurationRetainedHistoryAdmission or ContextConfirmationAdmission or SameCaptureContextAdmission;
+    static bool DurationAdmissionKind(string kind) => kind is DurationAdmission or DurationTrainingAdmission or DurationRetainedHistoryAdmission or ContextConfirmationAdmission or SameCaptureContextAdmission or FiveMinuteStorageAdmission;
     static bool DurationTrainingContinuation(CalibrationPlan p) => p?.FreshCandidateAdmission == DurationTrainingAdmission;
     static bool DurationRetainedHistory(CalibrationPlan p) => p?.FreshCandidateAdmission == DurationRetainedHistoryAdmission;
     static bool DurationQualification(CalibrationPlan p) => DurationAdmissionKind(p?.FreshCandidateAdmission);
@@ -20,6 +20,7 @@ internal static partial class ReplayCalibrationRun
     static DurationPreparationShape? DurationPreparation(string kind, int minutes)
     {
         if (!DurationAdmissionKind(kind)) return null;
+        Require(kind != FiveMinuteStorageAdmission || minutes == 5, "Five-minute experiment duration changed.");
         Require(ReplayReferenceModel.SupportedMinutes(minutes) && (kind != DurationRetainedHistoryAdmission || minutes is 1 or 5),
             "Unsupported duration preparation cell.");
         return new(minutes, DurationSourceBytes(minutes), DurationOutputBytes(minutes), DurationCopyBytes(minutes),

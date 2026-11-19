@@ -43,7 +43,7 @@ if($Release){
 }
 if([DateTime]::UtcNow.AddSeconds(9060) -ge ([DateTime]$p.createdUtc).AddHours(4)){throw 'Fresh full9060second horizon required only before initial Run.'}
 if(Test-Path -LiteralPath $p.root){throw 'Preserve prior whole-batch attempt.'}
-if((Get-PSDrive D).Free -lt 92000000000L){throw '31GB batch +1GB preparation +60GBfloor must fit before first capture.'}
+if([IO.DriveInfo]::new([IO.Path]::GetPathRoot($p.root)).AvailableFreeSpace -lt 92000000000L){throw '31GB batch +1GB preparation +60GBfloor must fit before first capture.'}
 . (Join-Path $PSScriptRoot 'replay-acceptance-budget.ps1')
 [IO.Directory]::CreateDirectory($p.root)|Out-Null
 $self=[Diagnostics.Process]::GetCurrentProcess();$clock=[Diagnostics.Stopwatch]::StartNew();$values=[Collections.Generic.List[object]]::new();$sealedPairs=[Collections.Generic.List[object]]::new();$failure=$null;$completed=0;$maxBytes=0L;$activePair=$null;$partial=$null

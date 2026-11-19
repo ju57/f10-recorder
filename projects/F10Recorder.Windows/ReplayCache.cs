@@ -105,7 +105,7 @@ internal class ReplayFiles(ReplayFileMode mode = ReplayFileMode.Conservative)
         else request.ValidatedOutput.Publish(final);
     }
     internal virtual void DeleteFile(string path) => System.IO.File.Delete(path);
-    internal virtual void DeleteDirectory(string path) => ReplayCacheFileOperations.DeleteTree(path);
+    internal virtual void DeleteDirectory(string path, string workspacePartial = null) => ReplayCacheFileOperations.DeleteTree(path, workspacePartial);
 }
 
 // One instance belongs to one protected recording profile. It owns registered
@@ -720,12 +720,13 @@ internal sealed partial class ReplayCache : IDisposable
         return true;
     }
 
-    Dictionary<string, long> PlanSnapshot(IReadOnlyList<Segment> selection, string extension, string snapshot, out ReplayVolumeCapacity target)
+    Dictionary<string, long> PlanSnapshot(IReadOnlyList<Segment> selection, string extension, string snapshot, out ReplayVolumeCapacity target, Action service = null)
     {
         target = ReplayStorage.ValidateCapacity(files.ObserveCapacity(snapshot));
         var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < selection.Count; i++)
         {
+            service?.Invoke();
             var extent = ReplayStorage.Validate(files.Observe(selection[i].Path));
             result.Add(Path.Combine(snapshot, i.ToString("D6") + extension), AllocationBytes(extent.Length, target.AllocationUnit));
         }
@@ -1271,19 +1272,25 @@ internal sealed partial class ReplayCache : IDisposable
             // pumping guards outside the cache stop lock.
             preparation?.WaitForReady();
             timing.ProtectionStarted ??= time.GetTimestamp();
-            preparedInputs=session.History?.Acquire(selection,()=>
+            // Borrowing pinned history cannot allocate snapshot files. The accepted
+            // observer already checks the live budget, claimed capacity and output.
+            // Rebind the full claim once the selected inputs and output are known.
+            void CheckHistoryCapacity()
             {
-                CheckPhaseAndPump();
-                lock(gate)RequireKnownInputCapacity(pendingAllocations,snapshot,pendingTarget);
-            });
+                if (earlyObservation != null) CheckPhaseAndPump();
+                else lock (gate) RequireKnownInputCapacity(pendingAllocations, snapshot, pendingTarget);
+            }
+            preparedInputs = session.History?.Acquire(selection, CheckHistoryCapacity);
             timing.PreparedOwnedInputs=preparedInputs?.Count??0;
             lock (gate)
             {
-                var plan = PlanSnapshot(selection, info.Extension, snapshot, out var target);
+                var plan = PlanSnapshot(selection, info.Extension, snapshot, out var target, PumpPreparation);
                 RequireTarget(pendingTarget, target);
                 var output = PlanOutput(session, selection, end, root, partial, true, out var demand);
-                RequireBudget(plan);
-                RequireStorageCapacity(plan, snapshot, target, output);
+                PumpPreparation();
+                var rebindInventory = Inventory();
+                RequireBudget(plan, observed: rebindInventory);
+                RequireStorageCapacity(plan, snapshot, target, output, rebindInventory);
                 pendingAllocations = plan;
                 pendingOutput = output;
                 outputDemand = demand;
@@ -1296,25 +1303,36 @@ internal sealed partial class ReplayCache : IDisposable
                         return true;
                     }, 100, ReplayStorageCoordinator.MaximumObservationGapMilliseconds, timing.StorageChecks,
                         error: message => new OutputEvidenceInvalid(message));
+                    PumpPreparation();
                     setupObservation.CheckNow();
+                    void CheckSetup()
+                    {
+                        // No payload is allocated while admitting these input
+                        // capabilities. Use the already-bound budget and volume
+                        // observer between full rebind and final admission.
+                        // Running two independent inventory clocks here can
+                        // make each scan immediately trigger the other.
+                        if (earlyObservation != null) CheckPhaseAndPump();
+                        else setupObservation.Check();
+                    }
                     ownedFiles ??= new ReplayRootedFiles();
                     ownedFiles.Root(info.Directory);
                     if (preparation == null) OwnedRequestCreatedForChecks?.Invoke(ownedFiles);
-                    setupObservation.Check();
+                    CheckSetup();
                     ownedFiles.EnsureOutputRoot(root);
-                    setupObservation.Check();
+                    CheckSetup();
                     var originalsInventory = Inventory();
-                    setupObservation.Check();
+                    CheckSetup();
                     for (int i = 0; i < selection.Count; i++)
                     {
-                        setupObservation.Check();
+                        CheckSetup();
                         var input = selection[i];
                         if (!originalsInventory.TryGetValue(input.Path, out var expected))
                             throw new OutputEvidenceInvalid("Completed source is absent from the fresh protection inventory.");
                         if(preparedInputs?.Contains(input.Path)==true)
                             ownedFiles.AdmitPreparedInput(input.Path,expected,preparedInputs);
                         else ownedFiles.Admit(input.Path, expected, false);
-                        setupObservation.Check();
+                        CheckSetup();
                     }
                     setupObservation.CheckNow();
                     saveFiles = ownedFiles;
@@ -1382,17 +1400,25 @@ internal sealed partial class ReplayCache : IDisposable
             string concat = Path.Combine(snapshot, "concat.txt");
             lock (gate)
             {
-                RequireBudget(pendingAllocations);
-                RequireKnownInputCapacity(pendingAllocations, snapshot, pendingTarget);
+                PumpPreparation();
+                var inventory = Inventory();
+                RequireBudget(pendingAllocations, observed: inventory);
+                RequireStorageCapacity(pendingAllocations, snapshot, pendingTarget, pendingOutput, inventory);
             }
+            PumpPreparation();
             string concatText = ConcatText(selection, info.Extension);
             if (pendingOutput != null && Encoding.UTF8.GetByteCount(concatText) > pendingOutput.Demand.ConcatMaximumBytes)
                 throw new OutputEvidenceInvalid("Replay concat metadata exceeds its reserved reference envelope.");
             saveFiles.WriteText(concat, concatText);
             lock (gate) pendingAllocations.Remove(concat);
-            var exportRequest = new ReplayExportRequest(info, interval,
-                Array.AsReadOnly(selection.Select(s => new ReplayOutputInput(s.Path, s.Start, s.End, ReplayStorage.Validate(saveFiles.Observe(s.Path)))).ToArray()),
-                concat, partial, timing);
+            var exportInputs = new ReplayOutputInput[selection.Count];
+            for (int i = 0; i < selection.Count; i++)
+            {
+                PumpPreparation();
+                var segment = selection[i];
+                exportInputs[i] = new(segment.Path, segment.Start, segment.End, ReplayStorage.Validate(saveFiles.Observe(segment.Path)));
+            }
+            var exportRequest = new ReplayExportRequest(info, interval, Array.AsReadOnly(exportInputs), concat, partial, timing);
             acceptedExport=exportRequest;
             exportRequest.PreparedInputs=preparedInputs;
             exportRequest.Preparation = preparation;
@@ -1411,6 +1437,7 @@ internal sealed partial class ReplayCache : IDisposable
                     // actual immutable snapshot consumed by this export.
                     var output = PlanOutput(session, selection, end, root, partial, true, out var demand);
                     snapshotInventory?.Seal(snapshot);
+                    PumpPreparation();
                     RequireStorageCapacity(pendingAllocations, snapshot, pendingTarget, output);
                     pendingOutput = output;
                     outputDemand = demand;
@@ -1509,7 +1536,9 @@ internal sealed partial class ReplayCache : IDisposable
                 void CheckExportStorage() { PumpPreparation(); CheckExportStorageCore(false); PumpPreparation(); }
                 void CheckExportStorageNow() => CheckExportStorageCore(true);
                 exportRequest.NativeFiles?.BindBarrier(CheckExportStorageNow);
+                PumpPreparation();
                 if (earlyObservation != null) earlyObservation.Check(true);
+                PumpPreparation();
                 CheckExportStorageNow();
                 earlyObservation?.RequireFreshness();
                 phaseCheck = () => CheckExportStorageCore(false);
@@ -1758,7 +1787,7 @@ internal sealed partial class ReplayCache : IDisposable
                 if (!retainEvidence && PendingProducerStopped())
                 {
                     if (!Cleanup(() => saveFiles.DeleteFile(partial), partial)) { retainEvidence = true; session.PreserveEvidence = true; }
-                    if (exportRequest.OwnWorkDirectory && !Cleanup(() => saveFiles.DeleteDirectory(exportRequest.WorkDirectory), exportRequest.WorkDirectory))
+                    if (exportRequest.OwnWorkDirectory && !Cleanup(() => saveFiles.DeleteDirectory(exportRequest.WorkDirectory, exportRequest.Partial), exportRequest.WorkDirectory))
                     { retainEvidence = true; session.PreserveEvidence = true; }
                 }
             }

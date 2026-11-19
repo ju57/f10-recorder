@@ -21,7 +21,8 @@ internal static class ReplayPacketMuxExport
         long started = Stopwatch.GetTimestamp(); using var parent = Process.GetCurrentProcess();
         double initialCpu = parent.TotalProcessorTime.TotalMilliseconds;
         long initialAllocation = GC.GetAllocatedBytesForCurrentThread();
-        FileStream output = null; ReplayMp4PacketWriter writer = null; Exception failure = null;
+        FileStream output = null; ReplayGuardedPacketOutput guardedOutput = null;
+        ReplayMp4PacketWriter writer = null; Exception failure = null;
         string closeError = null, observationError = null; bool closed = false, inputComplete = false;
         int sources = 0, nextAudio = 0; long bytes = 0; ReplayFileExtent final = null;
         using var samples = new ReplayPacketSampleWorkspace();
@@ -42,14 +43,15 @@ internal static class ReplayPacketMuxExport
             &&plan.Parts.All(p=>originals[p.Input].IsAsync&&ReplayPreparedPackets.Eligible(indices[p.Input]))
             &&boundaries.Values.All(b=>ReplayPreparedPackets.Eligible(b.Index));
         long sourceCapacityBound=checked(Math.Min(4,plan.Parts.Count)*(2*8388608L+65536+16777216+262144)+(2*8388608L+65536+262144));
-        pipeline&=sourceCapacityBound<=167772160;
+        pipeline&=sourceCapacityBound+ReplayGuardedPacketOutput.Capacity<=167772160;
         request.PacketPipelineSelected=pipeline;
         if(pipeline)request.Timing.ExportConstruction+="+BoundedPacketPipeline";
         try
         {
-            output = request.NativeFiles?.CreateMain()
+            output = request.NativeFiles?.CreateMain(asynchronous: pipeline)
                 ?? new(request.Partial, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 65536, FileOptions.SequentialScan);
-            writer = new(output, request.Info.FramesPerSecond, plan.FirstFrame / (double)request.Info.FramesPerSecond - request.Interval.Start,
+            if (pipeline) guardedOutput = new(output, Check);
+            writer = new((Stream)guardedOutput ?? output, request.Info.FramesPerSecond, plan.FirstFrame / (double)request.Info.FramesPerSecond - request.Interval.Start,
                 indices[0].Sps.Span, indices[0].Pps.Span, checked((int)(plan.EndFrame - plan.FirstFrame)),
                 audio?.PrimingSamples ?? 0, audio?.LogicalSamples ?? 0, audio?.Expected, Check, writing);
             void Audio(ReplayTransportAudioFrame frame, ReadOnlySpan<byte> payload)
@@ -107,7 +109,7 @@ internal static class ReplayPacketMuxExport
                     // No packet workspace may close while its reader is active.
                     if(!request.PacketReaders.Joined)throw new IOException("Packet source ownership has not drained.");
                     long workspace=workers.Sum(w=>w.PeakWorkspaceBytes);
-                    request.PacketPipelineBufferBytes=checked(workspace+request.PacketMuxWork.PeakOwnedBytes+samples.CapacityBytes+(workers.Length+1)*262144L);
+                    request.PacketPipelineBufferBytes=checked(workspace+request.PacketMuxWork.PeakOwnedBytes+samples.CapacityBytes+(workers.Length+1)*262144L+ReplayGuardedPacketOutput.Capacity);
                     foreach(var worker in workers){Add(extraction,worker.Extraction);worker.Dispose();}
                     if(request.PacketPipelineBufferBytes>167772160)throw new IOException("Packet source buffers exceeded160MiB allowance.");
                 }
@@ -149,7 +151,16 @@ internal static class ReplayPacketMuxExport
             inputComplete = true; writer.Complete();
         }
         catch (Exception error) { failure = error; writer?.Abort(); }
-        try { if (output != null) { output.Dispose(); closed = true; } }
+        try
+        {
+            if (output != null)
+            {
+                if (guardedOutput is { Joined: false })
+                    throw new IOException("Packet write has not joined; its output remains owned.");
+                output.Dispose();
+                closed = true;
+            }
+        }
         catch (Exception error) { closeError = error.ToString(); failure ??= error; writer?.Abort(); }
         try
         {

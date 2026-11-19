@@ -52,7 +52,7 @@ internal sealed class ReplayStagedProcess : IDisposable
     Action stopChild;
     Exception failure;
     volatile bool feeding;
-    bool disposed, pumping;
+    bool disposed, pumping, joinedSuccessfully;
     internal readonly ReplayStagedProcessTiming Timing = new();
 
     internal ReplayStagedProcess(string executable, IReadOnlyList<string> arguments, string directory, Native.ProcessJob job,
@@ -136,7 +136,7 @@ internal sealed class ReplayStagedProcess : IDisposable
                 }
                 catch (Exception error) { Fail(error); request.Completion.TrySetException(error); }
             }
-            if (clock.ElapsedMilliseconds >= deadlineMilliseconds) Fail(new IOException("Staged process whole operation deadline exceeded."));
+            if (!joinedSuccessfully && clock.ElapsedMilliseconds >= deadlineMilliseconds) Fail(new IOException("Staged process whole operation deadline exceeded."));
             if (feeder?.IsFaulted == true) { try { feeder.GetAwaiter().GetResult(); } catch (Exception error) { Fail(error); } }
             if (execution.IsFaulted) { try { execution.GetAwaiter().GetResult(); } catch (Exception error) { Fail(error); } }
             if (!cleanup) ThrowFailure();
@@ -215,6 +215,7 @@ internal sealed class ReplayStagedProcess : IDisposable
             Pump(); feeder.GetAwaiter().GetResult();
             var receipt = execution.GetAwaiter().GetResult();
             if (!Stopped || !receipt.Success) throw new IOException("Staged boundary failed: " + receipt.Error + " " + receipt.StandardError);
+            joinedSuccessfully = true;
             Timing.FeedJoined = true; Timing.Joined = Stopwatch.GetTimestamp(); return receipt;
         }
         catch (Exception error)

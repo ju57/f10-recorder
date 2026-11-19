@@ -112,7 +112,7 @@ internal static class ReplayPostClosePhasePilot
         }
         internal override ReplayNamespaceIdentity ObserveNamespace(string path, ReplayFileExtent enumerated)
             => new(enumerated.Volume, enumerated.Identity);
-        internal override void DeleteDirectory(string path) { }
+        internal override void DeleteDirectory(string path, string workspacePartial = null) { }
         internal override void DeleteFile(string path) { }
     }
 

@@ -10,6 +10,16 @@ internal static class CalibrationReferencePhase
 {
     internal const string Identity="after-validated-foreground-request-v1";
     internal const long PreAdmissionMaximumBytes=2097152;
+    internal static void CheckRecordingDuringSave(bool stopped,CaptureHealthSnapshot health)
+    {
+        if(stopped||!health.Healthy)throw new IOException("Recording stopped or capture/audio health failed during the primary save.");
+    }
+    internal static void CheckRecordingAtPublication(bool stopped,CaptureHealthSnapshot atPress,CaptureHealthSnapshot atPublication,double requestedEnd)
+    {
+        CheckRecordingDuringSave(stopped,atPublication);
+        if(!atPress.Healthy || !(atPublication.CompletedSegmentEnd>atPress.CompletedSegmentEnd && atPublication.CompletedSegmentEnd>=requestedEnd))
+            throw new IOException("The open-tail save requires newly completed recording history through the requested end.");
+    }
     internal static void RequireNormalFixtureExit((bool Forced,int Code) exit)
     {
         if(exit.Forced||exit.Code!=0)
@@ -41,6 +51,14 @@ internal static class CalibrationReferencePhase
         if(budget==null)writer.Write(line);else budget.Write(writer,line);
         if(qualified&&(after-before)/(double)frequency>.025)
         {writer.Flush();throw new IOException("Visual compositor bracket exceeds25ms.");}
+    }
+    internal static void ValidatePaintBrackets(long[][] rows,double frequency,int? lastRequiredMarker)
+    {
+        if(rows.Length is <=2 or >40000 || rows.Any(r=>r.Length!=3 || r[0] is <0 or >=0x1000000 || r[1]<=0 || r[2]<r[1])
+            || rows.Select(r=>r[0]).Distinct().Count()!=rows.Length
+            || lastRequiredMarker.HasValue && !rows.Any(r=>r[0]==lastRequiredMarker.Value)
+            || rows.Any(r=>(!lastRequiredMarker.HasValue || r[0]<=lastRequiredMarker.Value) && (r[2]-r[1])/frequency>.025))
+            throw new IOException("Unique visual publication brackets within 25 ms required through the final display witness.");
     }
     internal static void ValidateArm(string phase,long requested,long arm,long ready,double epoch,
         IEnumerable<long> paints,IEnumerable<double> clockRows)

@@ -1,4 +1,4 @@
-param([switch]$Publish, [switch]$NoRestore)
+param([switch]$Publish, [switch]$NoRestore, [string]$QueueEnginePath)
 $ErrorActionPreference = 'Stop'
 $sdk = Join-Path $PSScriptRoot '.tools\dotnet\dotnet.exe'
 if (-not (Test-Path -LiteralPath $sdk)) { $sdk = (Get-Command dotnet -ErrorAction Stop).Source }
@@ -10,5 +10,9 @@ $project = Join-Path $PSScriptRoot 'projects\F10Recorder.Desktop\F10Recorder.Des
 $buildArgs = @('build', $project, '-c', 'Release', '-o', (Join-Path $PSScriptRoot 'bin\avalonia'), '-m:1', '--disable-build-servers', '-p:UseSharedCompilation=false')
 if ($Publish) { $buildArgs = @('publish', $project, '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '-o', (Join-Path $PSScriptRoot 'bin\avalonia-publish'), '-m:1', '--disable-build-servers', '-p:UseSharedCompilation=false') }
 if ($NoRestore) { $buildArgs += '--no-restore' }
+if ($QueueEnginePath) {
+    $queueEngine = (Get-Item -LiteralPath $QueueEnginePath -ErrorAction Stop).FullName
+    $buildArgs += "-p:F10QueueEnginePath=$queueEngine"
+}
 & $sdk @buildArgs
 if ($LASTEXITCODE -ne 0) { throw 'Avalonia build failed.' }

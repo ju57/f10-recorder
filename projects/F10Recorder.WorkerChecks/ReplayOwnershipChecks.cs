@@ -212,11 +212,11 @@ internal static class ReplayOwnershipChecks
             base.DeleteFile(path);
             DeletedFile?.Invoke(path);
         }
-        internal override void DeleteDirectory(string path)
+        internal override void DeleteDirectory(string path, string workspacePartial = null)
         {
             Cleaned.Enqueue(path);
             if (FailCleanup) throw new UnauthorizedAccessException("controlled directory cleanup failure");
-            base.DeleteDirectory(path);
+            base.DeleteDirectory(path, workspacePartial);
             DeletedDirectory?.Invoke(path);
         }
     }
@@ -308,9 +308,10 @@ internal static class ReplayOwnershipChecks
         foreach (bool persistent in new[] { false, true })
         {
             string path = Path.Combine(root, persistent ? "persistent" : "transient"); Directory.CreateDirectory(path);
-            using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
-            ReplayStorageCoordinator coordinator = null; Fixture f = null; Thread releaser = null;
-            int armed = 0, injected = 0; bool stopped = false;
+            ReplayStorageCoordinator coordinator = null; Fixture f = null;
+            IDisposable ledgerLock = null;
+            Task releaseLock = null;
+            int injected = 0; bool stopped = false;
             var clock = Stopwatch.StartNew(); ReplaySaveResult saved = null; Exception failure = null;
             try
             {
@@ -326,32 +327,19 @@ internal static class ReplayOwnershipChecks
                 coordinator = new(new ReplayStorageStopLatch(Path.Combine(path, "profile"), Path.Combine(path, "private")), store,
                     f.Files, () => new(model, null), (_, _) => true);
                 coordinator.BeginCapture(scope, f.Source.ReplayInfo.Directory, f.Destination, () => stopped = true);
-                f.Files.CapacityObservation = directory =>
-                {
-                    if (Volatile.Read(ref armed) == 1 && Thread.CurrentThread.Name == "Capture storage safety"
-                        && Interlocked.CompareExchange(ref injected, 1, 0) == 0)
-                    {
-                        entered.Set();
-                        if (!release.Wait(5000)) throw new IOException("Controlled supervisor lock release deadline.");
-                    }
-                    return ReplayStorage.ObserveCapacity(directory);
-                };
                 f.Files.BeforeLink = () =>
                 {
-                    if (Interlocked.CompareExchange(ref armed, 1, 0) != 0) return;
-                    // Refresh immediately before the forced short locked poll.
-                    coordinator.Poll(); coordinator.StartSupervision();
-                    if (!entered.Wait(5000)) throw new IOException("Supervisor did not enter its actual locked capacity observation.");
+                    if (injected != 0) return;
+                    ledgerLock = TrustedStorage.AcquireLock(Path.Combine(path, "private"), "replay-volume-reservations");
+                    injected++;
+                    coordinator.StartSupervision();
                     if (!persistent)
-                    {
-                        releaser = new Thread(() => { Thread.Sleep(80); release.Set(); }) { IsBackground = true };
-                        releaser.Start();
-                    }
+                        releaseLock = Task.Run(async () => { await Task.Delay(80); Interlocked.Exchange(ref ledgerLock, null)?.Dispose(); });
                 };
                 var submission = f.Save(300);
                 Require(submission.Accepted, "Controlled initial admission rejected: " + submission.Rejection);
                 saved = submission.Completion.WaitAsync(TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
-                Require(injected == 1, "The accepted snapshot never overlapped the real supervisor's ledger lock.");
+                Require(injected == 1, "The accepted snapshot never overlapped a held reservation ledger lock.");
                 if (persistent)
                 {
                     Require(!saved.Succeeded && saved.Error.Contains("lock is busy") && f.Source.ExportCount == 0
@@ -366,7 +354,8 @@ internal static class ReplayOwnershipChecks
             catch (Exception ex) { failure = ex; failures++; }
             finally
             {
-                release.Set(); releaser?.Join(1000);
+                releaseLock?.GetAwaiter().GetResult();
+                Interlocked.Exchange(ref ledgerLock, null)?.Dispose();
                 coordinator?.CompleteCapture(true); coordinator?.Dispose(); f?.Dispose();
             }
             results.Add(new { name = persistent ? "persistent-accepted-contention-retains-before-export" : "transient-accepted-contention-completes-300-input-snapshot",
@@ -379,26 +368,29 @@ internal static class ReplayOwnershipChecks
             var capacity = ReplayStorage.ObserveCapacity(path); string scope = new('C', 64);
             var headroom = new ReplayCaptureHeadroom(scope, capacity.Volume, capacity.AllocationUnit, 4096, 8192, ReplayCapacityPolicy.CoverageMilliseconds);
             var model = new ReplayReferenceModel("controlled-stale-contention", scope, capacity.Volume, capacity.AllocationUnit, 0, 0, [], headroom);
-            var latch = new ReplayStorageStopLatch(profile, authority); bool stopped = false; Exception failure = null;
+            var latch = new ReplayStorageStopLatch(profile, authority); using var stop = new ManualResetEventSlim(); Exception failure = null;
             using var coordinator = new ReplayStorageCoordinator(latch, store, catalog: () => new(model, null), applicable: (_, _) => true);
             try
             {
                 var freshness = Stopwatch.StartNew();
-                coordinator.BeginCapture(scope, path, path, () => stopped = true);
+                coordinator.BeginCapture(scope, path, path, stop.Set);
                 using (TrustedStorage.AcquireLock(authority, "replay-volume-reservations"))
                 {
                     coordinator.StartSupervision();
-                    var deadline = Stopwatch.StartNew();
-                    while (!stopped && deadline.ElapsedMilliseconds < 1500) Thread.Sleep(5);
-                    Require(stopped && coordinator.Stopped && latch.Read().Held,
-                        "Persistent contention refreshed stale evidence instead of preserving the500ms stop/hold.");
+                    Require(stop.Wait(ReplayStorageCoordinator.MaximumObservationGapMilliseconds + 1000) && coordinator.Stopped,
+                        "Persistent contention refreshed stale evidence beyond its qualified coverage.");
                     Require(freshness.ElapsedMilliseconds >= ReplayStorageCoordinator.MaximumObservationGapMilliseconds,
                         "Contention stopped before the declared freshness interval.");
                 }
+                coordinator.CompleteCapture(true);
+                var hold = latch.Read();
+                Require(hold.Held && hold.Durable && !coordinator.CapturePending
+                    && (hold.Reason.Contains("cover", StringComparison.OrdinalIgnoreCase) || hold.Reason.Contains("lock is busy")),
+                    "Confirmed producer closure must preserve the durable capacity or contention stop cause: " + hold.Reason);
             }
             catch (Exception ex) { failure = ex; failures++; }
             finally { coordinator.CompleteCapture(true); }
-            results.Add(new { name = "persistent-capture-contention-stops-at-unchanged-freshness-boundary", passed = failure == null, error = failure?.ToString(), stopped });
+            results.Add(new { name = "persistent-capture-contention-stops-at-unchanged-freshness-boundary", passed = failure == null, error = failure?.ToString(), stopped = stop.IsSet });
         }
         foreach (bool sealing in new[] { true, false })
         {

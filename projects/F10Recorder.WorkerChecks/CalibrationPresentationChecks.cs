@@ -178,6 +178,21 @@ internal static class CalibrationPresentationChecks
             Check("actual-observer-wrapper-"+fault,fault=="success"?signaled&&!rejected&&terminal is{Successful:true,ThreadJoined:true,NativeOwnersClosed:true,WriterClosed:true}&&terminal.Acquired==terminal.Committed:rejected&&terminal?.Successful==false);
             if(fault is "initial-metrics" or "nan-initial-metrics")Check("no-invented-zero-CPU-baseline-"+fault,terminal?.ProcessCpuMilliseconds==null&&terminal?.ResourceError!=null&&terminal?.Acquired==0);
         }
+        using(var tailRead=new ManualResetEventSlim())
+        {
+            PresentationClosure? result=null;
+            var scoped=new CalibrationPresentationReference(method,methodHash,request with{QualifySavedPictures=true},
+                ()=>new NativePresentationReader((reader,_)=>{
+                    Thread.Sleep(1);
+                    if(reader.ProducedRows==5){tailRead.Set();return null;}
+                    reader.FakeAcquire();reader.FakeRelease();
+                    long n=reader.AcquiredRows,now=Stopwatch.GetTimestamp();
+                    return new(n,checked(100+(int)n),now,now,now,n==5?3u:1u,false,false,true);
+                }),()=>new MemorySink(),_=>{},c=>result=c);
+            try{Check("scoped-observer-keeps-sampling-through-ambiguous-tail",tailRead.Wait(1000));scoped.Check();}
+            finally{scoped.Dispose();}
+            Check("scoped-observer-seals-all-five-raw-rows",result is {Successful:true,ThreadJoined:true,Committed:5});
+        }
         int nullClock=0,nullReads=0;PresentationClosure? nullResult=null;
         var nullObserver=new CalibrationPresentationReference(method,methodHash,request,()=>new NativePresentationReader((_,_)=>{Interlocked.Increment(ref nullReads);return null;}),()=>new MemorySink(),_=>{},c=>nullResult=c,()=> (0,0),()=>Interlocked.Increment(ref nullClock));
         SpinWait.SpinUntil(()=>nullObserver.Closure!=null,1000);Check("always-timeout-enforces-Ready-not700s",Rejected(()=>nullObserver.Dispose())&&nullReads<10&&nullResult?.Successful==false);

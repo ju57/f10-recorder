@@ -243,7 +243,9 @@ internal static partial class ReplayCalibrationRun
             File.WriteAllText(manifest, string.Join('\n', copied.Select(s => FormattableString.Invariant($"{Path.GetFileName(s.Path)},{s.Start:R},{s.End:R}"))) + "\n");
             var info = new ReplaySessionInfo(session, manifest, 60, 20, 60, "h264_nvenc", ".ts", false, true);
             using var source = CaptureSession.OpenRetainedForQualification(info, original.Scope, original.OutputEnd);
-            var reservations = new ReplayVolumeReservations(Path.Combine(plan.Root, "retained-ownership"), ReplayStorageSafety.MinimumBytes);
+            // The sampler observes this private ledger through directory entries so
+            // its metadata handles cannot block the worker's atomic replacements.
+            var reservations = new ReplayVolumeReservations(Path.Combine(plan.Root, "calibration-ownership"), ReplayStorageSafety.MinimumBytes);
             using var cache = new ReplayCache(cacheDirectory: Path.Combine(caseRoot, "buffer"), cacheBudgetBytes: 1_000_000_000,
                 volumeReservations: reservations, fileMode: ReplayFileMode.Production);
             int exportArguments = 0;
@@ -288,12 +290,15 @@ internal static partial class ReplayCalibrationRun
                     var stage = request.Preparation;
                     Require(packet ? stage is { Joined: true } && stage.Timing is { FeedJoined: true, Aborted: false, Error: null, FedBytes: > 0 and <= 8388608 }
                         : stage == null, "Retained packet preparation/exact path differs from the frozen policy.");
-                    var native = new ReplayCalibrationNativeReceipt(ReplayReferenceModel.Hash(new { request.Interval, request.Timing, eligible,
-                        source = original.AcquisitionIdentity, inputMappingReview = p.MappingReviewHash }), ReplaySaveExport.PolicyIdentity,
+                    var selectionIdentity = source.LastOutputSelection?.Identity ?? submission.AdmissionDemand.SelectionIdentity;
+                    var native = new ReplayCalibrationNativeReceipt(ReplayReferenceModel.Hash(new { request.Interval, eligible,
+                        source = original.AcquisitionIdentity, inputMappingReview = p.MappingReviewHash, selectionIdentity,
+                        request.PacketPipelineSelected, request.NativeFiles.Closed, result.Validation.ExportRecipe, result.Validation.CheckedOutput }),
+                        ReplaySaveExport.PolicyIdentity,
                         true, true, packet, true, packet, packet, packet ? stage.Timing.FeedSha256 : null, packet ? stage.Timing.FedBytes : 0);
                     var peaks = sampler.OutputAndWorkspacePeak(result.File); var extent = ReplayStorage.Observe(result.File);
                     var sample = new Sample("H03", original.Scope, result.File, request.Inputs.Sum(i => i.Extent.Length), result.Bytes, extent.AllocatedBytes,
-                        sampler.Peak(result.File), original.OutputEnd, 60, source.LastOutputSelection?.Identity ?? submission.AdmissionDemand.SelectionIdentity,
+                        sampler.Peak(result.File), original.OutputEnd, 60, selectionIdentity,
                         submission.AdmissionDemand, SaveProcess(cell, "main-export", source.LastExport), source.ExportArguments, result.Interval,
                         packet ? null : SaveProcess(cell, "runtime-validation", source.LastValidation), source.ValidationArguments,
                         peaks.Combined, peaks.Work, SaveProcesses(cell, "main-export", source), peaks.Assembly, peaks.Boundaries,

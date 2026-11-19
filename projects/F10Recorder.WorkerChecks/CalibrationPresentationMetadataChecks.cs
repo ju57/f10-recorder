@@ -170,6 +170,37 @@ internal static class CalibrationPresentationMetadataChecks
         Need("v6-closed-reader-rejects-changed-ac3",Reject(()=>CalibrationPresentationReference.ReadClosed(root,1260,1000,adjacentHash,adjacent)));
         Trace(adjacentTrace.Replace("4,103,","4,104,",StringComparison.Ordinal));
         Need("v6-closed-reader-rejects-skipped-ac2",Reject(()=>CalibrationPresentationReference.ReadClosed(root,1260,1000,adjacentHash,adjacent)));
+        Change(CalibrationPresentationReference.RequestName,n=>n["QualifySavedPictures"]=true);
+        foreach(string name in new[]{CalibrationPresentationReference.ReadyName,CalibrationPresentationReference.ClosureName})
+            Change(name,n=>n["Request"]["QualifySavedPictures"]=true);
+        PresentationTimeline Saved(int? last)=>CalibrationPresentationReference.ReadClosed(root,1260,1000,adjacentHash,adjacent,last);
+        string badTail=adjacentTrace.Replace("1401,1,0,1,1","1401,3,0,1,1",StringComparison.Ordinal);
+        Trace(badTail);
+        var saved=Saved(102);saved.CheckFrame(102,1200+tolerance, .002);
+        Need("saved-marker-qualified-through-its-bounded-successor-before-bad-tail",saved.LastQualifiedRow==4&&saved.HasSuccessor(102)&&!saved.HasSuccessor(103));
+        Need("in-window-late-picture-still-fails",Reject(()=>saved.CheckFrame(102,1201+tolerance,.002)));
+        Need("bad-final-required-transition-still-fails",Reject(()=>Saved(103)));
+        Need("scoped-request-without-decoded-final-marker-fails",Reject(()=>Saved(null)));
+        Trace(adjacentTrace);
+        Need("missing-final-successor-fails",Reject(()=>Saved(104)));
+        Trace(badTail.Replace("1401,3,0,1,1","1401,3,0,1,0",StringComparison.Ordinal));
+        Need("post-window-unreleased-row-still-fails",Reject(()=>Saved(102)));
+        long[][] paints=[[101,1000,1025],[102,1100,1125],[103,1200,1225],[104,1300,1326]];
+        CalibrationReferencePhase.ValidatePaintBrackets(paints,1000,103);
+        Need("long-paint-after-witness-scoped-to-diagnostics",true);
+        Need("long-paint-at-witness-and-in-full-trace-fail",Reject(()=>CalibrationReferencePhase.ValidatePaintBrackets(paints,1000,104))
+            &&Reject(()=>CalibrationReferencePhase.ValidatePaintBrackets(paints,1000,null)));
+        Need("missing-witness-paint-fails",Reject(()=>CalibrationReferencePhase.ValidatePaintBrackets(paints,1000,105)));
+        var atPress=new CaptureHealthSnapshot(false,null,null,300,299,0,299,0,17940,"");
+        var atSave=atPress with{CompletedSegmentEnd=301};
+        CalibrationReferencePhase.CheckRecordingAtPublication(false,atPress,atSave,300.25);
+        Need("open-tail-advanced-through-request",true);
+        Need("stopped-or-failed-audio-during-save-rejected",
+            Reject(()=>CalibrationReferencePhase.CheckRecordingDuringSave(true,atSave))
+            &&Reject(()=>CalibrationReferencePhase.CheckRecordingDuringSave(false,atSave with{AudioFailure="generated"})));
+        Need("unadvanced-or-short-recording-at-publication-rejected",
+            Reject(()=>CalibrationReferencePhase.CheckRecordingAtPublication(false,atPress,atPress,299))
+            &&Reject(()=>CalibrationReferencePhase.CheckRecordingAtPublication(false,atPress,atSave,302)));
         Reset();Bound();var result=new{kind="generated-fixed-fixture-closed-reference-parser-controls-v2",count=cases.Count,cases,
             seconds=watch.Elapsed.TotalSeconds,fixtureFiles=baseline.Count,fixtureBytes=baseline.Values.Sum(x=>x.Length),children=0,
             deviceCalls=0,gpuCalls=0,uiCalls=0,audioCalls=0,codecCalls=0,captures=0,nativeFileSinkCalls=0,

@@ -175,8 +175,14 @@ namespace F10Recorder
                 if (mediaClock != null) saveClock = new ReplaySaveClock(mediaClock);
                 if (mediaClock != null) Log.Write("Media clock: QPC=" + mediaClock.QpcEpoch + "; frequency=" + mediaClock.QpcFrequency + "; UTC microseconds=" + mediaClock.UnixMicroseconds + "; bridge bracket ticks=" + mediaClock.BridgeUncertaintyTicks);
                 var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-stats_period", "0.25", "-progress", "pipe:1" };
+                string desktopFilter = "ddagrab=framerate=";
+#if F10_QUEUE_ENGINE
+                if (!synthetic && ReplayReferenceModel.ReferenceSettings(settings)
+                    && Native.DisplayBounds(IntPtr.Zero) is { Width: 1920, Height: 1080 })
+                    desktopFilter = "ddagrab=f10_queue=1:framerate=";
+#endif
                 string source = settings.CaptureMode == "window" && !synthetic ? WindowVideoSource(target, captureRateLimit)
-                    : "ddagrab=framerate=" + captureRateLimit + ":output_idx=" + (synthetic ? 0 : settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1";
+                    : desktopFilter + captureRateLimit + ":output_idx=" + (synthetic ? 0 : settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1";
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=" + settings.FramesPerSecond });
                 // ddagrab's rate is a polling ceiling, not a guaranteed output clock.
                 // Allow acquisition headroom, then pace the GPU frames in the graph.

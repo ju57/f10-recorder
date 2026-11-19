@@ -17,7 +17,7 @@ internal static partial class ReplayCalibrationRun
     static Dictionary<string, string> PreparedEvidenceRoles(string admission, Dictionary<string, string> files)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (string role in CommonAdmissionRoles.Concat(OutsideAdmissionRoles).Concat(["composite-training-bindings","prior-failed-attempt","duration-failure-disposition","coverage-freeze"]))
+        foreach (string role in CommonAdmissionRoles.Concat(OutsideAdmissionRoles).Concat(["composite-training-bindings","prior-failed-attempt","duration-failure-disposition","coverage-freeze",FiveMinuteContractRole,PresentationMethod.Role]))
         {
             string path = Path.Combine(admission, role == "run-instructions" ? "RUN.md" : role + ".json");
             if (files.ContainsKey(path)) result.Add(role, path);
@@ -67,7 +67,7 @@ internal static partial class ReplayCalibrationRun
         var plan = root.GetProperty("plan").Deserialize<CalibrationPlan>();
         Require(plan?.Files != null, "Final plan bindings are absent.");
         string directory = Path.GetDirectoryName(path);
-        Require(root.GetProperty("controllerKind").GetString() == (SameCaptureQualification(plan) ? "issue83-two-confirmation-owner-v2" : OwnedHistoryQualification(plan) ? "issue83-owned-history-cohort-v1" : "issue83-fresh-guard2-cohort-v1")
+        Require(root.GetProperty("controllerKind").GetString() == (FiveMinuteStorage(plan) ? "issue83-five-minute-c00-owner-v1" : SameCaptureQualification(plan) ? "issue83-two-confirmation-owner-v2" : OwnedHistoryQualification(plan) ? "issue83-owned-history-cohort-v1" : "issue83-fresh-guard2-cohort-v1")
             && root.GetProperty("parentHandleBudget").GetInt32() == (SameCaptureQualification(plan) ? 49152 : OwnedHistoryQualification(plan) ? CompositeParentHandleBudget(plan) : 98304)
             && root.GetProperty("maximumSupportChildren").GetInt32() == 1
             && root.GetProperty("maximumManagedRoles").GetInt32() == (SameCaptureQualification(plan) ? 16 : 61) && root.GetProperty("maximumOuterRoles").GetInt32() == 1
@@ -86,7 +86,8 @@ internal static partial class ReplayCalibrationRun
         if(OwnedHistoryRepair(plan))ValidateOwnedHistoryPriorAttempt(plan,root.GetProperty("originalPurposeDeadlineUtc").GetString());
         Require(!Directory.Exists(plan.Root) && !File.Exists(plan.Root) && Path.GetFullPath(plan.Root).StartsWith(
             Path.GetFullPath("artifacts") + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase), "Final admission requires a fresh task artifact root.");
-        if (ContextQualification(plan)) _ = ReadContextFreeze(plan);
+        if (FiveMinuteStorage(plan)) _ = ReadFiveMinuteContract(plan);
+        else if (ContextQualification(plan)) _ = ReadContextFreeze(plan);
         var roles = root.GetProperty("plan").GetProperty("EvidenceRoles");
         Require(roles.ValueKind == JsonValueKind.Object, "Explicit evidence roles must be an object.");
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -134,7 +135,8 @@ internal static partial class ReplayCalibrationRun
         Require(capacity.Volume == environment.GetProperty("capacity").GetProperty("Volume").GetString()
             && capacity.AllocationUnit == environment.GetProperty("capacity").GetProperty("AllocationUnit").GetInt64()
             && new DriveInfo(Path.GetPathRoot(plan.Root)).DriveFormat == "NTFS"
-            && capacity.AvailableBytes >= QualificationFreeRequirement(plan), "Current volume/capacity does not meet final admission.");
+            && capacity.AvailableBytes >= QualificationFreeRequirement(plan) && (!FiveMinuteStorage(plan) || capacity.AvailableBytes >= 90_000_000_000),
+            "Current volume/capacity does not meet final admission.");
         Require(HashFile(path) == hash, "Final plan changed during validation.");
         return plan;
     }
@@ -165,6 +167,13 @@ internal static partial class ReplayCalibrationRun
         string file = Path.Combine(Path.GetDirectoryName(path), "current-authorization.json");
         Require(File.Exists(file) && new FileInfo(file).Length is > 0 and <= 8192, "Fresh recording authorization required.");
         using var input = JsonDocument.Parse(File.ReadAllBytes(file)); var approval = input.RootElement; var plan = document.RootElement;
+        if (plan.GetProperty("plan").TryGetProperty("FreshCandidateAdmission", out var admission)
+            && admission.ValueKind == JsonValueKind.String && admission.GetString() == FiveMinuteStorageAdmission)
+        {
+            DateTime granted = approval.GetProperty("approvedUtc").GetDateTime();
+            Require(granted.Kind == DateTimeKind.Utc && DateTime.UtcNow - granted <= TimeSpan.FromMinutes(15),
+                "Five-minute C00 launch grant expired.");
+        }
         Require(approval.GetProperty("approvedPlanSha256").GetString() == hash && approval.GetProperty("approvedCaptures").GetInt32() == plan.GetProperty("plan").GetProperty("Order").GetArrayLength()
             && !string.IsNullOrWhiteSpace(approval.GetProperty("questionItemId").GetString())
             && approval.GetProperty("approvedUtc").GetDateTime() <= DateTime.UtcNow

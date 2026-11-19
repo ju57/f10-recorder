@@ -19,6 +19,8 @@ Development uses the SDK pinned in [global.json](global.json). The initial packa
 .\build-avalonia.ps1 -Publish
 ```
 
+For the Issue #83 Windows qualification build, pass `-QueueEnginePath <path-to-ffmpeg.exe>` to the same build command. It verifies the queue-enabled binary against the pinned SHA-256 and includes it in the build output. Explicit setup or repair uses that binary with the inspection tool and notices from the approved base archive. Omitting the option selects the stock engine.
+
 Without `-Publish`, the build goes to `bin/avalonia`; publishing produces the self-contained Windows application. End users do not need a separate .NET runtime. The prototype installer requires 64-bit Windows 10/11 and an NVIDIA GPU with NVENC; codec availability depends on the actual GPU, driver and engine build.
 
 ```powershell

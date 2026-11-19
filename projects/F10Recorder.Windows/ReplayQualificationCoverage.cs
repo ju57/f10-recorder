@@ -256,7 +256,7 @@ internal static partial class ReplayCalibrationCatalog
         bool Fresh(ReplayCalibrationProcessReceipt p) => IdentifiedProcess(p)
             && p.StartedUtcTicks >= c.StartedUtc.Ticks && p.StartedUtcTicks <= c.CompletedUtc.Ticks;
     }
-    static void ValidatePair(ReplayCalibrationSourceReceipt packet, ReplayCalibrationSourceReceipt exact)
+    internal static void ValidatePair(ReplayCalibrationSourceReceipt packet, ReplayCalibrationSourceReceipt exact)
     {
         Require(packet != null && exact != null && packet.NormalValidation?.ExportRecipe == ReplaySaveExport.PacketRecipe
             && exact.NormalValidation?.ExportRecipe == ReplayExactExport.Recipe && packet.Label == exact.Label

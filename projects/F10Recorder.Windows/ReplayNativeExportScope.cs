@@ -197,14 +197,14 @@ internal sealed class ReplayNativeExportScope : IDisposable
         lock (sync) members.Add(preparation.Boundary, new(null, observer));
         forceObservation?.Invoke();
     }
-    internal FileStream CreateMain()
+    internal FileStream CreateMain(bool asynchronous = false)
     {
         Require(); forceObservation?.Invoke(); FileStream result;
         lock (sync)
         {
             Require(); if (request.Integrity == null) throw new IOException("Main creation precedes frozen source proof.");
             var root = files.DirectoryOwner(Path.GetDirectoryName(request.Partial)).Native;
-            var creator = root.CreateNew(Path.GetFileName(request.Partial));
+            var creator = root.CreateNew(Path.GetFileName(request.Partial), asynchronous);
             try
             {
                 var observer = root.OpenObservation(Path.GetFileName(request.Partial), creator.Observe().Extent);

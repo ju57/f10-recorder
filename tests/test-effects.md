@@ -35,9 +35,15 @@ validation.
 For a same-source confirmation with independent presentation, the controller
 joins the fixture after the primary save and confirmed capture/audio drain.
 Normal fixture exit and a complete observer closure precede the paired exact
-export. The 25 ms paint check runs through fixture closure, and the closed
-source oracle still checks current/next marker and audio coverage over the
-full selected inputs.
+export. New C00 requests bind picture qualification to the saved frames. The
+observer keeps every native row and checks row integrity through fixture closure.
+After source decode, the oracle checks transitions through the actual successor
+of the last selected picture, including the transition that establishes that
+successor. A missing successor fails. Earlier requests keep full-trace scoring.
+The 25 ms paint bound includes the final display witness, and audio checks
+retain their existing coverage. The
+controller checks recording health during the primary save and verifies that
+newly completed segments covered the frozen request before stopping capture.
 
 The preserved pre-Ready bootstrap permits a coalesced image before computed Ready to
 restart only the unproved bootstrap after all ownership, ordinal, native-clock
@@ -202,6 +208,10 @@ shims that suppress ACL mutations.
 No engine, codec, media-payload reading/hashing/decoding, capture, audio, UI,
 ordinary worker, account catalog activation, settings/startup or vendor changes.
 Controlled positive receipts are nonempirical and never qualify this computer.
+
+`--replay-five-minute-storage-checks` exercises the queue-specific C00 shape,
+duration and graph selection, native observation intervals and stop prefix in
+memory. This selector opens no device or media and grants no admission.
 
 `--replay-coverage-C00-admission-checks` checks the single-source preparation,
 full future commitments, fixed purpose window and rejection of six-source/refit

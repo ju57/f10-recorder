@@ -15,7 +15,7 @@ internal static class FramePacingChecks
     }
     sealed class EvidenceFiles(string evidence, Dictionary<string, object> report) : ReplayFiles
     {
-        internal override void DeleteDirectory(string path)
+        internal override void DeleteDirectory(string path, string workspacePartial = null)
         {
             if (Directory.Exists(path))
                 foreach (string trace in Directory.GetFiles(path, "ffmpeg-*.log"))
@@ -24,7 +24,7 @@ internal static class FramePacingChecks
                         report["retainedSessionDiagnostics"] = path;
                         throw new IOException("Uncopied or unverified diagnostic trace retained in " + path);
                     }
-            base.DeleteDirectory(path);
+            base.DeleteDirectory(path, workspacePartial);
         }
     }
     internal static int Run(string data, int seconds, int fps, string mode, bool audio, string variant, int ceiling, int sourceFps, string codec)

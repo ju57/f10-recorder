@@ -38,7 +38,9 @@ internal sealed record PresentationMethod(string Method,uint OutputIndex,string 
             throw new IOException("The independent presentation method requires the fixed monotonic H03/no-divisor/no-wrap source-reference fixture");
     }
 }
-internal sealed record PresentationStart(string MethodHash,string Label,int Pid,long Hwnd,string Nonce,long RequestedQpc);
+internal sealed record PresentationStart(string MethodHash,string Label,int Pid,long Hwnd,string Nonce,long RequestedQpc,
+    [property:System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    bool QualifySavedPictures=false);
 internal sealed record PresentationReady(string Method,string MethodHash,PresentationStart Request,long ReadyQpc,long Frequency,string DeviceName,int Left,int Top,int Width,int Height);
 internal sealed record PresentationClosure(string Method,string MethodHash,PresentationStart Request,long ReadyQpc,long Frequency,
     string DeviceName,int Left,int Top,int Width,int Height,long Acquired,long Released,long Produced,long Committed,long Rows,long Bytes,string TraceHash,
@@ -95,6 +97,7 @@ internal sealed class CalibrationPresentationReference:IDisposable
     volatile bool stop;Exception error;PresentationClosure closure;bool disposed;
     void RecordError(Exception value){Interlocked.CompareExchange(ref error,value,null);lock(errors)errors.Add(value.ToString());}
     internal bool IsReady=>ready.IsSet&&error==null&&closure==null;
+    internal bool QualifySavedPictures=>request.QualifySavedPictures;
     string[] ErrorSnapshot(){lock(errors)return errors.ToArray();}
     internal PresentationClosure Closure=>closure==null?null:closure with{Error=Volatile.Read(ref error)?.ToString(),Errors=ErrorSnapshot(),Successful=closure.Successful&&Volatile.Read(ref error)==null};
     internal CalibrationPresentationReference(PresentationMethod spec,string hash,PresentationStart request,Func<NativePresentationReader> factory,
@@ -120,7 +123,10 @@ internal sealed class CalibrationPresentationReference:IDisposable
                 if(readyAt==0&&seconds()>spec.ReadySeconds)throw new IOException("Presentation reference readiness deadline");
                 var row=reader.Read(CancellationToken.None);if(row==null)continue;
                 if(sink.Rows>=spec.MaximumRows)throw new IOException("Presentation reference row ceiling");
-                sink.Write(row);timeline.Add(row); // Preserve even a rejected observed row before propagating the failure.
+                sink.Write(row);
+                // Only the closed source decode identifies the last saved marker.
+                // Keep checking native row integrity until the fixture is drained.
+                timeline.Add(row,readyAt==0||!request.QualifySavedPictures);
                 if(readyAt==0&&timeline.Ready)
                 {
                     readyAt=Stopwatch.GetTimestamp();var d=reader.Output;
@@ -172,7 +178,7 @@ internal sealed class CalibrationPresentationReference:IDisposable
     internal static T ReadJson<T>(string path,int maximum=16384)
     {return JsonSerializer.Deserialize<T>(ReadBounded(path,maximum),new JsonSerializerOptions {
         UnmappedMemberHandling=System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow,RespectRequiredConstructorParameters=true });}
-    internal static PresentationTimeline ReadClosed(string sourceCell,double epoch,double frequency,string expectedMethodHash,PresentationMethod spec)
+    internal static PresentationTimeline ReadClosed(string sourceCell,double epoch,double frequency,string expectedMethodHash,PresentationMethod spec,int? lastSavedMarker=null)
     {
         PresentationMethod.Validate(spec);
         if(!double.IsFinite(epoch)||epoch<=0||!double.IsFinite(frequency)||frequency<=0||frequency!=Math.Truncate(frequency)
@@ -197,6 +203,8 @@ internal sealed class CalibrationPresentationReference:IDisposable
             ||exited.RootElement.GetProperty("pid").GetInt32()!=start.Pid||!exited.RootElement.GetProperty("exited").GetBoolean()||exited.RootElement.GetProperty("forced").GetBoolean()||exited.RootElement.GetProperty("exit").GetInt32()!=0)
             throw new IOException("Pinned presentation method/output/foreground/Ready identity changed");
         ValidateClosure(c,spec,expectedMethodHash,epoch,frequency);
+        if(start.QualifySavedPictures && lastSavedMarker is not (>=0 and <0x1000000))
+            throw new IOException("Saved-picture qualification requires the decoded final marker");
         string path=Path.Combine(sourceCell,TraceName);byte[] bytes=ReadBounded(path,20971520);
         if(bytes.Length!=c.Bytes||Convert.ToHexString(SHA256.HashData(bytes))!=c.TraceHash)throw new IOException("Independent presentation trace bytes changed");
         var t=new PresentationTimeline(c.Frequency,spec.AllowsAdjacentTransition);var lines=Encoding.UTF8.GetString(bytes).Split('\n',StringSplitOptions.RemoveEmptyEntries);
@@ -208,8 +216,11 @@ internal sealed class CalibrationPresentationReference:IDisposable
             // Include the row that first proves Ready in its unqualified prefix.
             // Replaying the same bootstrap logic cannot move a later fault before Ready.
             if(!t.Ready?x[4]>c.ReadyQpc:x[3]<c.ReadyQpc)throw new IOException("Computed presentation Ready boundary differs from declared native Ready");
-            t.Add(new(x[0],checked((int)x[1]),x[2],x[3],x[4],checked((uint)x[5]),x[6]==1,x[7]==1,x[8]==1));
+            bool qualify=!start.QualifySavedPictures || !t.HasSuccessor(lastSavedMarker.Value);
+            t.Add(new(x[0],checked((int)x[1]),x[2],x[3],x[4],checked((uint)x[5]),x[6]==1,x[7]==1,x[8]==1),qualify);
         }
+        if(start.QualifySavedPictures && !t.HasSuccessor(lastSavedMarker.Value))
+            throw new IOException("Missing independently observed successor for the final saved picture");
         t.Complete(true,true,true);return t;
     }
     internal static void ValidateClosure(PresentationClosure c,PresentationMethod spec,string expectedMethodHash,double epoch,double frequency)

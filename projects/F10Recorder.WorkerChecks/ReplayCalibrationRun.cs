@@ -148,7 +148,7 @@ internal static partial class ReplayCalibrationRun
         long scratchBytes = durationShape?.Scratch ?? 1_256_000_000L;
         long traceBytes = durationShape?.Trace ?? 67_108_864L;
         bool capacityCohort = durationCohort || capacityContinuation || candidateKind.ValueKind == JsonValueKind.String && candidateKind.GetString() is CapacityAdmission or OwnedHistoryAdmission or OwnedHistoryRepairAdmission;
-        string[] admittedOrder = durationKind is ContextConfirmationAdmission or SameCaptureContextAdmission ? ["H03"] : compositeTrainingRoot == null ? Order : Order.Skip(capacityContinuation || durationContinuation ? 3 : 2).ToArray();
+        string[] admittedOrder = durationKind is ContextConfirmationAdmission or SameCaptureContextAdmission or FiveMinuteStorageAdmission ? ["H03"] : compositeTrainingRoot == null ? Order : Order.Skip(capacityContinuation || durationContinuation ? 3 : 2).ToArray();
         long namespaceBytes = DurationAliasNamespaceBytes(durationKind, replayMinutes, admittedOrder.Length);
         long requiredFree = capacityCohort ? new QualificationCommitments(admittedOrder, sourceBytes, outputBytes, copyBytes, scratchBytes,traceBytes,namespaceBytes).InitialRequiredFreeBytes(60_000_000_000L+(durationCohort || candidateKind.GetString() is OwnedHistoryAdmission or OwnedHistoryRepairAdmission?OwnedHistoryOutsideFuture:0))
             : checked(resourceRecord.RootElement.GetProperty("budgetBytes").GetInt64() + 60_000_000_000L);
@@ -187,7 +187,12 @@ internal static partial class ReplayCalibrationRun
             }
         if (ContextQualification(plan))
         {
-            string file = Path.Combine(admission, "coverage-freeze.json"); files.Add(file, HashFile(file));
+            string file = Path.Combine(admission, FiveMinuteStorage(plan) ? FiveMinuteContractRole + ".json" : "coverage-freeze.json"); files.Add(file, HashFile(file));
+            if (FiveMinuteStorage(plan))
+            {
+                string method = Path.Combine(admission, PresentationMethod.Role + ".json");
+                files.TryAdd(method, HashFile(method));
+            }
         }
         if(OwnedHistoryRepair(plan))
         {
@@ -381,7 +386,7 @@ internal static partial class ReplayCalibrationRun
             boundedTrace = QualificationTraceBytes(plan), scratchAndClosure = QualificationScratchBytes(plan),
             newCohortFileForecast = QualificationFileForecast(plan), checkedEarlyCeiling = plan.StopBytes,
             accounting = "native allocation plus booked commitments; copied bytes may conservatively coexist with the fixed copy reservation" },
-        captureArguments = CaptureTemplate("<primary-index>"),
+        captureArguments = ExpectedCaptureTemplate(plan, "<primary-index>"),
         exportArguments = ReplayExactExport.Arguments(new("<session>", "<manifest>", ReferenceSeconds(plan), 20, 60, "h264_nvenc", ".ts", true, true), new ReplayInterval(3.25, 3.25 + ReferenceSeconds(plan), ReferenceSeconds(plan)), 3, "<owned-concat>", "<owned-partial>"),
         validationArguments = ReplayExactExport.DecodeArguments("<owned-partial>", true, 60),
         analysisArguments = InspectionArguments("<evidence-root>", "<owned-final>", ReferenceSeconds(plan)),
@@ -397,6 +402,9 @@ internal static partial class ReplayCalibrationRun
         "-segment_format", "mpegts", "-reset_timestamps", "0", "-avoid_negative_ts", "disabled",
         "-segment_format_options", "mpegts_copyts=1:avoid_negative_ts=disabled", .. ReplayManifestStream.OutputArguments(), Path.Combine("<session>", "chunk-%09d.ts")];
 
+    static string[] TimeoutControlArguments(string source) =>
+        ["-hide_banner", "-nostdin", "-re", "-f", "lavfi", "-i", source, "-t", "10", "-f", "null", "-"];
+
     internal static int Controls(string root, string engineRoot)
     {
         Require(!Directory.Exists(root) && !File.Exists(root), "Controls need a fresh root.");
@@ -406,7 +414,7 @@ internal static partial class ReplayCalibrationRun
         {
             (Name: "version", Args: new[] { "-version" }, Ms: 5000, Bytes: 2097152),
             (Name: "nonzero", Args: new[] { "-this-option-is-not-real" }, Ms: 5000, Bytes: 2097152),
-            (Name: "timeout", Args: new[] { "-hide_banner", "-nostdin", "-re", "-f", "lavfi", "-i", "anullsrc", "-t", "10", "-f", "null", "-" }, Ms: 200, Bytes: 2097152),
+            (Name: "timeout", Args: TimeoutControlArguments("sine"), Ms: 200, Bytes: 2097152),
             (Name: "output-limit", Args: new[] { "-version" }, Ms: 5000, Bytes: 128)
         };
         foreach (var item in cases)
@@ -737,7 +745,7 @@ internal static partial class ReplayCalibrationRun
                         foreach (var item in accounting.Outputs)
                             RecordOutput(item.Key, item.Value, workspaceCurrent.GetValueOrDefault(item.Key));
                         double observed = clock.Elapsed.TotalMilliseconds;
-                        if (activeCoverage) ObserveCaptureGrowth(accounting, observed);
+                        if (activeCoverage) ObserveCaptureGrowth(accounting, at, observed);
                         frozenHistory?.Check();
                         long traceStarted = Stopwatch.GetTimestamp();
                         trace.Append(FormattableString.Invariant($"{at},{observed - at},{gap},{observed - previousCompletion},{Used},{capacity.AvailableBytes},{fileCount},{entered - at},{inventoried - entered},{files.LeafMilliseconds},{files.LeafCount},{files.MaximumLeafMilliseconds},{phase},\"{files.MaximumLeafPath?.Replace("\"", "\"\"")}\",{files.OpenCount},{MetadataHandles},{accounted - inventoried},{observed - accounted}"));
@@ -801,6 +809,12 @@ internal static partial class ReplayCalibrationRun
         {
             if (!path.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase)
                 || closedCases.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase))) return true;
+            // The worker retires the staging directory and its hard-linked
+            // snapshot as soon as the save closes. A retained reader can keep
+            // a delete-pending entry alive through the next storage scan.
+            if (path.Contains(".partial.mp4.work" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || Path.GetFileName(Path.GetDirectoryName(path)).StartsWith("save-", StringComparison.OrdinalIgnoreCase))
+                return false;
             // Holding a handle through producer close can delay filesystem
             // allocation trimming. Current captured chunks and MP4s therefore
             // use short-lived observations until the case is fully closed.
@@ -830,7 +844,10 @@ internal static partial class ReplayCalibrationRun
             inventoryFiles.ReleaseHandles(); Volatile.Write(ref MetadataHandles, 0);
         }
 
-        void ObserveCaptureGrowth(CalibrationInventoryAccounting accounting, double at)
+        readonly FiveMinuteGrowthJournal fiveMinuteJournal = new();
+        internal void WriteFiveMinuteGrowth(string cell) => fiveMinuteJournal.WriteTo(cell, captureGrowth["H03"].StopAt);
+
+        void ObserveCaptureGrowth(CalibrationInventoryAccounting accounting, double scanStart, double at)
         {
             foreach (var label in Order)
             {
@@ -846,12 +863,17 @@ internal static partial class ReplayCalibrationRun
                 long growth = 0;
                 foreach (var member in current)
                     growth = checked(growth + Math.Max(0, member.Value - state.Previous.GetValueOrDefault(member.Key)));
+                bool journal = label == "H03" && FiveMinuteStorage(plan);
+                double earliest = journal ? fiveMinuteJournal.Observe(scanStart, at, state.Previous, current) : at;
                 state.Previous.Clear(); foreach (var member in current) state.Previous.Add(member.Key, member.Value);
                 Interlocked.Exchange(ref state.Total, checked(Interlocked.Read(ref state.Total) + growth));
+                if (journal) fiveMinuteJournal.Publish(state.Total);
                 state.Window.Enqueue((at, growth)); state.WindowBytes = checked(state.WindowBytes + growth);
-                while (state.Window.Count > 1 && state.Window.Peek().At < at - ReplayCapacityPolicy.CoverageMilliseconds)
+                while (state.Window.Count > 1 && state.Window.Peek().At < earliest - ReplayCapacityPolicy.CoverageMilliseconds)
                     state.WindowBytes -= state.Window.Dequeue().Bytes;
                 state.PeakWindowBytes = Math.Max(state.PeakWindowBytes, state.WindowBytes);
+                if (journal && (state.PeakWindowBytes > FiveMinutePollLimit || state.StopAt >= 0 && state.Total - state.StopAt > FiveMinuteStopLimit))
+                    throw new IOException($"Five-minute growth exceeded at {at:F3} ms: rolling peak {state.PeakWindowBytes} B, cumulative {state.Total} B, stop prefix {state.StopAt} B.");
             }
         }
         internal void MarkCaptureStop(string label)
@@ -859,7 +881,9 @@ internal static partial class ReplayCalibrationRun
             // Never delay owned cleanup behind observer I/O. The latest completed
             // allocation prefix is deliberately conservative for the drain interval.
             var state = captureGrowth[label];
-            Interlocked.CompareExchange(ref state.StopAt, Interlocked.Read(ref state.Total), -1);
+            long prefix = FiveMinuteStorage(plan) && label == "H03"
+                ? fiveMinuteJournal.MarkStop(clock.Elapsed.TotalMilliseconds) : Interlocked.Read(ref state.Total);
+            Interlocked.CompareExchange(ref state.StopAt, prefix, -1);
         }
         // A request is not absence or observer closure. In particular, never
         // acquire Gate here: a native inventory call may hold it indefinitely.
@@ -1135,6 +1159,13 @@ internal static partial class ReplayCalibrationRun
                 Require(capacityThread.Join(1000), "Capacity supervisor did not stop.");
                 Require(capacityQuery.WaitForClosure(1000), "Capacity observer closure is unconfirmed; retain experiment ownership.");
                 var errors = new List<Exception>();
+                if (FiveMinuteStorage(plan) && fiveMinuteJournal.HasChanges)
+                {
+                    string cell = Path.Combine(plan.Root, "H03");
+                    if (!File.Exists(Path.Combine(cell, "native-allocation-growth.json")))
+                        try { fiveMinuteJournal.WriteTo(cell, captureGrowth["H03"].StopAt, partial: true); }
+                        catch (Exception error) { errors.Add(error); }
+                }
                 if (closureError != null) errors.Add(closureError);
                 if (Failure != null) errors.Add(new IOException(Failure));
                 try { capacityQuery.TryComplete(out _); } catch (Exception error) { errors.Add(error); }
@@ -1185,7 +1216,7 @@ internal static partial class ReplayCalibrationRun
             if (!linked && hardlinksRequired) throw new IOException("Native qualification requires admitted same-volume hard links; no payload copy was reserved.");
             return linked;
         }
-        internal override void DeleteDirectory(string path) { } // All successes and failures are retained.
+        internal override void DeleteDirectory(string path, string workspacePartial = null) { } // All successes and failures are retained.
         internal override void DeleteFile(string path) { }
         internal override void Publish(string partial, string final)
             => WithPublicationGate(sampler.Gate, () => sampler.BeforePublication(partial), () => base.Publish(partial, final));
@@ -1541,7 +1572,7 @@ internal static partial class ReplayCalibrationRun
             {
                 var normalized = ReplayCalibrationStartup.NormalizeCaptureArguments(a, root,
                     Exact14(plan) && label == "H03" ? Issue14WorkerCase.CacheRoot(root) : null);
-                Require(normalized.SequenceEqual(CaptureTemplate(Native.PrimaryOutputIndex().ToString(CultureInfo.InvariantCulture))), "Real capture arguments differ from frozen reference recipe.");
+                Require(normalized.SequenceEqual(ExpectedCaptureTemplate(plan, Native.PrimaryOutputIndex().ToString(CultureInfo.InvariantCulture))), "Real capture arguments differ from frozen reference recipe.");
                 Write(Path.Combine(root, "capture-arguments.json"), a);
             };
             RecorderRuntime.ExportArgumentObserver = a => { BeginPayloadWork(); nativeEvidence?.RequireNativeSnapshot(a, capture.LastOutputSelection); AdmitNativeChild("export:" + label); Write(Path.Combine(root, "export-arguments-" + ++exports + ".json"), a); };
@@ -1572,7 +1603,7 @@ internal static partial class ReplayCalibrationRun
                 null, beforeLaunch: source =>
                 {
                     if (ContextQualification(plan))
-                        Require(source.ReferenceScope == ReadContextFreeze(plan).Context.Scope(ReplayReferenceModel.ExporterIdentity, 5),
+                        Require(source.ReferenceScope == (FiveMinuteStorage(plan) ? ReadFiveMinuteContract(plan).Context : ReadContextFreeze(plan).Context).Scope(ReplayReferenceModel.ExporterIdentity, 5),
                             "C00 actual capture context differs from the prospective freeze.");
                     if (captureStorage == null) return;
                     captureStorage.BeginCapture(source.ReferenceScope, source.DirectoryPath, root, () =>
@@ -1723,12 +1754,13 @@ internal static partial class ReplayCalibrationRun
             }
             sampler.RequireTime(ExportControllerLimit(plan));
             long? pressSourceChecked = null;
+            CaptureHealthSnapshot healthAtPress = independentPresentation!=null ? capture.ReadHealth() : null;
             if (cadence != null)
             {
                 // A maintenance wake may cross triggerAt between observations.
                 // Recheck immediately before stamping the immutable request.
                 Require(GetForegroundWindow() == hwnd && !fixture.HasExited && Native.IsWindowVisible(hwnd)
-                    && capture.ReadHealth().Healthy && captureStorage?.Stopped != true, "Controlled source is not valid at the save press.");
+                    && (healthAtPress??capture.ReadHealth()).Healthy && captureStorage?.Stopped != true, "Controlled source is not valid at the save press.");
                 var pressBounds = Native.DisplayBounds(IntPtr.Zero);
                 Require(pressBounds.Width == 1920 && pressBounds.Height == 1080, "Display dimensions changed at save press.");
                 pressSourceChecked = Stopwatch.GetTimestamp();
@@ -1771,6 +1803,8 @@ internal static partial class ReplayCalibrationRun
             while (!save.Completion.IsCompleted)
             {
                 sampler.Check(); Require(saveClock.Elapsed.TotalSeconds < ExportControllerLimit(plan), "Export controller deadline.");
+                if(independentPresentation!=null && (cadence==null || cadence.ObservationDue))
+                    CalibrationReferencePhase.CheckRecordingDuringSave(((IReplaySessionSource)capture).Stopped,capture.ReadHealth());
                 if (!plan.CompositeQualification && !((IReplaySessionSource)capture).Stopped
                     && ((IReplaySessionSource)capture).SaveCutoffAt(Stopwatch.GetTimestamp()) >= (Exact14(plan) || plan.CompositeQualification ? triggerAt + 10 : 310))
                 {
@@ -1788,6 +1822,9 @@ internal static partial class ReplayCalibrationRun
                 Thread.Sleep(cadence != null && !((IReplaySessionSource)capture).Stopped ? cadence.DelayMilliseconds : 100);
             }
             var result = save.Completion.GetAwaiter().GetResult();
+            CaptureHealthSnapshot healthAtPublication = independentPresentation!=null ? capture.ReadHealth() : null;
+            if(independentPresentation!=null && result.Succeeded)
+                CalibrationReferencePhase.CheckRecordingAtPublication(((IReplaySessionSource)capture).Stopped,healthAtPress,healthAtPublication,result.Interval.End);
             sampler.MarkCaptureStop(label); StopSource();
             Require(capture.HasExited && capture.CaptureExitCode == 0 && string.IsNullOrWhiteSpace(capture.ErrorTail),
                 "Capture did not exit normally with empty diagnostics; source is not eligible.");
@@ -1826,7 +1863,7 @@ internal static partial class ReplayCalibrationRun
                 // after CompletionReady and never inside the timed save.
                 PublishCreatorProofs(plan, root, label, "packet", capture, exports);
                 Write(Path.Combine(root, "primary-normal-sample.json"), new {
-                    qualification = "pending-paired-and-independent-inspections", sample });
+                    qualification = "pending-paired-and-independent-inspections", sample, healthAtPress, healthAtPublication });
                 Require(cache != null && workerCase == null && ((IReplaySessionSource)capture).Stopped,
                     "Paired output collection requires the stopped original capture and its owned cache.");
                 Require(pairedInputs != null, "Primary protected input ownership was not retained.");
@@ -2134,9 +2171,10 @@ internal static partial class ReplayCalibrationRun
                 timerIntervalMilliseconds = source.GetProperty("timerIntervalMilliseconds").GetInt32(),
                 fixtureReadySha256 = HashFile(Path.Combine(fixtureRoot, CalibrationFixturePublication.ReadyName)) };
         }
-        int sourceIdRange=creatorPlan?.FreshCandidateAdmission is SameCaptureContextAdmission or SameCaptureRetainedAdmission
+        int sourceIdRange=creatorPlan?.FreshCandidateAdmission is SameCaptureContextAdmission or SameCaptureRetainedAdmission or FiveMinuteStorageAdmission
             ? CalibrationPattern.ReferenceSourceIdRange : CalibrationPattern.SourceIdRange;
-        return ReadInspectionEvidence(receipt, root, file, seconds, label, input.CheckedIdentity, true, input.VerifyUnchanged, frameContract,sourceIdRange);
+        return ReadInspectionEvidence(receipt, root, file, seconds, label, input.CheckedIdentity, true, input.VerifyUnchanged, frameContract,sourceIdRange,
+            (SameCaptureQualification(creatorPlan) || creatorPlan?.FreshCandidateAdmission == SameCaptureRetainedAdmission) ? HashFile(file) : null);
         }
         finally { if (absent) input.Dispose(); }
     }
@@ -2145,7 +2183,7 @@ internal static partial class ReplayCalibrationRun
     // launching a new decoder when continuing an interrupted training phase.
     static Inspection ReadInspectionEvidence(ReplayExportProcessReceipt receipt, string root, string file, double seconds,
         string label, ReplayFileExtent checkedOutput, bool persistPictures, Action verify = null, object frameContract = null,
-        int sourceIdRange=CalibrationPattern.SourceIdRange)
+        int sourceIdRange=CalibrationPattern.SourceIdRange, string inspectedFileSha256=null)
     {
         int[] frames = InspectionFrames(seconds);
         string evidence = Path.Combine(root, Path.GetFileName(file));
@@ -2172,8 +2210,13 @@ internal static partial class ReplayCalibrationRun
         }
         if (label.EndsWith('1')) Require(ids.All(id => id == baseId), "Static source changed its ID.");
         else Require(ids[0] < ids[1] && ids[1] < ids[2] && hashes.Distinct().Count() >= 2, "Motion/cut source samples did not progress.");
-        if (persistPictures) Write(evidence + ".source-pictures.json", new { ids, hashes, sampleFrames = frames, frameContract,
-            limits = "Three sampled source IDs/complement rows and coarse images; no full picture cadence or A/V alignment claim." });
+        if (persistPictures)
+        {
+            var proof = JsonSerializer.SerializeToNode(new { ids, hashes, sampleFrames = frames, frameContract,
+                limits = "Three sampled source IDs/complement rows and coarse images; no full picture cadence or A/V alignment claim." });
+            if (inspectedFileSha256 != null) proof["inspectedFileSha256"] = inspectedFileSha256;
+            Write(evidence + ".source-pictures.json", proof);
+        }
         var audio = Regex.Matches(receipt.StandardError, @"RMS level dB:\s*([-+]?[0-9]+(?:\.[0-9]+)?)")
             .Select(m => double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture)).ToArray();
         Require(audio.Length > 0 && audio.All(double.IsFinite), "Reference RMS evidence is unavailable.");
@@ -2318,7 +2361,8 @@ internal static partial class ReplayCalibrationRun
             return lease;
         }
         ReplayReferenceModel model = null;
-        var contextFreeze = ContextQualification(plan) ? ReadContextFreeze(plan) : null;
+        var scoped = FiveMinuteStorage(plan) ? ReadFiveMinuteContract(plan) : null;
+        var contextFreeze = ContextQualification(plan) && scoped == null ? ReadContextFreeze(plan) : null;
         DateTime confirmationStarted = DateTime.UtcNow;
         if (CapacityTrainingContinuation(plan) || DurationTrainingContinuation(plan))
         {
@@ -2408,6 +2452,7 @@ internal static partial class ReplayCalibrationRun
                 var sample = Collect(plan, label, sampler, model, processes, focus, qualificationOutputs);
                 if (sampler.ActiveCoverage) sampler.EndActive();
                 var captureGrowth = sampler.CaptureMetrics(label);
+                if (scoped != null) sampler.WriteFiveMinuteGrowth(Path.Combine(plan.Root, label));
                 Write(Path.Combine(plan.Root, label, "capture-growth.json"), new {
                     captureGrowth.PollGrowth, captureGrowth.StopGrowth, captureGrowth.Volume,
                     sampler.MaximumActiveGap, sampler.MaximumCapacityGap, ObservationMilliseconds = ReplayCapacityPolicy.CoverageMilliseconds,
@@ -2468,7 +2513,7 @@ internal static partial class ReplayCalibrationRun
                 }
                 if (SameCaptureQualification(plan))
                     sameOracle = CollectSameOracle(plan, engine, [qualifications[^1],legacyQualifications[^1]],
-                        [sample,sample.LegacyOutput], sampler,caseRoot,createSource:true,contextFreeze.Context);
+                        [sample,sample.LegacyOutput], sampler,caseRoot,createSource:true,scoped?.Context ?? contextFreeze.Context);
                 // All source/export/inspection children of this case have exited.
                 // Keep complete snapshot bytes and provenance in verified archives
                 // before retiring only these new duplicate directory entries.
@@ -2540,6 +2585,12 @@ internal static partial class ReplayCalibrationRun
                 : ExactContinuation14(plan) ? ReplayReferenceModel.Hash(new { retained = HashFile(Path.Combine(plan.ExactContinuationRoot, "storage.csv")),
                 heldout = ExactFinalWorker14(plan) ? HashFile(Path.Combine(plan.ExactHeldoutContinuationRoot, "storage.csv")) : null, current = HashFile(Path.Combine(plan.Root, "storage.csv")) })
                 : HashFile(Path.Combine(plan.Root, "storage.csv"));
+            if (scoped != null)
+            {
+                WriteFiveMinuteResult(plan, scoped, expectedPlanHash, observationHash, confirmationStarted,
+                    qualifications.Single(), legacyQualifications.Single(), sameOracle);
+                return 0;
+            }
             if (ContextQualification(plan))
             {
                 var confirmation = new ReplayCoverageConfirmation("C00-current-5m-pair", contextFreeze.FreezeHash,

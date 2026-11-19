@@ -36,21 +36,26 @@ internal static partial class ReplayCalibrationCatalog
             && m.AcquisitionIdentity == c00.Packet.AcquisitionIdentity && m.SelectionHash == c00.Packet.SelectionHash
             && m.Start == c00.Packet.OutputStart && m.End == c00.Packet.OutputEnd
             && Hash(m.SourceClockHash) && Hash(m.SourceReferenceHash), "Genuine C00 manifest/clock/reference binding is missing or changed.");
-        Require(m.Inputs is { Length: > 0 and <= 305 } && m.Inputs.Length == c00.Packet.SegmentCount
-            && m.Inputs.All(i => i?.Extent != null && Hash(i.Sha256) && Path.IsPathFullyQualified(i.Path)
-                && double.IsFinite(i.Start) && double.IsFinite(i.End) && i.End > i.Start && i.Extent.Length > 0)
-            && m.Inputs.Select(i => i.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() == m.Inputs.Length
-            && m.Inputs.Select(i => i.Extent.Volume + "/" + i.Extent.Identity).Distinct().Count() == m.Inputs.Length
-            && m.Inputs.Sum(i => i.Extent.Length) == c00.Packet.InputBytes, "Complete protected C00 input digests/identities are required.");
-        for (int n = 1; n < m.Inputs.Length; n++)
-            Require(Math.Abs(m.Inputs[n - 1].End - m.Inputs[n].Start) <= .000001, "C00 complete input continuity changed.");
-        string selection = ReplayReferenceModel.Hash(new {
-            scope = c00.Packet.Scope, Interval = new ReplayInterval(m.Start, m.End, 300), FramesPerSecond = 60,
-            Codec = "h264_nvenc", RecordAudio = true,
-            inputs = m.Inputs.Select(i => new { i.Start, i.End, i.Extent.Volume, i.Extent.Identity, i.Extent.Length, i.Extent.AllocationUnit }).ToArray()
-        });
-        Require(selection == m.SelectionHash, "C00 manifest ordered native objects do not match its actual acquisition selection.");
+        ValidateFiveMinuteInputs(m.Inputs, c00.Packet);
         _ = SameCaptureMinute(m);
+    }
+
+    internal static void ValidateFiveMinuteInputs(ReplayCompletedInputDigest[] inputs, ReplayCalibrationSourceReceipt packet)
+    {
+        Require(inputs is { Length: > 0 and <= 305 } && inputs.Length == packet.SegmentCount
+            && inputs.All(i => i?.Extent != null && Hash(i.Sha256) && Path.IsPathFullyQualified(i.Path)
+                && double.IsFinite(i.Start) && double.IsFinite(i.End) && i.End > i.Start && i.Extent.Length > 0)
+            && inputs.Select(i => i.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() == inputs.Length
+            && inputs.Select(i => i.Extent.Volume + "/" + i.Extent.Identity).Distinct().Count() == inputs.Length
+            && inputs.Sum(i => i.Extent.Length) == packet.InputBytes, "Complete protected C00 input digests/identities are required.");
+        for (int n = 1; n < inputs.Length; n++)
+            Require(Math.Abs(inputs[n - 1].End - inputs[n].Start) <= .000001, "C00 complete input continuity changed.");
+        string selection = ReplayReferenceModel.Hash(new {
+            scope = packet.Scope, Interval = new ReplayInterval(packet.OutputStart, packet.OutputEnd, 300), FramesPerSecond = 60,
+            Codec = "h264_nvenc", RecordAudio = true,
+            inputs = inputs.Select(i => new { i.Start, i.End, i.Extent.Volume, i.Extent.Identity, i.Extent.Length, i.Extent.AllocationUnit }).ToArray()
+        });
+        Require(selection == packet.SelectionHash, "C00 manifest ordered native objects do not match its actual acquisition selection.");
     }
     internal static ReplayCompletedInputDigest[] SameCaptureMinute(ReplaySameCaptureManifest m)
     {

@@ -71,6 +71,7 @@ internal static class WorkerChecks
         { Console.WriteLine("V9 coverage controls: controlled private JSON/ACL/NTFS receipts and 302 one-byte dummy inputs; actual serialized loader and profile admission/resume/guard withdrawal, plus unmodelled C00 private-ledger staging sentinel before codec. No engine/codec/media payload/capture/audio/UI/worker/account activation. One helper, 45s work/60s outer, 512MiB/4096 handles, 8MiB private logical output, 60GB floor. Run --replay-coverage-checks <fresh-root>. Future --replay-coverage-freeze/issue are metadata only; C00 uses existing final calibration Run with separate recording authorization and exact-plan review; no future operation is authorized here."); return 0; }
         if (args is ["--replay-coverage-checks", var coverageRoot]) return ReplayCalibrationCatalogChecks.CoverageChecks(Path.GetFullPath(coverageRoot));
         if (args is ["--replay-coverage-C00-admission-checks"]) return ReplayCalibrationRun.ContextAdmissionChecks();
+        if (args is ["--replay-five-minute-storage-checks"]) return ReplayCalibrationRun.FiveMinuteStorageChecks();
         if (args is ["--replay-coverage-parent-checks", var parentRoot, var fivePath, var fiveHash, var thirtyPath, var thirtyHash, var omissionReview])
             return ReplayCalibrationCatalogChecks.CoverageParentChecks(Path.GetFullPath(parentRoot), fivePath, fiveHash, thirtyPath, thirtyHash, omissionReview);
         if (args is ["--replay-coverage-freeze", var freezeRequest, var freezeHash, var freezeOutput])

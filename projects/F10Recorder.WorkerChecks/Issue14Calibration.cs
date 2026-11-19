@@ -205,9 +205,12 @@ internal static partial class ReplayCalibrationRun
             {
                 "version" or "output-limit" => ["-version"],
                 "nonzero" => ["-this-option-is-not-real"],
-                _ => ["-hide_banner", "-nostdin", "-re", "-f", "lavfi", "-i", "anullsrc", "-t", "10", "-f", "null", "-"]
+                _ => TimeoutControlArguments("sine")
             };
-            Require(document.RootElement.GetProperty("arguments").Deserialize<string[]>().SequenceEqual(expectedArguments),
+            var recordedArguments = document.RootElement.GetProperty("arguments").Deserialize<string[]>();
+            // Older, already hash-bound receipts used stock FFmpeg's silence source.
+            Require(recordedArguments.SequenceEqual(expectedArguments)
+                || name == "timeout" && recordedArguments.SequenceEqual(TimeoutControlArguments("anullsrc")),
                 "Prior engine control arguments changed.");
             var receipt = document.RootElement.GetProperty("receipt");
             bool absent = receipt.GetProperty("ProducerAbsent").GetBoolean();

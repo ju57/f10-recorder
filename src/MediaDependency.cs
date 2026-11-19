@@ -27,7 +27,11 @@ namespace F10Recorder
         internal const string PackageSha256 = "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba";
         // This is never assigned from --data-dir, settings, manifests or PATH.
         internal static string RootDirectory = TrustedStorage.DefaultRoot;
+#if F10_QUEUE_ENGINE
+        internal const string ExecutableSha256 = "4a1af73d7e64dca262a435a72d2d292fdbab877bae786036169c497dfea9076a";
+#else
         internal const string ExecutableSha256 = "3256173f3f8bffd7df12227c68adf68025edb1832273a9530688a7bb1ed8edec";
+#endif
         internal const string ProbeSha256 = "f0d36ecbbdd3bcfac3efa078c96c7271c2e68b3810595552ac3b7f17e9a65c52";
         internal static string ExecutablePath { get { return Path.Combine(RootDirectory, "ffmpeg-" + PackageVersion, "bin", "ffmpeg.exe"); } }
         static readonly object Gate = new object();
@@ -179,6 +183,11 @@ namespace F10Recorder
                         if (!Hash(archive).Equals(PackageSha256, StringComparison.OrdinalIgnoreCase)) throw new IOException("The downloaded recording engine failed checksum verification. Retry setup.");
                         string extracted = Path.Combine(staging, "extracted"); ExtractArchive(archive, extracted);
                         string binary = Path.Combine(extracted, "ffmpeg-" + PackageVersion + "-essentials_build", "bin", "ffmpeg.exe");
+#if F10_QUEUE_ENGINE
+                        // The verified base archive supplies the probe, presets and notices.
+                        // Authenticate the bundled replacement in private staging before execution.
+                        File.Copy(Path.Combine(AppContext.BaseDirectory, "engine", "ffmpeg-queue.exe"), binary, true);
+#endif
                         if (!TryValidate(binary, out version)) throw new IOException("The approved FFmpeg package does not support this recorder.");
                         string packageRoot = Path.GetDirectoryName(Path.GetDirectoryName(binary));
                         string installedPackage = Path.Combine(RootDirectory, "ffmpeg-" + PackageVersion);

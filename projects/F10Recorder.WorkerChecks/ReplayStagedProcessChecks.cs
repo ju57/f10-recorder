@@ -51,6 +51,7 @@ internal static class ReplayStagedProcessChecks
     }
     internal static void Run()
     {
+        CheckGuardedPacketWrite();
         var tailClock = new Clock(); int tailPumps = 0;
         var neverReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Reject(() => ReplaySavePreparation.WaitForTail(neverReady.Task, tailClock, 0, () => { tailPumps++; tailClock.Ticks += 1000; }, () => "Controlled tail."), "Pending notification outlived original five-second tail budget.");
@@ -83,7 +84,7 @@ internal static class ReplayStagedProcessChecks
         byte[] bytes = Enumerable.Range(0, 1024).Select(n => (byte)n).ToArray(); string hash = Convert.ToHexString(SHA256.HashData(bytes));
         using (var source = new Source(bytes))
         using (var sink = new Sink())
-        using (var operation = new ReplayStagedProcess(Transport(sink), () => { }, () => Need(Environment.CurrentManagedThreadId == owner, "Guard ran off owner."), 3000, new object()))
+        using (var operation = new ReplayStagedProcess(Transport(sink), () => { }, () => Need(Environment.CurrentManagedThreadId == owner, "Guard ran off owner."), 1000, new object()))
         {
             WaitUntil(operation, () => operation.Timing.Ready != 0);
             Need(sink.Length == 0 && !source.Closed && !operation.Stopped, "Preparation consumed media or claimed closure before feed.");
@@ -92,6 +93,21 @@ internal static class ReplayStagedProcessChecks
             Need(receipt.Success && operation.Stopped && operation.Timing.FeedJoined && operation.Timing.FedBytes == bytes.Length
                 && operation.Timing.FeedSha256 == hash && verified == 2 && !source.Closed && operation.Timing.OwnerCallbacks > 0,
                 "Normal staged source/guard/feed/child joins failed.");
+            Thread.Sleep(1050);
+            operation.Pump(); // The joined child cannot expire during a later MP4 validation.
+        }
+        using (var sink = new Sink())
+        using (var active = new ReplayStagedProcess(Transport(sink), () => { }, () => { }, 200, new object()))
+        {
+            active.WaitForReady();
+            try
+            {
+                var clock = Stopwatch.StartNew();
+                while (clock.ElapsedMilliseconds < 1000) { active.Pump(); Thread.Sleep(1); }
+                throw new IOException("Active boundary missed its whole-operation deadline.");
+            }
+            catch (IOException error) when (error.Message == "Staged process whole operation deadline exceeded.") { }
+            active.AbortAndJoin();
         }
         using (var source = new Source(bytes))
         using (var sink = new Sink())
@@ -169,6 +185,40 @@ internal static class ReplayStagedProcessChecks
         using (var operation = new ReplayStagedProcess((_, _, _) => Receipt(), () => { }, () => { }, 1000, new object()))
             Reject(operation.WaitForReady, "An exited producer was treated as ready.");
         Console.WriteLine("Passed: staged accepted-only preparation, original-owner guards, readiness/early-exit checks, withheld verified input, exact bytes/hash, blocked pipe cancellation, actual simulated joins, expiry, wrong-thread and uncertain-launch retention controls; no child process/native API/media/device/capture.");
+    }
+    sealed class DelayedWrite : MemoryStream
+    {
+        internal bool Cancelled;
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> bytes, CancellationToken token = default)
+        {
+            try { await Task.Delay(650, token); }
+            catch (OperationCanceledException) { Cancelled = true; throw; }
+            await base.WriteAsync(bytes, token);
+        }
+    }
+    static void CheckGuardedPacketWrite()
+    {
+        byte[] bytes = new byte[ReplayGuardedPacketOutput.Capacity];
+        bytes[^1] = 17;
+        int owner = Environment.CurrentManagedThreadId, callbacks = 0;
+        using var destination = new DelayedWrite();
+        using var output = new ReplayGuardedPacketOutput(destination, () =>
+        {
+            Need(Environment.CurrentManagedThreadId == owner, "Packet output callback migrated off the owner.");
+            callbacks++;
+        });
+        output.Write(bytes);
+        output.Position = 0;
+        output.WriteByte(33);
+        output.Flush();
+        Need(output.Joined && callbacks >= 2 && destination.Length == bytes.Length
+            && destination.GetBuffer()[0] == 33 && destination.GetBuffer()[^1] == 17,
+            "Pending packet I/O starved checks or changed MP4 positions or bytes.");
+
+        using var cancelled = new DelayedWrite();
+        using var rejected = new ReplayGuardedPacketOutput(cancelled, () => throw new IOException("Owner rejected capacity."));
+        Reject(() => rejected.Write(bytes), "Guard failure did not reject the write.");
+        Need(rejected.Joined && cancelled.Cancelled && cancelled.Length == 0, "Rejected write failed to cancel and join.");
     }
     static void WaitUntilCleanup(ReplayStagedProcess operation, Func<bool> done)
     {

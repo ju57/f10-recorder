@@ -8,8 +8,8 @@ internal static partial class ReplayCalibrationRun
 {
     internal const string ContextConfirmationAdmission = "issue83-C00-current-context-frozen-union-v9";
     internal const string SameCaptureContextAdmission = "issue83-C00-same-capture-reference-v10";
-    static bool SameCaptureQualification(CalibrationPlan p) => p?.FreshCandidateAdmission == SameCaptureContextAdmission;
-    static bool ContextQualification(CalibrationPlan p) => p?.FreshCandidateAdmission is ContextConfirmationAdmission or SameCaptureContextAdmission;
+    static bool SameCaptureQualification(CalibrationPlan p) => p?.FreshCandidateAdmission is SameCaptureContextAdmission or FiveMinuteStorageAdmission;
+    static bool ContextQualification(CalibrationPlan p) => p?.FreshCandidateAdmission is ContextConfirmationAdmission or SameCaptureContextAdmission or FiveMinuteStorageAdmission;
     internal static CalibrationPlan ContextFixturePlan() => new("unqueried-current", "unqueried-engine", "controlled-C00",
         new(), ["H03"], ["unqueried-retained"], 0, 0, MaximumChildren: 13, BudgetBytes: 13_000_000_000,
         StopBytes: 12_000_000_000, DeadlineSeconds: 1800, RetainedOfflineSeconds: 0, MetadataHandleRoots: ["unqueried-retained"],
@@ -49,7 +49,7 @@ internal static partial class ReplayCalibrationRun
         && p.FreezeRetainedAllocations && p.ReuseCurrentMetadataHandles && !p.RetainActiveOutputHandles && !p.ReadonlyValidationPhases
         && !p.OperatorForegroundHandoff && !p.UserForegroundHandoff && !p.AutomaticFixtureHandoff
         && p.SelectedRetainedFiles == null && p.ReplayExporterRecipe == ReplaySaveExport.PolicyIdentity && p.Files != null
-        && p.EvidenceRoles?.ContainsKey("fresh-candidate-qualification") == true && p.EvidenceRoles.ContainsKey("coverage-freeze");
+        && p.EvidenceRoles?.ContainsKey("fresh-candidate-qualification") == true && (FiveMinuteStorage(p) ? FiveMinuteShape(p) : p.EvidenceRoles.ContainsKey("coverage-freeze"));
 
     static ReplayCoverageFreeze ReadContextFreeze(CalibrationPlan plan)
     {

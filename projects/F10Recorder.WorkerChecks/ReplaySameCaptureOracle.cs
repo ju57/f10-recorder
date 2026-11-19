@@ -79,32 +79,42 @@ internal static partial class ReplayCalibrationRun
         return ids;
     }
     static SameOracleRaw DecodeSameOracle(CalibrationPlan plan, string engine, string input, string root,
-        bool source, double origin, int ordinal, Sampler sampler)
+        bool source, double origin, int ordinal, Sampler sampler, ReplayDecodeLease inputLease = null)
     {
-        sampler.BeginOffline(SameDecodePhase, 32_000_000, 100);
+        bool absent = true, phaseStarted = false;
         try
         {
+            sampler.BeginOffline(SameDecodePhase, 32_000_000, 100);
+            phaseStarted = true;
             Directory.CreateDirectory(root); string[] args = SameOracleArguments(input, root, source, origin);
             string arguments = Path.Combine(root, "arguments.json"); Write(arguments, args);
             AdmitNativeChild("reference-oracle:H03");
             using var job = new Native.ProcessJob();
             var receipt = ReplayExportProcess.Run(engine, args, root, job, timeoutMilliseconds: 90000,
-                checkStorage: () => sampler.Check());
+                checkStorage: () => sampler.Check(), inputLease: inputLease, producerStopped: value => absent = value);
             Require(receipt is { Success: true, ResourcesFinal: true, ResourceError: null }, "Independent source/reference decoder failed; no retry.");
             Write(Path.Combine(root, "process.json"), SaveProcess(root, "reference-decode", receipt));
             PublishSameOracleCreator(plan, root, arguments, args, receipt, ordinal);
-            var ids = SameIds(File.ReadAllBytes(Path.Combine(root, "ids.raw")));
-            string audio = Path.Combine(root, "audio.raw");
-            Require(new FileInfo(audio).Length is > 0 and <= 21_000_000 && new FileInfo(audio).Length % 8 == 0,
-                "Reference PCM21MB/float-stereo bound.");
-            var raw = new SameOracleRaw(root, "pending", SameFirstTimestamp(receipt.StandardError,@"\[Parsed_showinfo_",48000), SameFirstTimestamp(receipt.StandardError,@"\[Parsed_ashowinfo_",8000), ids,
-                audio, HashFile(Path.Combine(root, "process.json")));
-            var evidence = new { raw.Root, raw.FirstVideo, raw.FirstAudio, pictures = ids.Length,
-                ids = HashFile(Path.Combine(root, "ids.raw")), audio = HashFile(audio), process = raw.ReceiptHash, arguments = HashFile(arguments) };
-            Write(Path.Combine(root, "evidence.json"), evidence);
-            return raw with { EvidenceHash = HashFile(Path.Combine(root, "evidence.json")) };
+            return ReadSameOracleDecode(root, receipt.StandardError, arguments);
         }
-        finally { sampler.EndOffline(); }
+        finally
+        {
+            if (absent) inputLease?.Dispose();
+            if (phaseStarted) sampler.EndOffline();
+        }
+    }
+    static SameOracleRaw ReadSameOracleDecode(string root, string log, string arguments)
+    {
+        var ids = SameIds(File.ReadAllBytes(Path.Combine(root, "ids.raw")));
+        string audio = Path.Combine(root, "audio.raw");
+        Require(new FileInfo(audio).Length is > 0 and <= 21_000_000 && new FileInfo(audio).Length % 8 == 0,
+            "Reference PCM21MB/float-stereo bound.");
+        var raw = new SameOracleRaw(root, "pending", SameFirstTimestamp(log,@"\[Parsed_showinfo_",48000), SameFirstTimestamp(log,@"\[Parsed_ashowinfo_",8000), ids,
+            audio, HashFile(Path.Combine(root, "process.json")));
+        var evidence = new { raw.Root, raw.FirstVideo, raw.FirstAudio, pictures = ids.Length,
+            ids = HashFile(Path.Combine(root, "ids.raw")), audio = HashFile(audio), process = raw.ReceiptHash, arguments = HashFile(arguments) };
+        Write(Path.Combine(root, "evidence.json"), evidence);
+        return raw with { EvidenceHash = HashFile(Path.Combine(root, "evidence.json")) };
     }
     static void PublishSameOracleCreator(CalibrationPlan plan, string root, string argumentsFile,
         string[] arguments, ReplayExportProcessReceipt child, int ordinal)
@@ -180,19 +190,58 @@ internal static partial class ReplayCalibrationRun
         }
         else
         {
-            string data = Path.Combine(sourceCell,"reference-oracle","source-data.json");
-            source = JsonSerializer.Deserialize<SameOracleRaw>(File.ReadAllBytes(data));
-            Require(source.EvidenceHash == HashFile(Path.Combine(source.Root,"evidence.json")),"Immutable accepted C00 source oracle changed.");
-            using var evidence = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(source.Root,"evidence.json")));
-            var bound=evidence.RootElement;
-            Require(bound.GetProperty("Root").GetString()==source.Root && bound.GetProperty("FirstVideo").GetDouble()==source.FirstVideo
-                && bound.GetProperty("FirstAudio").GetDouble()==source.FirstAudio && source.AudioPath==Path.Combine(source.Root,"audio.raw")
-                && Path.GetFullPath(source.Root)==Path.Combine(Path.GetFullPath(sourceCell),"reference-oracle","source"),"C00 source timing/owned paths changed.");
-            Require(HashFile(source.AudioPath)==evidence.RootElement.GetProperty("audio").GetString()
-                && HashFile(Path.Combine(source.Root,"ids.raw"))==evidence.RootElement.GetProperty("ids").GetString(), "C00 source oracle raw bytes changed.");
-            Require(source.Ids.SequenceEqual(SameIds(File.ReadAllBytes(Path.Combine(source.Root,"ids.raw")))),"C00 source oracle IDs changed.");
+            source = ReadSameOracleSource(sourceCell);
         }
-        sampler.BeginOffline(SameSourcePhase,0,60);bool sourcePhase=true;
+        SameOracleRaw DecodeOutput(int index)
+        {
+            var sample = samples[index];
+            var q = outputs[index];
+            string inspectionRoot = index == 0 ? cell : Path.Combine(cell, "legacy");
+            string proof = Path.Combine(inspectionRoot, Path.GetFileName(sample.File) + ".source-pictures.json");
+            using var evidence = JsonDocument.Parse(ReadCoverageMetadata(proof, q.SourcePicturesHash));
+            var owner = OpenSameOracleOutput(sample.File, q.QualificationOutput,
+                evidence.RootElement.GetProperty("inspectedFileSha256").GetString());
+            return DecodeSameOracle(plan,engine,sample.File,Path.Combine(oracle,"output-"+index),false,0,createSource?index+1:index,sampler,owner);
+        }
+        return AnalyzeSameOracle(plan, outputs, source, sourceCell, oracle, context, watch, createSource, sampler, DecodeOutput);
+    }
+
+    static ReplayDecodeLease OpenSameOracleOutput(string file, ReplayFileExtent published, string inspectedFileSha256)
+    {
+        var owner = new ReplayDecodeLease(file);
+        try
+        {
+            // Check the pinned native file ID, volume, allocation unit and logical length.
+            // NTFS can release unused allocation after the final publishing handle closes.
+            owner.ObserveReservation(published);
+            Require(inspectedFileSha256?.Length == 64 && HashFile(file) == inspectedFileSha256,
+                "Reopened qualification output content changed since inspection.");
+            return owner;
+        }
+        catch { owner.Dispose(); throw; }
+    }
+
+    static SameOracleRaw ReadSameOracleSource(string sourceCell)
+    {
+        string data = Path.Combine(sourceCell,"reference-oracle","source-data.json");
+        var source = JsonSerializer.Deserialize<SameOracleRaw>(File.ReadAllBytes(data));
+        Require(source.EvidenceHash == HashFile(Path.Combine(source.Root,"evidence.json")),"Immutable accepted C00 source oracle changed.");
+        using var evidence = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(source.Root,"evidence.json")));
+        var bound=evidence.RootElement;
+        Require(bound.GetProperty("Root").GetString()==source.Root && bound.GetProperty("FirstVideo").GetDouble()==source.FirstVideo
+            && bound.GetProperty("FirstAudio").GetDouble()==source.FirstAudio && source.AudioPath==Path.Combine(source.Root,"audio.raw")
+            && Path.GetFullPath(source.Root)==Path.Combine(Path.GetFullPath(sourceCell),"reference-oracle","source"),"C00 source timing/owned paths changed.");
+        Require(HashFile(source.AudioPath)==evidence.RootElement.GetProperty("audio").GetString()
+            && HashFile(Path.Combine(source.Root,"ids.raw"))==evidence.RootElement.GetProperty("ids").GetString(), "C00 source oracle raw bytes changed.");
+        Require(source.Ids.SequenceEqual(SameIds(File.ReadAllBytes(Path.Combine(source.Root,"ids.raw")))),"C00 source oracle IDs changed.");
+        return source;
+    }
+
+    static SameOracleResult AnalyzeSameOracle(CalibrationPlan plan, ReplayCalibrationSourceReceipt[] outputs,
+        SameOracleRaw source, string sourceCell, string oracle, ReplayQualificationContext context,
+        Stopwatch watch, bool createSource, Sampler sampler, Func<int,SameOracleRaw> decodeOutput)
+    {
+        sampler?.BeginOffline(SameSourcePhase,0,60);bool sourcePhase=true;
         try {
         var allRows = File.ReadLines(Path.Combine(sourceCell,"source-render-clock.csv")).Skip(1).Select(s=>s.Split(',').Select(v=>double.Parse(v,CultureInfo.InvariantCulture)).ToArray()).ToArray();
         int leadingZero=allRows.TakeWhile(r=>r.Length==7&&r[1]==0).Count();
@@ -221,9 +270,6 @@ internal static partial class ReplayCalibrationRun
             && Math.Abs((rows[n][1]-rows[n-1][1])/rows[n][2]-(rows[n][3]-rows[n-1][3])/1e7)<=.002,
             "Discontinuous/stale render clock/stream position.");
         var paints = File.ReadLines(Path.Combine(sourceCell,"source-paints.csv")).Skip(1).Select(s=>s.Split(',').Select(v=>long.Parse(v,CultureInfo.InvariantCulture)).ToArray()).ToArray();
-        Require(paints.Length is >2 and <=40000 && paints.All(r=>r.Length==3&&r[2]>=r[1]&&(r[2]-r[1])/frequency<=.025)
-            && paints.Select(r=>r[0]).Distinct().Count()==paints.Length,"Unique visual publication brackets required.");
-        var paintMap=paints.ToDictionary(r=>(int)r[0]);
         var presentationBinding=PresentationPlanBinding.For(plan);
         if(presentationBinding!=null&&createSource)
         {
@@ -232,20 +278,36 @@ internal static partial class ReplayCalibrationRun
             sameCapturePresentationOwner=new FrozenCalibrationHistory([],paths.Length,64,selectedFiles:paths);
             Require(sameCapturePresentationOwner.AllocatedBytes<=32_000_000,"Native reference metadata reserve32MB");
         }
-        var presentation=presentationBinding==null?null:CalibrationPresentationReference.ReadClosed(sourceCell,epoch,frequency,presentationBinding.Hash,presentationBinding.Spec);
+        var windows=outputs.Select(q=>{
+            int first=checked((int)Math.Ceiling((q.OutputStart-source.FirstVideo)*60-.000001));
+            int count=checked((int)Math.Round(q.ExportSeconds*60));
+            Require(first>=0 && count>0 && first<=source.Ids.Length-count,"Requested output window outside decoded C00 history.");
+            return (First:first,End:first+count);
+        }).ToArray();
+        Require(windows.Length>0 && windows.All(w=>w==windows[0]),"Same-capture exports must cover the same source pictures.");
+        var window=windows[0];
+        int visualEnd=source.Ids.Length;
+        int? finalDisplayWitness=null;
+        PresentationTimeline presentation=null;
         string presentationMethod=presentationBinding?.Spec.Method??"GDI-Refresh-DwmFlush-v1";
-        if(presentation!=null)
+        if(presentationBinding!=null)
         {
             var requested=CalibrationPresentationReference.ReadJson<PresentationStart>(Path.Combine(sourceCell,CalibrationPresentationReference.RequestName));
+            if(requested.QualifySavedPictures)visualEnd=window.End;
+            presentation=CalibrationPresentationReference.ReadClosed(sourceCell,epoch,frequency,presentationBinding.Hash,presentationBinding.Spec,source.Ids[window.End-1]);
+            if(requested.QualifySavedPictures)finalDisplayWitness=presentation.SuccessorId(source.Ids[window.End-1]);
             var ready=CalibrationPresentationReference.ReadJson<PresentationReady>(Path.Combine(sourceCell,CalibrationPresentationReference.ReadyName));
+            CalibrationReferencePhase.ValidatePaintBrackets(paints,frequency,finalDisplayWitness);
             CalibrationReferencePhase.ValidateArm(policy.GetProperty("qualificationPhase").GetString(),requested.RequestedQpc,policy.GetProperty("qualificationArmQpc").GetInt64(),ready.ReadyQpc,epoch,
                 paints.Select(p=>p[1]),allRows.Select(r=>r[4]));
         }
+        else CalibrationReferencePhase.ValidatePaintBrackets(paints,frequency,null);
+        var paintMap=paints.ToDictionary(r=>(int)r[0]);
         if(presentation!=null)nativeTimestampUncertainty=1d/frequency;
         var gdiProxyFailedFrames=new List<int>();
         double sourceVisualError=0,visualHalf=0,interpolationHalf=0;
         double visualMinimum=double.PositiveInfinity,visualMaximum=double.NegativeInfinity;
-        for(int n=0;n<source.Ids.Length;n++)
+        for(int n=0;n<visualEnd;n++)
         {
             bool haveShown=paintMap.TryGetValue(source.Ids[n],out var shown),haveNext=paintMap.TryGetValue(source.Ids[n]+1,out var next);
             Require(haveShown&&haveNext,
@@ -256,7 +318,7 @@ internal static partial class ReplayCalibrationRun
             if(presentation==null)Require(gdiValid,"Stale/early source picture outside independent compositor bounds.");
             else presentation.CheckFrame(source.Ids[n],epoch+actual*frequency,bridge);
         }
-        for(int n=1;n<source.Ids.Length;n++) if(source.Ids[n]!=source.Ids[n-1])
+        for(int n=1;n<visualEnd;n++) if(source.Ids[n]!=source.Ids[n-1])
         {
             Require(paintMap.TryGetValue(source.Ids[n],out var paint),"Unknown source visual ID.");
             double actual=source.FirstVideo+n/60d, low=(paint[1]-epoch)/frequency, high=(paint[2]-epoch)/frequency;
@@ -268,19 +330,18 @@ internal static partial class ReplayCalibrationRun
             visualMinimum=Math.Min(visualMinimum,minimum);visualMaximum=Math.Max(visualMaximum,maximum);
         }
         Write(Path.Combine(oracle,"source-presentation-diagnostic.json"),new{primaryMethod=presentationMethod,
-            gdiProxyFailedFrames,meaning="Original GDI proxy results retained;native presentation is a new independent content reference,not recorder acquire-time attribution or old-C00 acceptance."});
+            visualEndExclusive=visualEnd,lastRequiredMarker=source.Ids[visualEnd-1],lastQualifiedDisplayRow=presentation?.LastQualifiedRow,gdiProxyFailedFrames,
+            meaning="Decoded source frame indices on the acquisition clock; native display evidence and GDI diagnostics."});
         var sourcePcm=SamePcm(source.AudioPath); var checks=new List<ReplaySameCaptureOutputCheck>();
-        sampler.EndOffline();sourcePhase=false;
+        sampler?.EndOffline();sourcePhase=false;
         for(int output=0;output<outputs.Length;output++)
         {
-            var q=outputs[output]; var sample=samples[output];
-            using var owner=new ReplayPublicationLease(sample.File);
-            Require(owner.CheckedIdentity==q.QualificationOutput,"Oracle output identity differs from actual independent publication/inspection.");
-            var raw=DecodeSameOracle(plan,engine,sample.File,Path.Combine(oracle,"output-"+output),false,0,createSource?output+1:output,sampler);
-            sampler.BeginOffline(SameOutputPhase,0,90);
+            var q=outputs[output];
+            var raw=decodeOutput(output);
+            sampler?.BeginOffline(SameOutputPhase,0,90);
             try {
-            int first=(int)Math.Ceiling((q.OutputStart-source.FirstVideo)*60-.000001), count=checked((int)Math.Round(q.ExportSeconds*60));
-            Require(first>=0&&first+count<=source.Ids.Length&&raw.Ids.Length==count&&raw.Ids.SequenceEqual(source.Ids.Skip(first).Take(count)),
+            int first=window.First, count=window.End-first;
+            Require(raw.Ids.Length==count&&raw.Ids.SequenceEqual(source.Ids.Skip(first).Take(count)),
                 "Every output picture must match independently decoded C00 source in the fixed window.");
             var pcm=SamePcm(raw.AudioPath); double audioError=0; int markers=0;var eligible=new List<int>();
             double audioMinimum=double.PositiveInfinity,audioMaximum=double.NegativeInfinity;
@@ -300,7 +361,7 @@ internal static partial class ReplayCalibrationRun
                 double expected=(qpc100ns/1e7-epoch/frequency);
                 if(expected<q.OutputStart+2 || expected+1.9>q.OutputEnd)continue;
                 eligible.Add(id);
-                sampler.Check();
+                sampler?.Check();
                 var sourceMarker=LocateSameMarker(sourcePcm,(int)Math.Round((expected-source.FirstAudio)*8000));
                 var outputMarker=LocateSameMarker(pcm,(int)Math.Round((expected-q.OutputStart-raw.FirstAudio)*8000));
                 Require(sourceMarker.Id==id&&outputMarker.Id==id,"Wrong absolute audio ID/integer-period substitution.");
@@ -320,11 +381,11 @@ internal static partial class ReplayCalibrationRun
                 visualMinimum,visualMaximum,audioMinimum,audioMaximum,uncertainty,nativeTimestampUncertainty,diagnosticGdiVisualHalf=visualHalf,primaryVisualReferenceUncertainty=presentation==null?visualHalf:nativeTimestampUncertainty,relativeAvMethod=SameRelativeAvMethod,
                 legacyAbsoluteErrorSum=sourceVisualError+audioError,
                 conservativeRelativeAvBound=SameAvBound(visualMinimum,visualMaximum,audioMinimum,audioMaximum,uncertainty)});
-            } finally { sampler.EndOffline(); }
+            } finally { sampler?.EndOffline(); }
         }
         Write(Path.Combine(oracle,"report.json"),new{policy=CalibrationSourceReference.Policy,relativeAvMethod=SameRelativeAvMethod,presentationMethod,source.Root,source.EvidenceHash,leadingZeroPositionRows=leadingZero,outputs=checks,seconds=watch.Elapsed.TotalSeconds,
             meaning="Measured source render-clock and compositor relation, then all-output source identity and absolute unique audio IDs. No fitted output offset, physical DAC/scanout, soak, game or ordinary Saved acceptance."});
         return new(source.Root,source.EvidenceHash,checks.ToArray(),watch.Elapsed.TotalSeconds,HashFile(Path.Combine(oracle,"report.json")));
-        } finally { if(sourcePhase)sampler.EndOffline(); }
+        } finally { if(sourcePhase)sampler?.EndOffline(); }
     }
 }

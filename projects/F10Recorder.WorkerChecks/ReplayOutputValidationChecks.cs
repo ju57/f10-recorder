@@ -128,10 +128,10 @@ internal static class ReplayOutputValidationChecks
         internal override void Publish(string partial, string final) { base.Publish(partial, final); Publications++; }
         internal override void Publish(ReplayExportRequest request, string final)
         { BeforeRequestPublication?.Invoke(request, final); base.Publish(request, final); if (request.ValidatedOutput != null) Publications++; }
-        internal override void DeleteDirectory(string path)
+        internal override void DeleteDirectory(string path, string workspacePartial = null)
         {
             if (FailCleanup) throw new IOException("Independent cleanup failure");
-            base.DeleteDirectory(path);
+            base.DeleteDirectory(path, workspacePartial);
         }
         internal override void DeleteFile(string path)
         {
@@ -419,7 +419,8 @@ internal static class ReplayOutputValidationChecks
                 request.Closure.BeginPacketMux();
                 request.Closure.BeginSourceClose();
                 if (defect != "source-close-incomplete") request.Closure.CompleteSourceClose(defect != "source-close");
-                request.IndexBatch = new() { Workers = 4, Joined = defect != "reader-join" };
+                request.IndexReaders.Begin();
+                request.IndexReaders.Complete(defect != "reader-join");
                 if (defect != "missing-receipt") request.FreezeManagedMux(new(Environment.ProcessId, DateTime.UtcNow, defect != "writer-close", true,
                     "Completed", 1, 1, 0, 0, new("fixture-volume", "fixture-id", 4096, 1024, 4096), null, null, null, 0, 0, new(), new(), 0, 0));
                 var lifetime = new ReplayExportLifetime();
@@ -612,7 +613,7 @@ internal static class ReplayOutputValidationChecks
         });
         await Check("shared-ledger-scratch-discharged-once", async path =>
         {
-            using var f = new Fixture(path, sharedLedger: true); f.Files.OutputFree = 28672;
+            using var f = new Fixture(path, sharedLedger: true); f.Files.OutputFree = 49152;
             f.Source.Estimate = (s, _) => f.Demand(s, 24576) with { Scratch = new(8192, 4096) };
             f.Source.CompositeExport = (request, check) =>
             {
@@ -621,13 +622,24 @@ internal static class ReplayOutputValidationChecks
                 File.WriteAllBytes(ReplayOutputWorkspace.AssemblyPath(request.Partial), new byte[6144]);
                 File.WriteAllBytes(request.Partial, new byte[6144]);
                 check();
-                // 28KiBinitial -20KiBmaterialized -4KiBstill reserved=4KiB.
-                // Charging the entire24KiB against only the final8KiB would fail.
-                var available = f.Reservations.ObserveUnreserved(f.Destination, f.Files);
-                Require(available.Bytes == 4096, "Shared ledger charged scratch twice or discharged more than its actual allocation.");
+                // Admission credits verified materialized files. The periodic free-space
+                // sample conservatively charges the full 24 KiB promise against 28 KiB free.
+                Require(f.Reservations.ObserveUnreserved(f.Destination, f.Files).Bytes == 4096,
+                    "Periodic polling credited materialized scratch without verifying it.");
+                string owner = Guid.NewGuid().ToString("N");
+                var claim = new ReplayVolumeClaim(Path.Combine(f.Destination, "next-output"), f.Destination, "volume-B", 4096, 24576);
+                f.Reservations.Update(owner, [claim], f.Files);
+                try
+                {
+                    bool rejected = false;
+                    try { f.Reservations.Update(owner, [claim with { PeakAllocatedBytes = 28672 }], f.Files); }
+                    catch (IOException ex) when (ex.Message.Contains("remaining growth")) { rejected = true; }
+                    Require(rejected, "Competing admission exceeded the 24 KiB remaining after materialization.");
+                }
+                finally { f.Reservations.Release(owner); }
             };
             var result = await Finish(f.Save());
-            Require(result.Succeeded && f.Files.Publications == 1, "A fully reserved save failed as its scratch materialized.");
+            Require(result.Succeeded && f.Files.Publications == 1, "A fully reserved save failed as its scratch materialized: " + result.Error);
             f.Preserved();
         });
         await Check("stopped-before-accepted-tail-fails-without-shortening", async path =>
@@ -1160,10 +1172,13 @@ internal static class ReplayOutputValidationChecks
             File.WriteAllText(plan, JsonSerializer.Serialize(new { plan = new CalibrationPlan("unused-root", "unused-engine", "unused-environment",
                 new Dictionary<string, string>(), [], [], 0, 0) }));
             string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(plan)));
-            bool rejected = false;
-            try { ReplayCalibrationRun.Run(plan, hash); }
-            catch (IOException ex) { rejected = ex.Message.StartsWith("Legacy copy-export calibration admission"); }
-            Require(rejected, "Legacy child/resource admission reached device work for a changed exporter.");
+            int exit = ReplayCalibrationRun.Run(plan, hash, CalibrationAdmissionMode.CheckLaunch);
+            using var failure = JsonDocument.Parse(File.ReadAllBytes(Directory.GetFiles(path, "STARTUP-FAILURE-*.json").Single()));
+            var report = failure.RootElement;
+            Require(exit == 1 && report.GetProperty("planSha256").GetString() == hash
+                && report.GetProperty("phase").GetString() == "final-plan-admission"
+                && !report.GetProperty("captureStarted").GetBoolean() && !report.GetProperty("audioStarted").GetBoolean()
+                && !report.GetProperty("engineStarted").GetBoolean(), "Legacy plan did not fail before source/device work.");
             return Task.CompletedTask;
         });
         File.WriteAllText(Path.Combine(root, "verification.json"), JsonSerializer.Serialize(new

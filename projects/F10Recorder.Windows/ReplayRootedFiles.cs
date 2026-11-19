@@ -94,7 +94,7 @@ internal sealed class ReplayRootedFiles() : ReplayFiles(ReplayFileMode.NativeInv
         if (!owner.Files.ContainsKey(leaf) && !owner.Native.EnumerateLeaves(4096).Any(e=>e.Path.Equals(Path.GetFullPath(path),StringComparison.OrdinalIgnoreCase))) return;
         Registry.RemoveFile(owner, leaf);
     }
-    internal override void DeleteDirectory(string path)
+    internal override void DeleteDirectory(string path, string workspacePartial = null)
     { try { Registry.RemoveRegisteredTree(DirectoryOwner(path)); } catch(Win32Exception error) { throw new IOException("Rooted directory retirement failed.",error); } }
     internal override void Publish(ReplayExportRequest request, string final)
     {

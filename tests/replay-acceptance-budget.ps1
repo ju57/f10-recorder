@@ -22,7 +22,7 @@ function Assert-ReplayAcceptanceStorage {
  $scan=[Diagnostics.Stopwatch]::StartNew()
  $inventory=Measure-ReplayAcceptanceStorage @($Batch.root,$Batch.admission)
  if($Batch.budgetBytes -ne 31000000000L -or $Batch.stopBytes -ne 30500000000L -or $Batch.minimumFreeBytes -ne 60000000000L){throw 'Exact conditional-retention storage policy required.'}
- if($inventory.bytes -ge [long]$Batch.stopBytes -or (Get-PSDrive D).Free -lt 60000000000L){throw 'Whole batch storage stop/floor.'}
+ if($inventory.bytes -ge [long]$Batch.stopBytes -or [IO.DriveInfo]::new([IO.Path]::GetPathRoot($Batch.root)).AvailableFreeSpace -lt 60000000000L){throw 'Whole batch storage stop/floor.'}
  if($scan.Elapsed.TotalMilliseconds -gt 500){throw 'Whole batch scan exceeded500ms; failed observer remains retained.'}
  return $inventory
 }

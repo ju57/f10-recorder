@@ -18,8 +18,18 @@ internal static class ReplayRetirementChecks
     };
     sealed class Source(string directory, FailureStage stage, bool failExport) : IReplaySessionSource
     {
-        public ReplayValidation ValidateOutput(string path, ReplayInterval interval, Action<ReplayProducerProof> changed, Action check)
-            => new("ControlledNonmedia", 0, 0);
+        public ReplayValidation ValidateOutput(ReplayExportRequest request, Action<ReplayProducerProof> changed, Action check)
+        {
+            var output = new ReplayPublicationLease(request.Partial);
+            try
+            {
+                Require(output.CheckedIdentity.Length == 2048, "Unexpected controlled retirement output length.");
+                request.FreezeValidatedOutput(output);
+                return new("ControlledNonmedia", 0, 0, ExportRecipe: request.Recipe,
+                    CheckedOutput: output.CheckedIdentity, PublicationIdentityBound: true);
+            }
+            catch { output.Dispose(); throw; }
+        }
         internal readonly ManualResetEventSlim ExportEntered = new(), ReleaseExport = new();
         internal bool Disposed;
         public ReplaySessionInfo ReplayInfo => new(directory, Path.Combine(directory, "segments.csv"), 2, 20, 60, "h264_nvenc", ".ts", false, false);

@@ -135,7 +135,7 @@ internal sealed class ReplayGuardDirectory : IDisposable
     internal FileTicket OpenAsyncPublicationRead(string leaf,ReplayFileExtent expected)=>Open(leaf,ReadData,OpenDisposition,5,expected,asynchronous:true);
     internal FileTicket OpenObservation(string leaf,ReplayFileExtent expected)=>Open(leaf,ReadData,OpenDisposition,3,expected);
     internal FileTicket OpenForRemoval(string leaf,ReplayFileExtent expected)=>Open(leaf,DeleteAccess,OpenDisposition,3,expected);
-    internal FileTicket CreateNew(string leaf)=>Open(leaf,ReadData|WriteData,CreateDisposition,1,null);
+    internal FileTicket CreateNew(string leaf,bool asynchronous=false)=>Open(leaf,ReadData|WriteData,CreateDisposition,1,null,asynchronous);
     // Shared authority mutex name: open-or-create, exclusive, relative to the
     // held ordinary profiles directory. No data write/truncate occurs here.
     internal FileTicket OpenAuthorityLock(string leaf)=>Open(leaf,ReadData|WriteData,3,0,null);

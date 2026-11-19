@@ -35,6 +35,28 @@ function Add-PendingUnheldControlImage([string]$Key,$Fact) {
   ([DateTimeOffset]$Fact.CreationDate).UtcDateTime-lt$birth-or-not(Test-UnheldControlContext)){throw 'Unheld control lacks current pre-release collector context'}
  if(-not$pendingControlImages.ContainsKey($Key)){$pendingControlImages[$Key]=[ordered]@{unheld=$true;fact=$Fact;started=(Get-ControllerPolicyMilliseconds)}}
 }
+function Test-ExitAtHandleException($Failure,[int]$ChildPid) {
+ # GetProcessById succeeded. Only the runtime's specific exit-at-handle error
+ # may wait for creator proof. Access, birth and generic handle errors stay fatal.
+ $cause=$Failure.GetBaseException()
+ $site=$cause.TargetSite
+ $assembly=[Diagnostics.Process].Assembly
+ if($cause.GetType() -ne [InvalidOperationException] -or !$site -or $site.DeclaringType.Assembly -ne $assembly){return $false}
+ $knownSite=($site.DeclaringType -eq [Diagnostics.Process] -and $site.Name -ceq 'GetProcessHandle') -or
+    ($site.DeclaringType.FullName -ceq 'System.Diagnostics.ProcessManager' -and $site.Name -ceq 'OpenProcess')
+ if(!$knownSite){return $false}
+ $messages=$assembly.GetType('System.SR').GetProperty('ProcessHasExited',[Reflection.BindingFlags]'NonPublic,Static')
+ return ($null -ne $messages -and $cause.Message -ceq ($messages.GetValue($null) -f $ChildPid))
+}
+
+function Test-ControlExitAtHandle($Failure,$Fact) {
+ if(!(Test-ExitAtHandleException $Failure $Fact.ProcessId)){return $false}
+ if($Fact.ParentProcessId -ne $owned.Id -or $Fact.Name -cne 'ffmpeg.exe' -or $Fact.ExecutablePath -ine $engine[0] -or
+    !$Fact.CommandLine -or !(Test-CreatorProofMode) -or !(Test-UnheldControlContext)){return $false}
+ $argv=Split-ControllerArguments $Fact.CommandLine
+ return ($argv.Count -ge 2 -and $argv[0] -ieq $engine[0])
+}
+
 function Read-UnheldControlImageProof($Pending) {
  if(-not(Test-UnheldControlContext)){throw 'Unheld control context changed before proof'}
  $path=Join-Path $p.Root child-admissions.jsonl
@@ -66,6 +88,9 @@ function Read-UnheldControlImageProof($Pending) {
    ([DateTimeOffset]$rows[$i+1].utc).UtcDateTime-lt([DateTimeOffset]$rows[0].utc).UtcDateTime-or
    ([DateTimeOffset]$rows[$i+1].utc).UtcDateTime-gt$actualBirth){throw 'Unheld control was not admitted before its birth'}
   if(Test-ControlReceipt $doc $name ([int]$fact.ProcessId) $actualBirth $r.ExitCode){
+   if($Pending.handleExit -and !(Same-ControllerArguments (Split-ControllerArguments $fact.CommandLine) (@($engine[0])+@($doc.arguments)))){
+    throw 'Exited control command differs from creator receipt'
+   }
    $matches+=@{path=$file;sha256=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($raw));kind=$name;unheld=$true;
     admissionOrdinal=$rows[$i+1].ordinal;creatorExitCode=$r.ExitCode;collectorBindingSha256=(Get-FileHash -LiteralPath (Join-Path $directory 'collector-identity.json')).Hash}
   }

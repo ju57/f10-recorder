@@ -24,6 +24,9 @@ sealed class PresentationTimeline
     int transitions;
     bool failed,complete;
     public bool Ready=>!failed&&transitions>=2;
+    public long LastQualifiedRow {get;private set;}
+    public bool HasSuccessor(int marker)=>nextBirths.ContainsKey(marker);
+    public int SuccessorId(int marker)=>nextBirths[marker].Id;
     public PresentationBirth Birth(int value)=>births[value];
     public PresentationTimeline(long frequency,bool allowAdjacentTransition=false)
     {
@@ -33,17 +36,23 @@ sealed class PresentationTimeline
     }
     void Require(bool condition,string error)
     { if(!condition){failed=true;throw new IOException(error);} }
-    public void Add(PresentationRow row)
+    public void Add(PresentationRow row,bool qualifyPictures=true)
     {
         Require(!failed&&!complete,"Sticky failure/closed timeline");
         // v4 proves the fixture marker ROI from the acquired texture. The global
         // protected-content mask flag remains diagnostic; it proves no full-frame clearance.
         Require(row.Ordinal==ordinal+1&&row.Before>0&&row.Before>=lastAfter&&row.Before<=row.After&&row.Released,"Frame ownership/ordinal/clock failure");
         ordinal=row.Ordinal;lastAfter=row.After;
+        if(qualifyPictures)LastQualifiedRow=ordinal;
         if(row.Present==0&&row.Accumulated==0)return; // Explicit pointer-only event; not an image presentation.
         Require(row.Present>present&&row.Present<=row.After&&row.Accumulated>0&&row.Id is >=0 and <0x1000000,"Invalid native presentation row");
         bool bootstrap=id==null;
         Require(bootstrap||row.Id>=id,"Reused/backward visual ID");
+        if(!qualifyPictures)
+        {
+            Require(Ready,"Cannot skip presentation bootstrap");
+            id=row.Id;present=row.Present;return;
+        }
         if(!Ready&&row.Accumulated>1)
         {
             // Raw rows and ownership/ordinal/native-clock checks remain intact.
