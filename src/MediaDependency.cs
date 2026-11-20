@@ -28,7 +28,7 @@ namespace F10Recorder
         // This is never assigned from --data-dir, settings, manifests or PATH.
         internal static string RootDirectory = TrustedStorage.DefaultRoot;
 #if F10_QUEUE_ENGINE
-        internal const string ExecutableSha256 = "4a1af73d7e64dca262a435a72d2d292fdbab877bae786036169c497dfea9076a";
+        internal const string ExecutableSha256 = "ea698b512b73ecd8497a8c6949d6d5454ce5c9f6ae49f1dee8725f1c72f2cbb5";
 #else
         internal const string ExecutableSha256 = "3256173f3f8bffd7df12227c68adf68025edb1832273a9530688a7bb1ed8edec";
 #endif

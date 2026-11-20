@@ -1,0 +1,450 @@
+--- a/libavfilter/vsrc_ddagrab.c
++++ b/libavfilter/vsrc_ddagrab.c
+@@ -52,8 +52,13 @@
+ #define TIMER_RES 1000000
+ #define TIMER_RES64 INT64_C(1000000)
+ 
++#include "queue_worker.h"
++
+ typedef struct DdagrabContext {
+     const AVClass *class;
++    QueueWorker queue;
++    ID3D11Texture2D *snapshots[3];
++    int queue_opt;
+ 
+     AVBufferRef *device_ref;
+     AVHWDeviceContext *device_ctx;
+@@ -106,9 +111,13 @@
+     int        dup_frames;
+ } DdagrabContext;
+ 
++_Static_assert(offsetof(DdagrabContext, class) == 0,
++               "FFmpeg requires the AVClass pointer at offset zero");
++
+ #define OFFSET(x) offsetof(DdagrabContext, x)
+ #define FLAGS AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_FILTERING_PARAM
+ static const AVOption ddagrab_options[] = {
++    { "f10_queue", "Queue supported 1080p monitor input during video demux waits", OFFSET(queue_opt), AV_OPT_TYPE_BOOL, { .i64=0 }, 0, 1, FLAGS },
+     { "output_idx", "dda output index to capture", OFFSET(output_idx), AV_OPT_TYPE_INT,        { .i64 = 0    },       0, INT_MAX, FLAGS },
+     { "draw_mouse", "draw the mouse pointer",      OFFSET(draw_mouse), AV_OPT_TYPE_BOOL,       { .i64 = 1    },       0,       1, FLAGS },
+     { "framerate",  "set video frame rate",        OFFSET(framerate),  AV_OPT_TYPE_VIDEO_RATE, { .str = "30" },       0, INT_MAX, FLAGS },
+@@ -147,6 +156,8 @@
+ {
+     DdagrabContext *dda = avctx->priv;
+ 
++    queue_stop(&dda->queue);
++    for (int i=0; i<3; ++i) release_resource(&dda->snapshots[i]);
+     release_resource(&dda->blend_state);
+     release_resource(&dda->blend_state_xor);
+     release_resource(&dda->sampler_state);
+@@ -776,6 +787,11 @@
+     return ret;
+ }
+ 
++#include "libavformat/avio.h"
++extern const AVIOInterruptCB int_cb; /* Linked with the F10 Windows FFmpeg CLI. */
++#define startup_now_us av_gettime_relative
++static int startup_interrupted(void) { return int_cb.callback(int_cb.opaque); }
++#include "startup_wait.h"
+ static int probe_output_format(AVFilterContext *avctx)
+ {
+     DdagrabContext *dda = avctx->priv;
+@@ -784,9 +800,13 @@
+ 
+     av_assert1(!dda->probed_texture);
+ 
+-    do {
+-        ret = next_frame_internal(avctx, &dda->probed_texture, 1);
+-    } while(ret == AVERROR(EAGAIN));
++    if (dda->queue_opt) {
++        ret = startup_wait(avctx);
++    } else {
++        do {
++            ret = next_frame_internal(avctx, &dda->probed_texture, 1);
++        } while (ret == AVERROR(EAGAIN));
++    }
+     if (ret < 0)
+         return ret;
+ 
+@@ -854,6 +874,7 @@
+     return ret;
+ }
+ 
++static int queue_poll(void *opaque);
+ static int ddagrab_config_props(AVFilterLink *outlink)
+ {
+     FilterLink *l = ff_filter_link(outlink);
+@@ -926,6 +947,14 @@
+     outlink->h = dda->height;
+     outlink->time_base = (AVRational){1, TIMER_RES};
+     l->frame_rate = dda->framerate;
++    if (dda->queue_opt) {
++        if (dda->first_pts || dda->width!=1920 || dda->height!=1080 ||
++            dda->raw_width!=1920 || dda->raw_height!=1080 || dda->offset_x || dda->offset_y ||
++            dda->raw_format!=DXGI_FORMAT_B8G8R8A8_UNORM ||
++            av_cmp_q(dda->framerate,(AVRational){240,1}) || !dda->dup_frames)
++            dda->queue_opt=0; /* Unsupported surfaces keep ordinary desktop duplication. */
++        if (dda->queue_opt && queue_start(&dda->queue,avctx,queue_poll)<0) return AVERROR_EXTERNAL;
++    }
+ 
+     return 0;
+ }
+@@ -1087,7 +1116,8 @@
+     return ret;
+ }
+ 
+-static int ddagrab_request_frame(AVFilterLink *outlink)
++#include "queue_capture.h"
++static int request_inner(AVFilterLink *outlink)
+ {
+     AVFilterContext *avctx = outlink->src;
+     DdagrabContext *dda = avctx->priv;
+@@ -1101,6 +1131,12 @@
+     AVFrame *frame = NULL;
+     HRESULT hr;
+     int ret;
++
++    int from_queue = dda->queue_opt && dda->queue.count > 0;
++    if (from_queue) {
++        cur_texture=queue_take(dda,&now);
++        goto copy_surface;
++    }
+ 
+     /* time_frame is in units of microseconds divided by the time_base.
+      * This means that adding a clean 1M to it is the equivalent of adding
+@@ -1160,6 +1196,7 @@
+     // This increases accuracy of the timestamp, but might upset consumers due to more jittery framerate?
+     now = av_gettime_relative() - dda->first_pts;
+ 
++copy_surface:
+     ID3D11Texture2D_GetDesc(cur_texture, &desc);
+     if (desc.Format != dda->raw_format ||
+         (int)desc.Width != dda->raw_width ||
+@@ -1191,14 +1228,14 @@
+ 
+     release_resource(&cur_texture);
+ 
+-    hr = IDXGIOutputDuplication_ReleaseFrame(dda->dxgi_outdupl);
++    hr = from_queue ? S_OK : IDXGIOutputDuplication_ReleaseFrame(dda->dxgi_outdupl);
+     if (FAILED(hr)) {
+         av_log(avctx, AV_LOG_ERROR, "DDA ReleaseFrame failed!\n");
+         ret = AVERROR_EXTERNAL;
+         goto fail;
+     }
+ 
+-    if (dda->draw_mouse) {
++    if (dda->draw_mouse && !from_queue) {
+         ret = draw_mouse_pointer(avctx, frame);
+         if (ret < 0)
+             goto fail;
+@@ -1231,17 +1268,32 @@
+ frame_done:
+     frame->pts = now;
+     dda->time_frame = time_frame;
+-
++    if (dda->queue_opt && !from_queue) {
++        InterlockedCompareExchange64(&initial_raw,now,-1);
++        dda->queue.anchor=queue_now();
++    }
+     return ff_filter_frame(outlink, frame);
+ 
+ fail:
+     if (frame)
+         av_frame_free(&frame);
+ 
+-    if (cur_texture)
++    if (cur_texture && !from_queue)
+         IDXGIOutputDuplication_ReleaseFrame(dda->dxgi_outdupl);
+ 
+     release_resource(&cur_texture);
++    return ret;
++}
++
++static int ddagrab_request_frame(AVFilterLink *outlink)
++{
++    DdagrabContext *d=outlink->src->priv;
++    if (!d->queue_opt) return request_inner(outlink);
++    EnterCriticalSection(&d->queue.data);
++    d->device_hwctx->lock(d->device_hwctx->lock_ctx);
++    int ret=d->queue.error<0 ? d->queue.error : request_inner(outlink);
++    d->device_hwctx->unlock(d->device_hwctx->lock_ctx);
++    LeaveCriticalSection(&d->queue.data);
+     return ret;
+ }
+ 
+--- a/libavfilter/vf_fps.c
++++ b/libavfilter/vf_fps.c
+@@ -246,6 +246,7 @@
+      * The dance with offsets is required to match the rounding behaviour of the
+      * previous version of the fps filter when using the start_time option. */
+     in_pts = frame->pts;
++    if (s->frames_in==0) { extern void f10_queue_fps_first(int64_t); f10_queue_fps_first(in_pts); }
+     frame->pts = s->out_pts_off + av_rescale_q_rnd(in_pts - s->in_pts_off,
+                                                    inlink->time_base, outlink->time_base,
+                                                    s->rounding | AV_ROUND_PASS_MINMAX);
+--- a/fftools/ffmpeg_sched.c
++++ b/fftools/ffmpeg_sched.c
+@@ -327,7 +327,13 @@
+     pthread_mutex_lock(&w->lock);
+ 
+     while (atomic_load(&w->choked) && !atomic_load(&sch->terminate))
++    {
++        extern void f10_queue_wait(int);
++        int video_wait = sch->nb_demux == 2 && w == &sch->demux[1].waiter;
++        if (video_wait) f10_queue_wait(1);
+         pthread_cond_wait(&w->cond, &w->lock);
++        if (video_wait) f10_queue_wait(0);
++    }
+ 
+     terminate = atomic_load(&sch->terminate);
+ 
+--- /dev/null
++++ b/libavfilter/queue_worker.h
+@@ -0,0 +1,148 @@
++/* Private, single-context, wait-triggered producer. No graph calls on the helper. */
++#include <process.h>
++#include <windows.h>
++#include <stdint.h>
++
++typedef struct QueueItem {
++    int slot;
++    int64_t pts, bucket;
++} QueueItem;
++
++typedef struct QueueWorker {
++    CRITICAL_SECTION data;
++    HANDLE changed, thread, timer;
++    volatile LONG stopping, waiting, generation;
++    LONG error;
++    int initialized, count;
++    int64_t anchor, frequency;
++    QueueItem items[3];
++    void *opaque;
++    int (*poll)(void *);
++} QueueWorker;
++
++void f10_queue_fps_first(int64_t normalized);
++void f10_queue_wait(int waiting);
++
++static SRWLOCK registration = SRWLOCK_INIT;
++static QueueWorker *active_queue;
++static volatile LONG64 initial_raw = -1, clock_offset = INT64_MIN;
++
++void f10_queue_fps_first(int64_t normalized)
++{
++    int64_t raw = InterlockedCompareExchange64(&initial_raw,0,0);
++    if (raw >= 0) InterlockedCompareExchange64(&clock_offset,normalized-raw,INT64_MIN);
++}
++
++void f10_queue_wait(int waiting)
++{
++    AcquireSRWLockShared(&registration);
++    if (active_queue) {
++        InterlockedIncrement(&active_queue->generation);
++        InterlockedExchange(&active_queue->waiting,waiting);
++        SetEvent(active_queue->changed);
++    }
++    ReleaseSRWLockShared(&registration);
++}
++
++static int64_t queue_now(void)
++{
++    LARGE_INTEGER t;
++    QueryPerformanceCounter(&t);
++    return t.QuadPart;
++}
++
++static QueueItem queue_pop(QueueWorker *q)
++{
++    QueueItem item=q->items[0];
++    memmove(q->items,q->items+1,(--q->count)*sizeof(item));
++    return item;
++}
++
++/* Return the first free dedicated texture, or transfer the oldest pending slot. */
++static int queue_reserve(QueueWorker *q,int64_t bucket,QueueItem *evicted)
++{
++    evicted->slot=-1;
++    if (q->count && q->items[q->count-1].bucket==bucket) return -1;
++    if (q->count==3) {
++        *evicted=queue_pop(q);
++        return evicted->slot;
++    }
++    int used=0;
++    for (int i=0;i<q->count;i++) used |= 1<<q->items[i].slot;
++    for (int i=0;i<3;i++) if (!(used & (1<<i))) return i;
++    return -2;
++}
++
++static unsigned __stdcall queue_thread(void *opaque)
++{
++    QueueWorker *q=opaque;
++    HANDLE signals[]={q->changed,q->timer};
++    int64_t last=0;
++    while (!InterlockedCompareExchange(&q->stopping,0,0)) {
++        if (!InterlockedCompareExchange(&q->waiting,0,0)) {
++            WaitForSingleObject(q->changed,INFINITE);
++            continue;
++        }
++        EnterCriticalSection(&q->data);
++        int64_t base=q->anchor, now=queue_now();
++        int64_t previous=last>base?last:base;
++        int64_t tick=base+(1+(previous-base)*240/q->frequency)*q->frequency/240;
++        if (tick<=previous) tick=base+((previous-base)*240/q->frequency+2)*q->frequency/240;
++        int allowed=base>0 && q->waiting && !q->stopping &&
++                    InterlockedCompareExchange64(&clock_offset,0,0)!=INT64_MIN;
++        if (allowed && now>=tick) {
++            q->error=q->poll(q->opaque);
++            last=queue_now();
++        }
++        int failed=q->error<0;
++        LeaveCriticalSection(&q->data);
++        if (failed) break;
++        if (allowed && now>=tick) continue;
++        LARGE_INTEGER due;
++        due.QuadPart=allowed ? -((tick-now)*10000000/q->frequency+1) : -41667;
++        if (!SetWaitableTimer(q->timer,&due,0,NULL,NULL,FALSE) ||
++            WaitForMultipleObjects(2,signals,FALSE,INFINITE)==WAIT_FAILED) {
++            EnterCriticalSection(&q->data); q->error=-1; LeaveCriticalSection(&q->data); break;
++        }
++    }
++    return 0;
++}
++
++static void queue_stop(QueueWorker *q)
++{
++    if (!q->initialized) return;
++    AcquireSRWLockExclusive(&registration);
++    if (active_queue==q) active_queue=NULL;
++    ReleaseSRWLockExclusive(&registration);
++    InterlockedExchange(&q->stopping,1);
++    if (q->changed) SetEvent(q->changed);
++    if (q->thread) { WaitForSingleObject(q->thread,INFINITE); CloseHandle(q->thread); }
++    if (q->timer) CloseHandle(q->timer);
++    if (q->changed) CloseHandle(q->changed);
++    DeleteCriticalSection(&q->data);
++    q->initialized=0;
++}
++
++static int queue_start(QueueWorker *q,void *opaque,int (*poll)(void *))
++{
++    LARGE_INTEGER freq;
++    InitializeCriticalSection(&q->data);
++    q->initialized=1; q->opaque=opaque; q->poll=poll;
++    if (!QueryPerformanceFrequency(&freq)) goto fail;
++    q->frequency=freq.QuadPart;
++    q->changed=CreateEventW(NULL,FALSE,FALSE,NULL);
++    q->timer=CreateWaitableTimerExW(NULL,NULL,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
++    if (!q->timer || !q->changed) goto fail;
++    q->thread=(HANDLE)_beginthreadex(NULL,0,queue_thread,q,0,NULL);
++    if (!q->thread) goto fail;
++    AcquireSRWLockExclusive(&registration);
++    if (active_queue) { ReleaseSRWLockExclusive(&registration); goto fail; }
++    InterlockedExchange64(&initial_raw,-1);
++    InterlockedExchange64(&clock_offset,INT64_MIN);
++    active_queue=q;
++    ReleaseSRWLockExclusive(&registration);
++    return 0;
++fail:
++    queue_stop(q);
++    return -1;
++}
+--- /dev/null
++++ b/libavfilter/queue_capture.h
+@@ -0,0 +1,66 @@
++/* Snapshots are owned by the queue until copied to a downstream surface. */
++static ID3D11Texture2D *queue_take(DdagrabContext *d, int64_t *pts)
++{
++    QueueItem item = queue_pop(&d->queue);
++    ID3D11Texture2D *snapshot = d->snapshots[item.slot];
++    ID3D11Texture2D_AddRef(snapshot);
++    *pts = item.pts;
++    return snapshot;
++}
++
++static int queue_poll_locked(AVFilterContext *ctx)
++{
++    DdagrabContext *d=ctx->priv;
++    QueueWorker *q=&d->queue;
++    if (!InterlockedCompareExchange(&q->waiting,0,0) || InterlockedCompareExchange(&q->stopping,0,0)) return 0;
++    ID3D11Texture2D *texture=NULL;
++    int64_t timeout=d->time_timeout;
++    d->time_timeout=0;
++    int ret=next_frame_internal(ctx,&texture,0);
++    d->time_timeout=timeout;
++    if (ret==AVERROR(EAGAIN)) return 0;
++    if (ret<0) return ret;
++    D3D11_TEXTURE2D_DESC desc;
++    ID3D11Texture2D_GetDesc(texture,&desc);
++    if (desc.Width!=1920 || desc.Height!=1080 || desc.Format!=DXGI_FORMAT_B8G8R8A8_UNORM ||
++        desc.ArraySize!=1 || desc.MipLevels!=1 || desc.SampleDesc.Count!=1) {
++        ret=AVERROR_OUTPUT_CHANGED; goto finish;
++    }
++    int64_t pts=av_gettime_relative()-d->first_pts;
++    int64_t normalized=pts+InterlockedCompareExchange64(&clock_offset,0,0);
++    int64_t bucket=av_rescale_q_rnd(normalized,AV_TIME_BASE_Q,(AVRational){1,60},AV_ROUND_NEAR_INF);
++    QueueItem evicted;
++    int slot=queue_reserve(q,bucket,&evicted);
++    if (slot==-1) goto finish;
++    if (slot<0) { ret=AVERROR_BUG; goto finish; }
++    if (!d->snapshots[slot]) {
++        desc.Usage=D3D11_USAGE_DEFAULT; desc.BindFlags=D3D11_BIND_RENDER_TARGET;
++        desc.CPUAccessFlags=0; desc.MiscFlags=0;
++        if (FAILED(ID3D11Device_CreateTexture2D(d->device_hwctx->device,&desc,NULL,&d->snapshots[slot]))) {
++            ret=AVERROR(ENOMEM); goto finish;
++        }
++    }
++    ID3D11DeviceContext_CopyResource(d->device_hwctx->device_context,(ID3D11Resource*)d->snapshots[slot],(ID3D11Resource*)texture);
++    if (d->draw_mouse) {
++        AVFrame target={0};
++        target.data[0]=(uint8_t*)d->snapshots[slot];
++        ret=draw_mouse_pointer(ctx,&target);
++        ID3D11DeviceContext_OMSetRenderTargets(d->device_hwctx->device_context,0,NULL,NULL);
++        if (ret<0) goto finish;
++    }
++    q->items[q->count++]=(QueueItem){slot,pts,bucket};
++finish:
++    release_resource(&texture);
++    if (FAILED(IDXGIOutputDuplication_ReleaseFrame(d->dxgi_outdupl))) return AVERROR_EXTERNAL;
++    return ret;
++}
++
++static int queue_poll(void *opaque)
++{
++    AVFilterContext *ctx=opaque;
++    DdagrabContext *d=ctx->priv;
++    d->device_hwctx->lock(d->device_hwctx->lock_ctx);
++    int ret=queue_poll_locked(ctx);
++    d->device_hwctx->unlock(d->device_hwctx->lock_ctx);
++    return ret;
++}
+--- /dev/null
++++ b/libavfilter/startup_wait.h
+@@ -0,0 +1,27 @@
++/* Private queue-on probe only, before the first texture is transferred. */
++static int startup_wait(AVFilterContext *avctx)
++{
++    DdagrabContext *dda = avctx->priv;
++    const int64_t saved_timeout = dda->time_timeout;
++    const int64_t deadline = startup_now_us() + 64000;
++    int ret;
++    for (;;) {
++        const int64_t remaining_ms = (deadline - startup_now_us()) / 1000;
++        if (startup_interrupted()) { ret = AVERROR_EXIT; break; }
++        if (remaining_ms <= 0) { ret = AVERROR(ETIMEDOUT); break; }
++        dda->time_timeout = remaining_ms < 8 ? remaining_ms : 8;
++        ret = next_frame_internal(avctx, &dda->probed_texture, 1);
++        if (ret != AVERROR(EAGAIN)) break;
++    }
++    dda->time_timeout = saved_timeout;
++    if (ret == 0) {
++        int interrupted = startup_interrupted();
++        if (interrupted || startup_now_us() >= deadline) {
++            release_resource(&dda->probed_texture);
++            HRESULT hr = IDXGIOutputDuplication_ReleaseFrame(dda->dxgi_outdupl);
++            if (FAILED(hr)) return AVERROR_EXTERNAL;
++            return interrupted ? AVERROR_EXIT : AVERROR(ETIMEDOUT);
++        }
++    }
++    return ret;
++}

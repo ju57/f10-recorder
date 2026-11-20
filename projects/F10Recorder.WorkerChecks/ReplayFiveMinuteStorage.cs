@@ -8,7 +8,9 @@ internal static partial class ReplayCalibrationRun
 {
     internal const string FiveMinuteStorageAdmission = "issue83-C00-five-minute-queue-storage-v1";
     internal const string FiveMinuteContractRole = "five-minute-storage-contract";
-    const string QueueImage = "4A1AF73D7E64DCA262A435A72D2D292FDBAB877BAE786036169C497DFEA9076A";
+    const string QueueImage = "EA698B512B73ECD8497A8C6949D6D5454CE5C9F6AE49F1DEE8725F1C72F2CBB5";
+    // The prospective experiment below used fixed, independently reviewed growth limits.
+    const string FiveMinuteContractImage = "4A1AF73D7E64DCA262A435A72D2D292FDBAB877BAE786036169C497DFEA9076A";
     const long FiveMinutePollLimit = 32_833_536, FiveMinuteStopLimit = 19_820_544;
     // A file can change anywhere between two scans. Include the intersecting
     // edge interval. A disappearance never cancels another object's increase.
@@ -154,7 +156,7 @@ internal static partial class ReplayCalibrationRun
         RequireUniqueJsonMembers(json.RootElement);
         var c = json.RootElement.Deserialize<FiveMinuteContract>();
         Require(c?.Revision == FiveMinuteStorageAdmission && c.Exporter == ReplayReferenceModel.ExporterIdentity
-            && c.Exporter.StartsWith(QueueImage + "/", StringComparison.OrdinalIgnoreCase)
+            && c.Exporter.StartsWith(FiveMinuteContractImage + "/", StringComparison.OrdinalIgnoreCase)
             && c.Context?.Valid == true && c.Context.Arguments.SequenceEqual(ExpectedCaptureTemplate(plan, "0")
                 .Select(a => a.Replace("<clock>", "<common-clock-filter>", StringComparison.Ordinal)))
             && c.Host?.Valid() == true && c.Host == ReplayCalibrationCatalog.CaptureHostFacts()
