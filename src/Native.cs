@@ -14,9 +14,18 @@ namespace F10Recorder
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
         [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetFileInformationByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle file, out FileInformation information);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern uint GetFinalPathNameByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle file, System.Text.StringBuilder path, uint length, uint flags);
+        // Win32 callers can run under an app host without a longPathAware manifest.
+        internal static string FullPathForNativeOpen(string path)
+        {
+            string full = System.IO.Path.GetFullPath(path);
+            if (full.Length < 260 || full.StartsWith(@"\\?\", StringComparison.Ordinal)
+                || full.StartsWith(@"\\.\", StringComparison.Ordinal)) return full;
+            return full.StartsWith(@"\\", StringComparison.Ordinal)
+                ? @"\\?\UNC\" + full.Substring(2) : @"\\?\" + full;
+        }
         internal static string FinalDirectoryPath(string path)
         {
-            using (var file = CreateFile(System.IO.Path.GetFullPath(path), 0x80, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero))
+            using (var file = CreateFile(FullPathForNativeOpen(path), 0x80, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero))
                 return FinalDirectoryPath(file);
         }
         internal static string FinalDirectoryPath(Microsoft.Win32.SafeHandles.SafeFileHandle file)
@@ -36,13 +45,13 @@ namespace F10Recorder
         }
         internal static Microsoft.Win32.SafeHandles.SafeFileHandle AnchorDirectory(string path)
         {
-            var file = CreateFile(System.IO.Path.GetFullPath(path), 0x81, 3, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
+            var file = CreateFile(FullPathForNativeOpen(path), 0x81, 3, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero);
             if (file.IsInvalid) { file.Dispose(); throw new System.ComponentModel.Win32Exception(); }
             return file;
         }
         internal static string DirectoryIdentity(string path)
         {
-            using (var file = CreateFile(System.IO.Path.GetFullPath(path), 0x80, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero))
+            using (var file = CreateFile(FullPathForNativeOpen(path), 0x80, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero))
             {
                 return DirectoryIdentity(file);
             }

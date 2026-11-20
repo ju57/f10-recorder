@@ -212,12 +212,21 @@ internal static class ReplayCalibrationPhaseChecks
             { sampler.Check(); Require(wait.ElapsedMilliseconds < 2000, "Closed case metadata handles were not enabled."); Thread.Sleep(5); }
             sampler.StopAndCheck();
         });
-        Check("mutable-handles-released-before-verified-retirement", path =>
+        Check("closed-snapshot-handles-released-before-verified-retirement", path =>
         {
-            string snapshot = Path.Combine(path, "buffer", "save-owned"); Directory.CreateDirectory(snapshot);
+            string snapshot = Path.Combine(path, "T01", "buffer", "save-owned"); Directory.CreateDirectory(snapshot);
             File.WriteAllBytes(Path.Combine(snapshot, "000000.ts"), new byte[4096]); File.WriteAllText(Path.Combine(snapshot, "concat.txt"), "file '000000.ts'\n");
             using var sampler = new ReplayCalibrationRun.Sampler(Plan(path) with { ReuseCurrentMetadataHandles = true }, active: false);
-            Require(Volatile.Read(ref sampler.MetadataHandles) >= 2, "Mutable fixture did not exercise reused native handles.");
+            string media = Path.Combine(snapshot, "000000.ts"), list = Path.Combine(snapshot, "concat.txt");
+            Require(!sampler.RetainsMetadata(media) && !sampler.RetainsMetadata(list), "Live snapshot retained an observer handle.");
+            sampler.SealClosedCase("T01");
+            var wait = System.Diagnostics.Stopwatch.StartNew();
+            while (!sampler.RetainsMetadata(media) || !sampler.RetainsMetadata(list))
+            {
+                sampler.Check();
+                Require(wait.ElapsedMilliseconds < 2000, "Closed snapshot did not acquire both native handles.");
+                Thread.Sleep(5);
+            }
             bool ungatedRejected = false;
             try { sampler.ReleaseInventoryHandles(); } catch (IOException) { ungatedRejected = true; }
             Require(ungatedRejected, "Handle release bypassed the inventory mutation gate.");

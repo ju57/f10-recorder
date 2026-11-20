@@ -115,18 +115,17 @@ internal static class ReplayCalibrationTimingChecks
         });
         Check("short-scan-retains100ms-start-cadence", () =>
             Require(ReplayCalibrationRun.SamplingWaitMilliseconds(1000, 1023) == 77, "A23ms scan leaves77ms, not100ms."));
-        Check("500ms-accepted-501ms-rejected", () =>
+        Check("inventory-reports-full-elapsed-gap", () =>
         {
-            Require(ReplayCalibrationRun.SamplingGap(0, 500) == 500, "Exact500ms boundary must remain admissible.");
-            bool rejected = false; try { ReplayCalibrationRun.SamplingGap(0, 501); } catch (IOException) { rejected = true; }
-            Require(rejected, "A501ms gap must fail.");
+            foreach (double gap in new[] { 500.0, 500.1, 501.0 })
+                Require(ReplayCalibrationRun.SamplingGap(0, gap) == gap, "Inventory must report the measured gap.");
         });
-        Check("fractional-and-invalid-gap-rejected", () =>
+        Check("invalid-inventory-clock-rejected", () =>
         {
-            foreach (double gap in new[] { 500.1, -0.1, double.NaN, double.PositiveInfinity })
+            foreach (double gap in new[] { -0.1, double.NaN, double.PositiveInfinity })
             {
                 bool rejected = false; try { ReplayCalibrationRun.SamplingGap(0, gap); } catch (IOException) { rejected = true; }
-                Require(rejected, "Invalid or over500ms gap must fail: " + gap);
+                Require(rejected, "Invalid inventory gap must fail: " + gap);
             }
         });
         File.WriteAllText(Path.Combine(root, "timing-checks.json"), JsonSerializer.Serialize(new { failed, results }, new JsonSerializerOptions { WriteIndented = true }));

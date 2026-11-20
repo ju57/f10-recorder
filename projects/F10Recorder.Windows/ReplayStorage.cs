@@ -120,14 +120,14 @@ internal static class ReplayStorage
     }
 
     internal static SafeFileHandle OpenInventory(string path) =>
-        CreateFile(Path.GetFullPath(path), 0x80, 7, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
+        CreateFile(Native.FullPathForNativeOpen(path), 0x80, 7, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
 
     // Request data-read access (without reading payload): an attribute-only
     // handle did not enforce no-delete sharing in the prospective control.
     // Owned scratch remains writable, but cannot be renamed/replaced while its
     // allocation observer is in use. Never used for rolling/manifests.
     internal static SafeFileHandle OpenPinnedInventory(string path) =>
-        CreateFile(Path.GetFullPath(path), 0x81, 3, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
+        CreateFile(Native.FullPathForNativeOpen(path), 0x81, 3, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
 
     internal static ReplayFileExtent ObserveInventory(SafeFileHandle file, ReplayFileExtent enumerated)
     {

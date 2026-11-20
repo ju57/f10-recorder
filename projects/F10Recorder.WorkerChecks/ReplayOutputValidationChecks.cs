@@ -1065,6 +1065,10 @@ internal static class ReplayOutputValidationChecks
         });
         await Check("adaptive-native-path-buffers-preserve-long-path-identity", path =>
         {
+            string unc = @"\\server\share\" + new string('a', 120) + @"\" + new string('b', 125);
+            string extended = @"\\?\UNC\" + unc.Substring(2);
+            Require(Native.FullPathForNativeOpen(unc) == extended && Native.FullPathForNativeOpen(extended) == extended,
+                "Long UNC path must use exactly one extended namespace prefix.");
             foreach (string directory in new[] { Path.Combine(path, "short"), Path.Combine(path, new string('a', 120), new string('b', 120)) })
             {
                 Directory.CreateDirectory(directory); string file = Path.Combine(directory, "extent.bin"); File.WriteAllBytes(file, new byte[32]);
