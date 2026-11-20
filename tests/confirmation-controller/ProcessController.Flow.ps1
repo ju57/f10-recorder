@@ -54,8 +54,3 @@ finally{
 }
 if($failure){throw $failure}
 Get-Content -LiteralPath $receipt
-
-
-
-
-

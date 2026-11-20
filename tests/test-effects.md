@@ -1,5 +1,33 @@
 # Verification launch effects
 
+## Static confirmation tooling and pure CI regressions
+
+[Package preparation and verification](replay-confirmation-package.md) builds
+prospective C00/retained-minute metadata, dependency hashes and a static HOLD
+manifest. It creates no authorization, Ready clock, execution release, recording
+or acceptance result. Its complete controller dependency closure is development
+tooling and is not included in a product project.
+
+`tests/replay-confirmation-pure-checks.ps1 -Plan -Root <fresh-artifacts-root>`
+previews the standalone suite. Omit `-Plan` to run three generated PowerShell
+controller/v9-release/v10-release fixtures. At most one owned child runs at a
+time, with a40-second cleanup-inclusive limit per route,330seconds for the suite,
+256MiB sampled child RAM,8MiB/256files output and1MiB per log stream. These are
+sampled budgets, not OS quotas. Failed outputs remain in the fresh root.
+
+`-Scope Integrated -Sdk <pinned-dotnet> -AssemblyPath <matching-WorkerChecks.dll>`
+adds four managed presentation/protection/metadata/same-C00 routes; generated
+metadata allows512MiB sampled child RAM. Package tests additionally exercise the
+strict retained parser when `CONFIRMATION_CHECKS_SDK` is set. CI enables these
+five integrations only with their complete owning source/selector set; otherwise
+it visibly reports them deferred. An incomplete owning source set fails CI.
+The standalone tests still validate the versioned static profile and both
+emitted templates through two bounded owner `-Template -Plan` previews.
+
+No suite invokes owner `-Run`, media payload, capture, GPU/device, audio playback,
+real profile/catalog or empirical qualification. Passing generated checks changes
+no issue, performance, storage, acceptance or release evidence requirement.
+
 ## Independent presentation reference: offline preparation only
 
 The prospective v5 method requires the explicit

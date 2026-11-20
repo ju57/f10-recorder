@@ -47,6 +47,38 @@ jobs:
         run: dotnet restore projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj --locked-mode
       - name: Build worker checks
         run: dotnet build projects/F10Recorder.WorkerChecks/F10Recorder.WorkerChecks.csproj -c Release --no-restore -p:ContinuousIntegrationBuild=true
+      - name: Verify static confirmation packages with generated metadata
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $required = @('CalibrationPresentationChecks.cs', 'CalibrationPresentationMetadataChecks.cs', 'ReplaySameCaptureChecks.cs', 'ReplayCoverageRetained.cs')
+          $present = @($required | Where-Object { Test-Path -LiteralPath (Join-Path 'projects/F10Recorder.WorkerChecks' $_) })
+          if ($present.Count -ne 0 -and $present.Count -ne $required.Count) { throw 'Partial managed confirmation integration: restore its complete owning source set.' }
+          $integrated = $present.Count -eq $required.Count
+          if ($integrated) {
+            $program = Get-Content projects/F10Recorder.WorkerChecks/Program.cs -Raw
+            foreach ($selector in @('--replay-presentation-offline-checks', '--replay-presentation-protection-checks', '--replay-presentation-metadata-checks', '--replay-same-C00-offline-checks', '--replay-same-C00-envelope-checks')) {
+              if (-not $program.Contains($selector)) { throw "Missing owning confirmation selector: $selector" }
+            }
+            $env:CONFIRMATION_CHECKS_SDK = (Get-Command dotnet).Source
+          } else {
+            $env:CONFIRMATION_CHECKS_SDK = ''
+            Write-Output '::notice::Five managed confirmation integrations are deferred until their issue #83 owning sources land; standalone regressions still run.'
+          }
+          "F10_CONFIRMATION_MANAGED_AVAILABLE=$integrated" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          python -m unittest discover -s tests -p test_confirmation_package.py -v
+      - name: Verify pure confirmation regressions without devices or media
+        shell: pwsh
+        timeout-minutes: 6
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = Join-Path 'artifacts' ('confirmation-ci-' + [guid]::NewGuid().ToString('N'))
+          $scope = if ($env:F10_CONFIRMATION_MANAGED_AVAILABLE -eq 'True') { 'Integrated' } else { 'Standalone' }
+          $sdk = (Get-Command dotnet).Source
+          $assembly = Join-Path $PWD 'projects/F10Recorder.WorkerChecks/bin/Release/net10.0-windows/F10Recorder.WorkerChecks.dll'
+          ./tests/replay-confirmation-pure-checks.ps1 -Plan -Scope $scope -Root $output -Sdk $sdk -AssemblyPath $assembly
+          ./tests/replay-confirmation-pure-checks.ps1 -Scope $scope -Root $output -Sdk $sdk -AssemblyPath $assembly
       - name: Restore locked offscreen entry checks
         run: dotnet restore projects/F10Recorder.MigrationTests/F10Recorder.MigrationTests.csproj --locked-mode -p:NuGetAudit=true -p:NuGetAuditMode=all
       - name: Build offscreen entry checks

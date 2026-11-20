@@ -2,7 +2,7 @@ param([switch]$Plan,[Parameter(Mandatory)][string]$Root)
 $ErrorActionPreference='Stop'
 if($Plan){'Pure generated NONEMPIRICAL authorization/template JSON fixtures; no process/native inventory/media/audio/UI/device.30s/1MiB fresh ignored output.';return}
 $Root=[IO.Path]::GetFullPath($Root)
-$prefix=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../artifacts/issue83-same-capture-plan-20261114'))+'\'
+$prefix=[IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../artifacts')))+[IO.Path]::DirectorySeparatorChar
 if(-not$Root.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)-or(Test-Path -LiteralPath $Root)){throw 'Fresh readiness JSON-fixture root required'}
 [void][IO.Directory]::CreateDirectory($Root)
 . (Join-Path $PSScriptRoot 'confirmation-controller/ProcessController.Common.ps1')
