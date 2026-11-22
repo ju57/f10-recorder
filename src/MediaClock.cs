@@ -33,14 +33,10 @@ namespace F10Recorder
             double epoch100ns = QpcEpoch * (10000000.0 / QpcFrequency);
             return (long)Math.Round((reference100ns - epoch100ns) * (sampleRate / 10000000.0));
         }
-        internal string VideoTimestampFilter
-        {
-            get
-            {
-                // print emits one diagnostic: the RTC bridge used by the first
-                // frame. Keep it before fps; its input timebase is microseconds.
-                return "setpts='PTS+if(eq(N,0),(print(RTCTIME,24)-" + UnixMicroseconds.ToString(CultureInfo.InvariantCulture) + ")/1000000/TB-PTS,PREV_OUTPTS-PREV_INPTS)'";
-            }
-        }
+        // The RTC bridge is used only for the first frame of an unclocked source.
+        internal static string VideoTimestampExpression(string unixMicroseconds) =>
+            "PTS+if(eq(N,0),(print(RTCTIME,24)-" + unixMicroseconds + ")/1000000/TB-PTS,PREV_OUTPTS-PREV_INPTS)";
+        internal string VideoTimestampFilter =>
+            "setpts='" + VideoTimestampExpression(UnixMicroseconds.ToString(CultureInfo.InvariantCulture)) + "'";
     }
 }

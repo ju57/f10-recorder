@@ -150,7 +150,7 @@ namespace F10Recorder
             stopped = true; stoppedPosition = end; producerLaunchSealed = true; RetainEvidence = true;
             ReferenceScope = originalScope; ObserveOutputDemand = true;
         }
-        internal CaptureSession(Settings config, string root, bool synthetic, Func<bool> cancelled, WindowTargetSnapshot target, Func<bool> sourceStillValid = null, Action<CaptureSession> beforeLaunch = null, Action<CaptureSession> afterLaunch = null)
+        internal CaptureSession(Settings config, string root, bool synthetic, Func<bool> cancelled, WindowTargetSnapshot target, Func<bool> sourceStillValid = null, Action<CaptureSession> beforeLaunch = null, Action<CaptureSession> afterLaunch = null, bool qualifyDesktopTiming = false)
         {
             settings = config;
             recordAudio = synthetic || settings.SystemAudio;
@@ -170,26 +170,34 @@ namespace F10Recorder
                 string executable = MediaDependency.ResolveExecutable();
                 if (settings.CaptureMode == "window" && !synthetic && (target == null || !target.Available)) throw new InvalidOperationException("A validated window target is required; monitor fallback is disabled.");
                 if (!synthetic && settings.SystemAudio) audio = new LoopbackAudio();
+                bool referenceDesktop = !synthetic && ReplayReferenceModel.ReferenceSettings(settings)
+                    && Native.DisplayBounds(IntPtr.Zero) is { Width: 1920, Height: 1080 };
+                bool delayedDesktop = MediaDependency.SupportsDelayedDesktop && referenceDesktop;
+                var delayedCalibration = delayedDesktop && RecorderRuntime.CaptureArgumentProbe == null
+                    ? ReplayCalibrationCatalog.Load(settings.ReplayMinutes) : null;
+                bool requireDelayedSurface = qualifyDesktopTiming || delayedCalibration?.Model != null;
                 MediaClock mediaClock = synthetic ? null : MediaClock.Capture();
                 AcquisitionClock = mediaClock;
                 if (mediaClock != null) saveClock = new ReplaySaveClock(mediaClock);
                 if (mediaClock != null) Log.Write("Media clock: QPC=" + mediaClock.QpcEpoch + "; frequency=" + mediaClock.QpcFrequency + "; UTC microseconds=" + mediaClock.UnixMicroseconds + "; bridge bracket ticks=" + mediaClock.BridgeUncertaintyTicks);
                 var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-stats_period", "0.25", "-progress", "pipe:1" };
-                string desktopFilter = "ddagrab=framerate=";
-#if F10_QUEUE_ENGINE
-                if (!synthetic && ReplayReferenceModel.ReferenceSettings(settings)
-                    && Native.DisplayBounds(IntPtr.Zero) is { Width: 1920, Height: 1080 })
-                    desktopFilter = "ddagrab=f10_queue=1:framerate=";
-#endif
-                string source = settings.CaptureMode == "window" && !synthetic ? WindowVideoSource(target, captureRateLimit)
-                    : desktopFilter + captureRateLimit + ":output_idx=" + (synthetic ? 0 : settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1";
+                string videoGraph = null;
+                if (!synthetic)
+                {
+                    string source = settings.CaptureMode == "window" ? WindowVideoSource(target, captureRateLimit) : null;
+                    int output = source != null ? -1 : settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex;
+                    source ??= "ddagrab=framerate=" + captureRateLimit + ":output_idx=" + output + ":draw_mouse=1";
+                    videoGraph = delayedDesktop ? DelayedDesktopGraph(output.ToString(CultureInfo.InvariantCulture),
+                        mediaClock.QpcEpoch.ToString(CultureInfo.InvariantCulture), mediaClock.UnixMicroseconds.ToString(CultureInfo.InvariantCulture), requireDelayedSurface)
+                        : source + "," + mediaClock.VideoTimestampFilter + ",fps=fps=" + settings.FramesPerSecond + ":round=near";
+                }
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=" + settings.FramesPerSecond });
                 // ddagrab's rate is a polling ceiling, not a guaranteed output clock.
                 // Allow acquisition headroom, then pace the GPU frames in the graph.
                 // Output-only CFR resampling still showed intermittent motion loss.
                 // Audio/video use independent input queues but still share the
                 // FFmpeg scheduler; delayed audio can throttle video acquisition.
-                else if (!settings.SystemAudio) args.AddRange(new[] { "-filter_complex", source + "," + mediaClock.VideoTimestampFilter + ",fps=fps=" + settings.FramesPerSecond + ":round=near[video]" });
+                else if (!settings.SystemAudio) args.AddRange(new[] { "-filter_complex", videoGraph + "[video]" });
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000" });
                 else if (settings.SystemAudio)
                 {
@@ -205,7 +213,7 @@ namespace F10Recorder
                     // gfxcapture 7fd2be97b9 subtracts its first SystemRelativeTime.
                     // Re-anchor that relative timeline once at first delivery;
                     // its unknown first-frame delivery delay needs live A/V qualification.
-                    args.AddRange(new[] { "-thread_queue_size", "32", "-f", "lavfi", "-i", source + "," + mediaClock.VideoTimestampFilter + ",fps=fps=" + settings.FramesPerSecond + ":round=near" });
+                    args.AddRange(new[] { "-thread_queue_size", "32", "-f", "lavfi", "-i", videoGraph });
                 }
                 args.AddRange(new[] { "-map", synthetic ? "0:v:0" : !settings.SystemAudio ? "[video]" : "1:v:0" });
                 if (synthetic || settings.SystemAudio) args.AddRange(new[] { "-map", synthetic ? "1:a:0" : "0:a:0", "-af", synthetic ? "aresample=async=1:first_pts=0" : AudioPacketClock.ResamplerFilter, "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "192k" });
@@ -223,23 +231,19 @@ namespace F10Recorder
                 if (argumentProbe != null) args = argumentProbe(args);
                 CaptureArguments = args.ToArray();
                 RecorderRuntime.CaptureArgumentObserver?.Invoke(CaptureArguments);
-                if (!synthetic && argumentProbe == null && ReplayReferenceModel.ReferenceSettings(settings))
+                if (referenceDesktop && argumentProbe == null)
                 {
-                    var bounds = Native.DisplayBounds(IntPtr.Zero);
-                    if (bounds.Width == 1920 && bounds.Height == 1080)
-                    {
-                        var normalized = args.Select(a => a.Replace(directory, "<session>")
-                            .Replace(mediaClock.VideoTimestampFilter, "<common-clock-filter>"))
-                            .Select(a => a.StartsWith(@"\\.\pipe\F10Recorder-", StringComparison.Ordinal) ? "<audio-pipe>" : a).ToArray();
-                        ReferenceScope = new ReplayQualificationContext(normalized, bounds.Width, bounds.Height,
-                            audio.EndpointId, audio.SampleRate, audio.Channels, audio.FfmpegFormat)
-                            .Scope(ReplayReferenceModel.ExporterIdentity, settings.ReplayMinutes);
-                    }
+                    var normalized = args.Select(a => NormalizeDelayedGraph(a).Replace(directory, "<session>")
+                        .Replace(mediaClock.VideoTimestampFilter, "<common-clock-filter>"))
+                        .Select(a => a.StartsWith(@"\\.\pipe\F10Recorder-", StringComparison.Ordinal) ? "<audio-pipe>" : a).ToArray();
+                    ReferenceScope = new ReplayQualificationContext(normalized, 1920, 1080,
+                        audio.EndpointId, audio.SampleRate, audio.Channels, audio.FfmpegFormat)
+                        .Scope(ReplayReferenceModel.ExporterIdentity, settings.ReplayMinutes);
                 }
                 if (!synthetic && settings.CaptureMode == "window") Log.Write("Experimental window capture arguments: " + string.Join(" ", args.Select(Quote)));
                 if (ReferenceScope != null)
                 {
-                    var qualification = ReplayCalibrationCatalog.Load(settings.ReplayMinutes);
+                    var qualification = delayedCalibration ?? ReplayCalibrationCatalog.Load(settings.ReplayMinutes);
                     OutputCalibration = qualification.Model;
                     outputCalibrationReason = qualification.Reason ?? "Waiting for a closed reference replay selection.";
                 }
@@ -309,6 +313,21 @@ namespace F10Recorder
             }
             catch { Dispose(); throw; }
         }
+        // A supported surface already emits epoch-relative 1/60 PTS. If the native
+        // probe falls back to microsecond desktop frames, use the original RTC bridge and FPS filter.
+        internal static string DelayedDesktopGraph(string output, string epoch, string utcMicroseconds, bool requireDelayedSurface) =>
+            "ddagrab=f10_delay_epoch=" + epoch + (requireDelayedSurface ? ":f10_require_delay=1" : "") + ":framerate=240:output_idx=" + output + ":draw_mouse=1,"
+            + "setpts='if(eq(TB,1/60),PTS," + MediaClock.VideoTimestampExpression(utcMicroseconds)
+            + ")',fps=fps=60:round=near:f10_passthrough_clocked=1";
+
+        internal static string NormalizeDelayedGraph(string graph)
+        {
+            if (!graph.StartsWith("ddagrab=f10_delay_epoch=", StringComparison.Ordinal)) return graph;
+            // Mask only the dynamic operands. Preserve the entire fallback expression and option set.
+            graph = Regex.Replace(graph, @"(?<=^ddagrab=f10_delay_epoch=)[1-9][0-9]{0,18}(?=:)", "<qpc-epoch>");
+            return Regex.Replace(graph, @"(?<=print\(RTCTIME,24\)-)[1-9][0-9]{0,18}(?=[)]/1000000/TB)", "<utc-us>");
+        }
+
         internal static string WindowVideoSource(WindowTargetSnapshot target, int rate)
         {
             if (target == null || !target.Available) throw new InvalidOperationException("A live selected window is required.");

@@ -1612,7 +1612,7 @@ internal static partial class ReplayCalibrationRun
                         _ = Task.Run(source.StopCapture);
                     }, producerProof: source.ProducerProof, replayMinutes: plan.ReplayMinutes);
                     captureStorage.StartSupervision();
-                }, afterLaunch: source => captureStorage?.SealProducer(source.ProducerProof)));
+                }, afterLaunch: source => captureStorage?.SealProducer(source.ProducerProof), qualifyDesktopTiming: true));
             }
             var bootstrapClock = Stopwatch.StartNew();
             while (!create.IsCompleted) { sampler.Check();

@@ -97,6 +97,16 @@ internal static partial class ReplayCalibrationRun
         Require(!ContextEnvelopeValid(plan with { EvidenceRoles=noDisplay }), "Missing display reference was admitted.");
         Require(ExpectedCaptureTemplate(plan,"0").Single(a => a.StartsWith("ddagrab=")).StartsWith("ddagrab=f10_queue=1:", StringComparison.Ordinal)
             && !CaptureTemplate("0").Any(a => a.Contains("f10_queue")), "Capture graph selected for the wrong admission.");
+        string firstGraph = CaptureSession.DelayedDesktopGraph("0", "1111", "1000001", true);
+        string nextGraph = CaptureSession.DelayedDesktopGraph("0", "2222", "1000002", true);
+        string canonical = CaptureSession.NormalizeDelayedGraph(firstGraph);
+        Require(canonical == CaptureSession.NormalizeDelayedGraph(nextGraph)
+            && canonical == CaptureSession.DelayedDesktopGraph("0", "<qpc-epoch>", "<utc-us>", true)
+            && canonical != CaptureSession.NormalizeDelayedGraph(CaptureSession.DelayedDesktopGraph("0", "1111", "1000001", false))
+            && canonical != CaptureSession.NormalizeDelayedGraph(firstGraph.Replace("eq(TB,1/60)", "eq(TB,1/30)"))
+            && canonical != CaptureSession.NormalizeDelayedGraph(firstGraph.Replace("output_idx=0", "output_idx=1"))
+            && canonical != CaptureSession.NormalizeDelayedGraph(firstGraph.Replace("f10_passthrough_clocked=1", "f10_passthrough_clocked=0")),
+            "Delayed graph scope must preserve every operand except the two session clock origins.");
         var journal = new FiveMinuteGrowthJournal();
         Dictionary<string,long> before = new() { ["gone"] = 16384 }, after = new() { ["other"] = 4096 };
         Require(journal.Observe(0,30,[],before) == 0, "First native scan edge changed.");
@@ -136,7 +146,7 @@ internal static partial class ReplayCalibrationRun
         finally { File.Delete(path); }
     }
 
-    static string[] ExpectedCaptureTemplate(CalibrationPlan plan, string primary)
+    internal static string[] ExpectedCaptureTemplate(CalibrationPlan plan, string primary)
     {
         var arguments = CaptureTemplate(primary);
         if (FiveMinuteStorage(plan) || plan?.FreshCandidateAdmission == OwnedHistoryAdmission
@@ -144,6 +154,11 @@ internal static partial class ReplayCalibrationRun
         {
             int graph = Array.FindIndex(arguments, a => a.StartsWith("ddagrab=", StringComparison.Ordinal));
             arguments[graph] = arguments[graph].Replace("ddagrab=", "ddagrab=f10_queue=1:", StringComparison.Ordinal);
+        }
+        else if (MediaDependency.SupportsDelayedDesktop)
+        {
+            int graph = Array.FindIndex(arguments, a => a.StartsWith("ddagrab=", StringComparison.Ordinal));
+            arguments[graph] = CaptureSession.DelayedDesktopGraph(primary, "<qpc-epoch>", "<utc-us>", true);
         }
         return arguments;
     }

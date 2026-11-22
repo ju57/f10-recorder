@@ -15,7 +15,7 @@
     <GetFileHash Files="$(F10QueueEnginePath)" Algorithm="SHA256">
       <Output TaskParameter="Hash" PropertyName="QueueEngineHash" />
     </GetFileHash>
-    <Error Condition="'$(QueueEngineHash)' != 'EA698B512B73ECD8497A8C6949D6D5454CE5C9F6AE49F1DEE8725F1C72F2CBB5'" Text="The supplied queue engine differs from the approved binary." />
+    <Error Condition="'$(QueueEngineHash)' != 'AC62892E9CF5F384B25ED2BBEC7F7DB3CF31F7C65C144E39B2C1C42B4F0D61B2'" Text="The supplied queue engine differs from the approved binary." />
   </Target>
   <ItemGroup>
     <InternalsVisibleTo Include="F10Recorder.WorkerChecks" />
