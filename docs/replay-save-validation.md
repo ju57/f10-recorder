@@ -119,9 +119,9 @@ declared paths. Each control must identify the injected damage and expected
 rejecting path; success for one fault class does not establish equivalent
 fresh-every-picture semantic failure sensitivity.
 
-The publication changed no other criterion, checkbox, ownership or issue-body
-text. The public issue remains open. All other issue 83
-criteria remain: at least 20 matched reference exports, median <=3 seconds/p95
+At the time of that validation amendment, all other criteria, checkboxes and
+ownership stayed as published. The requirements then included at least
+20 matched reference exports, median <=3 seconds/p95
 <=5 seconds through observable Saved, exact one-frame boundaries and 1/5/30-minute
 coverage, warm-up/overlap/continued capture, physical feedback, resources,
 exact-candidate qualification, independent review and maintainer acceptance.
@@ -140,13 +140,14 @@ physical feedback. [Issue 55](https://github.com/ju57/f10-recorder/issues/55)
 owns the concurrent-save CPU follow-up. Source integration and maintainer
 acceptance remain part of issue 83.
 
-Existing finite qualification, failure controls and worker receipts remain
-usable only for the exact product, recipe, destination and workload they
-actually establish. Reconciliation neither discards valid evidence nor marks
-the revised criterion or the issue complete. Before acceptance, map applicable
-retained evidence to each criterion and record the remaining gaps:
+#### Acceptance map before the 23 November scope decision
 
-| Criterion | Evidence or disposition still required for acceptance |
+This table preserves the evidence requested at the time of the earlier
+validation amendment. The decision above assigns the outstanding
+integrated-product checks. Use each result for its measured product, recipe,
+destination and workload.
+
+| Criterion | Evidence requested at that checkpoint |
 | --- | --- |
 | 1 — Reference latency | At least 20 prospectively matched cold/warm reference exports with the frozen identities/order/quantile method, median <=3 seconds and p95 <=5 seconds. Finite pilot means do not establish these percentiles. |
 | 2 — Observable completion and feedback | Whole request-through-validated-publication/observable-Saved stage accounting and separate queue waiting; physical request-to-feedback <=200 ms remains required by issue 53. Headless client observations do not establish rendered physical feedback. |
