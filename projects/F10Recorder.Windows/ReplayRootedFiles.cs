@@ -91,7 +91,7 @@ internal sealed class ReplayRootedFiles() : ReplayFiles(ReplayFileMode.NativeInv
     {
         var owner = DirectoryOwner(Path.GetDirectoryName(path)); string leaf = Path.GetFileName(path);
         if (owner.Files.TryGetValue(leaf, out var registered) && registered.Retired) return;
-        if (!owner.Files.ContainsKey(leaf) && !owner.Native.EnumerateLeaves(4096).Any(e=>e.Path.Equals(Path.GetFullPath(path),StringComparison.OrdinalIgnoreCase))) return;
+        if (registered == null && !owner.Native.LeafExists(leaf)) return;
         Registry.RemoveFile(owner, leaf);
     }
     internal override void DeleteDirectory(string path, string workspacePartial = null)

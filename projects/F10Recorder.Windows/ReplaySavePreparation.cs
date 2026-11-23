@@ -84,7 +84,7 @@ internal sealed class ReplaySavePreparation : IDisposable
     {
         Require();
         var parent = files.DirectoryOwner(Path.GetDirectoryName(Partial)).Native;
-        if (parent.EnumerateLeaves(4096).Any(e => e.Path.Equals(Partial, StringComparison.OrdinalIgnoreCase)))
+        if (parent.LeafExists(Path.GetFileName(Partial)))
             throw new IOException("Staged preparation must not create the main output.");
         var work = ObserveWork(); return new(null, null, work, work.Values.Any(e => e.Identity == null));
     }

@@ -148,7 +148,8 @@ internal static class ReplayMp4Checks
         Require(shortenedTail.Tracks[0].PresentationTicks == 999, "Tail-edit control did not reach the intended presentation difference.");
         Reject(() => proof.Verify(shortenedTail), "Source proof accepted a shortened edit hiding the expected video tail.");
         foreach (string fault in new[] { "count", "duration", "drift", "hidden-head", "truncated-extent", "overlap", "external-reference", "wrong-sync", "nal-length", "duplicate-moov", "missing-audio",
-            "movie-duration", "disabled-track", "track-duration", "duplicate-id", "transform", "dimensions", "avcc-profile", "forbidden-sps", "nal-flood", "unindexed-tail", "aac-config", "short-all-edits" })
+            "movie-duration", "disabled-track", "track-duration", "duplicate-id", "transform", "dimensions", "avcc-profile", "forbidden-sps", "nal-flood", "unindexed-tail", "aac-config", "short-all-edits",
+            "missing-vmhd", "missing-smhd", "duplicate-vmhd", "mixed-media-headers", "short-smhd", "vmhd-flags", "graphics-mode", "sound-balance" })
             Reject(() => Read(Fixture(fault)), "MP4 inspection accepted " + fault);
         Reject(() => Read(bytes[..^1]), "Truncated closed MP4 was accepted.");
         using (var changed = new ChangedLength(bytes))
@@ -225,8 +226,18 @@ internal static class ReplayMp4Checks
                 if (!video) trackHeader[48] = 1;
                 Matrix(trackHeader, 52); U32(video ? 320u << 16 : 0).CopyTo(trackHeader, 88); U32(video ? 192u << 16 : 0).CopyTo(trackHeader, 92);
             }
+            var headerFields = new byte[video ? 12 : fault == "short-smhd" ? 7 : 8];
+            if (video && fault != "vmhd-flags") headerFields[3] = 1;
+            if (video && fault == "graphics-mode" || !video && fault == "sound-balance") headerFields[5] = 1;
+            string headerType = video ? "vmhd" : "smhd";
+            var mediaInfo = new List<byte[]>();
+            if (fault != "missing-" + headerType) mediaInfo.Add(Box(headerType, headerFields));
+            if (video && fault == "duplicate-vmhd") mediaInfo.Add(Box("vmhd", headerFields));
+            if (video && fault == "mixed-media-headers") mediaInfo.Add(Box("smhd", new byte[8]));
+            mediaInfo.Add(Box("dinf", reference));
+            mediaInfo.Add(Box("stbl", tables.ToArray()));
             return Box("trak", Box("tkhd", trackHeader), Box("edts", edit), Box("mdia", Box("mdhd", Clock(48000, duration)), Box("hdlr", hdlr),
-                Box("minf", Box("dinf", reference), Box("stbl", tables.ToArray()))));
+                Box("minf", mediaInfo.ToArray())));
         }
         byte[] Movie(uint start)
         {

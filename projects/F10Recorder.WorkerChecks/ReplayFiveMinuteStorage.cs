@@ -205,7 +205,7 @@ internal static partial class ReplayCalibrationRun
             ReplayCalibrationCatalog.ValidateOutput(output, limits, output.MaximumActiveGapMs);
             Require(output.CaptureVolume == limits.Volume && output.CaptureObservationMilliseconds == contract.ObservationMilliseconds
                 && output.MaximumCapacityGapMs > 0 && output.MaximumCapacityGapMs <= contract.ObservationMilliseconds
-                && output.CapturePollGrowthBytes >= 0 && output.CapturePollGrowthBytes <= contract.PollGrowthBytes
+                && output.CapturePollGrowthBytes > 0 && output.CapturePollGrowthBytes <= contract.PollGrowthBytes
                 && output.CaptureStopGrowthBytes >= 0 && output.CaptureStopGrowthBytes <= contract.StopGrowthBytes
                 && output.CombinedPeakAllocation.HasValue && limits.CoversObservations(output.InputBytes, output.FinalBytes,
                     output.FinalAllocation, output.CombinedPeakAllocation.Value), "Observed growth or output exceeds the predeclared experiment bounds.");

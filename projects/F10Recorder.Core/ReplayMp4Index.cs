@@ -266,6 +266,13 @@ internal static class ReplayMp4Reader
             if (video && edit.Start != 0 || !video && (clock.Scale != 48000 || edit.Start is < 0 or > 8192 || edit.Delay > 1d / 48000))
                 throw new IOException("MP4 edit hides replay pictures or has unsupported AAC priming.");
             var info = Children(One(media, "minf"));
+            var headers = info.Where(box => box.Kind is "vmhd" or "smhd" or "hmhd" or "nmhd" or "sthd" or "gmhd").ToArray();
+            if (headers.Length != 1 || headers[0].Kind != (video ? "vmhd" : "smhd")
+                || headers[0].End - headers[0].Data != (video ? 12 : 8))
+                throw new IOException("Unexpected MP4 media information header.");
+            var fields = Payload(headers[0]);
+            if (U32(fields) != (video ? 1u : 0u) || fields.AsSpan(4).ContainsAnyExcept((byte)0))
+                throw new IOException("Unsupported MP4 media header flags, graphics mode, colour or sound balance.");
             var references = Payload(One(Children(One(info, "dinf")), "dref"));
             if (references.Length != 20 || U32(references) != 0 || U32(references, 4) != 1 || U32(references, 8) != 12
                 || Text(references.AsSpan(12, 4)) != "url " || U32(references, 16) != 1)

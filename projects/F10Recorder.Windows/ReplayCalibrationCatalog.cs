@@ -333,8 +333,7 @@ internal static partial class ReplayCalibrationCatalog
         if (model.CaptureHeadroom != null)
         {
             var headroom = model.CaptureHeadroom;
-            Require(sources.All(s => s.CapturePollGrowthBytes.HasValue && s.CaptureStopGrowthBytes.HasValue
-                && s.CapturePollGrowthBytes >= 0 && s.CaptureStopGrowthBytes >= 0 && s.CaptureVolume == model.Volume
+            Require(sources.All(s => s.CapturePollGrowthBytes is > 0 && s.CaptureStopGrowthBytes is >= 0 && s.CaptureVolume == model.Volume
                 && s.CaptureObservationMilliseconds == ReplayCapacityPolicy.CoverageMilliseconds));
             Require(outputs.All(s => Gap(s.MaximumCapacityGapMs)), "Capacity query coverage evidence is missing or outside the declared horizon.");
             Require(headroom.Scope == model.Scope && headroom.Volume == model.Volume && headroom.AllocationUnit == model.AllocationUnit

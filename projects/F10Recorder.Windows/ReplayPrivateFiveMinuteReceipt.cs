@@ -120,7 +120,7 @@ internal static partial class ReplayCalibrationCatalog
             ValidateOutput(output, measuredModel, output.MaximumActiveGapMs);
             Require(output.Label == "H03" && output.CaptureVolume == contract.Volume && Gap(output.MaximumActiveGapMs)
                 && Gap(output.MaximumCapacityGapMs) && output.CaptureObservationMilliseconds == contract.ObservationMilliseconds
-                && output.CapturePollGrowthBytes is >= 0 && output.CapturePollGrowthBytes <= contract.PollGrowthBytes
+                && output.CapturePollGrowthBytes is > 0 && output.CapturePollGrowthBytes <= contract.PollGrowthBytes
                 && output.CaptureStopGrowthBytes is >= 0 && output.CaptureStopGrowthBytes <= contract.StopGrowthBytes
                 && output.CombinedPeakAllocation is long peak
                 && original.CoversObservations(output.InputBytes, output.FinalBytes, output.FinalAllocation, peak),

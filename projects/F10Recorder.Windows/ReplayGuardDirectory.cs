@@ -156,7 +156,18 @@ internal sealed class ReplayGuardDirectory : IDisposable
         }
         finally{file?.Dispose();}
     }
-    SafeFileHandle OpenNative(string leaf,uint access,uint disposition,uint share,bool isDirectory,bool asynchronous=false)
+    // Resolve only this name through the pinned parent. An indeterminate lookup
+    // (access, sharing, reparse or I/O error) cannot certify absence.
+    internal bool LeafExists(string leaf)
+    {
+        lock (operationGate)
+        {
+            using var entry = OpenNative(leaf, 0, OpenDisposition, 7, isDirectory: null, allowMissing: true);
+            return entry != null;
+        }
+    }
+
+    SafeFileHandle OpenNative(string leaf,uint access,uint disposition,uint share,bool? isDirectory,bool asynchronous=false,bool allowMissing=false)
     {
         ValidateLeaf(leaf);
         bool rootRef=false;IntPtr text=IntPtr.Zero,name=IntPtr.Zero,block=IntPtr.Zero,slot=IntPtr.Zero;SafeFileHandle file=null;
@@ -169,8 +180,11 @@ internal sealed class ReplayGuardDirectory : IDisposable
             Marshal.StructureToPtr(new UnicodeString{Length=checked((ushort)(leaf.Length*2)),MaximumLength=checked((ushort)(leaf.Length*2+2)),Buffer=text},name,false);
             var attributes=new ObjectAttributes{Length=Marshal.SizeOf<ObjectAttributes>(),RootDirectory=directory.DangerousGetHandle(),ObjectName=name,Attributes=0x1040}; // CASE_INSENSITIVE|DONT_REPARSE
             BeforeNativeOpenForChecks?.Invoke();
-            int status=NtCreateFile(slot,access|ReadAttributes|Synchronize,ref attributes,block,IntPtr.Zero,isDirectory?0x10u:0x80u,share,disposition,OpenReparse|(isDirectory?1u:NonDirectory)|(asynchronous?0u:Synchronous),IntPtr.Zero,0);
-            try{Complete(status,IntPtr.Zero,block,slot);}finally{AfterNativeOpenForChecks?.Invoke();}
+            uint typeOptions = isDirectory switch { true => 1u, false => NonDirectory, null => 0u };
+            int status=NtCreateFile(slot,access|ReadAttributes|Synchronize,ref attributes,block,IntPtr.Zero,isDirectory==true?0x10u:0x80u,share,disposition,OpenReparse|typeOptions|(asynchronous?0u:Synchronous),IntPtr.Zero,0);
+            try { Complete(status, IntPtr.Zero, block, slot); }
+            catch (Win32Exception error) when (allowMissing && error.NativeErrorCode == 2) { return null; }
+            finally { AfterNativeOpenForChecks?.Invoke(); }
             file=new SafeFileHandle(Marshal.ReadIntPtr(slot),true);Marshal.WriteIntPtr(slot,IntPtr.Zero);
             if(file.IsInvalid)throw new IOException("Completed create has no valid owned handle.");
             if(disposition==CreateDisposition&&Marshal.ReadIntPtr(block,IntPtr.Size).ToInt64()!=2)throw new IOException("New-file origin was not certified by FILE_CREATED.");
@@ -323,7 +337,7 @@ internal sealed class ReplayGuardDirectory : IDisposable
             return stream??=new FileStream(file,readable&&writable?FileAccess.ReadWrite:writable?FileAccess.Write:FileAccess.Read,65536,asynchronous);
             }
         }
-        void Set(int kind,byte[] information,ReplayGuardDirectory destination=null)
+        void Set(int kind,byte[] information,ReplayGuardDirectory destination=null,Action beforeMutation=null)
         {
             Require();bool targetRef=false,sourceRef=false;IntPtr block=IntPtr.Zero,buffer=IntPtr.Zero;
             try
@@ -335,7 +349,14 @@ internal sealed class ReplayGuardDirectory : IDisposable
                 buffer=Marshal.AllocHGlobal(information.Length);Marshal.Copy(information,0,buffer,information.Length);
                 if(kind is 10 or 13)retired=true; // From this point only close is allowed, including exceptional completion.
                 var hooks=destination??root;hooks.BeforeNativeMutationForChecks?.Invoke();
-                try{Complete(NtSetInformationFile(file.DangerousGetHandle(),block,buffer,(uint)information.Length,kind),file.DangerousGetHandle(),block);}
+                // Publication may have waited for the cache and native operation
+                // locks. Recheck its genuine capacity epoch at the rename.
+                try
+                {
+                    beforeMutation?.Invoke();
+                    Complete(NtSetInformationFile(file.DangerousGetHandle(), block, buffer, (uint)information.Length, kind),
+                        file.DangerousGetHandle(), block);
+                }
                 finally{hooks.AfterNativeMutationForChecks?.Invoke();}
             }
             catch{retired=true;throw;}
@@ -350,7 +371,15 @@ internal sealed class ReplayGuardDirectory : IDisposable
         }
         internal void LinkTo(ReplayGuardDirectory destination,string leaf){lock(operationGate){_ = ObserveCore();Set(11,NameInformation(destination,leaf),destination);}}
         void RequireRemoval(){if(!removable||stream is{CanRead:true}||stream is{CanWrite:true})throw new IOException("Removal requires a dedicated metadata ticket and closed data users.");}
-        internal void RenameTo(ReplayGuardDirectory destination,string leaf){lock(operationGate){RequireRemoval();_ = ObserveCore();Set(10,NameInformation(destination,leaf),destination);retired=true;}}
+        internal void RenameTo(ReplayGuardDirectory destination, string leaf, Action requireFreshness = null)
+        {
+            lock (operationGate)
+            {
+                RequireRemoval();
+                _ = ObserveCore();
+                Set(10, NameInformation(destination, leaf), destination, requireFreshness);
+            }
+        }
         internal void Delete(){lock(operationGate){RequireRemoval();_ = ObserveCore();Set(13,new byte[]{1});retired=true;}}
         public void Dispose(){lock(operationGate){if(disposed)return;try{stream?.Dispose();}finally{file.Dispose();if(file.IsClosed){disposed=true;root.tickets--;}}}}
     }

@@ -243,7 +243,7 @@ internal static partial class ReplayCalibrationCatalog
                     && output.ManagedExport.ParentStartedUtcTicks <= c.CompletedUtc.Ticks),
                 "Confirmation output creators must be genuine new work after the freeze.");
             Require(Gap(output.MaximumCapacityGapMs) && output.CaptureObservationMilliseconds == ReplayCapacityPolicy.CoverageMilliseconds
-                && output.CaptureVolume == f.Volume && output.CapturePollGrowthBytes is >= 0 && output.CaptureStopGrowthBytes is >= 0
+                && output.CaptureVolume == f.Volume && output.CapturePollGrowthBytes is > 0 && output.CaptureStopGrowthBytes is >= 0
                 && output.CapturePollGrowthBytes <= f.Envelope.Poll && output.CaptureStopGrowthBytes <= f.Envelope.Stop
                 && output.CombinedPeakAllocation.HasValue && model.CoversObservations(output.InputBytes, output.FinalBytes,
                     output.FinalAllocation, output.CombinedPeakAllocation.Value), "Confirmation exceeds the frozen envelope; stop, never refit.");

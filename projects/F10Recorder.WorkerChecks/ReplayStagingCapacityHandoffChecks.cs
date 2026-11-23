@@ -14,6 +14,7 @@ internal static class ReplayStagingCapacityHandoffChecks
         internal readonly ManualResetEventSlim QueryEntered = new(), QueryRelease = new();
         internal int PreparationOwner, Validations, Stops, QueriesCompleted;
         internal ReplayFileExtent CheckedOutput;
+        internal Action BeforeOutputMutation;
         ReplaySavePreparation preparation;
         bool childStopped, stopped;
         int blockNext;
@@ -52,6 +53,7 @@ internal static class ReplayStagingCapacityHandoffChecks
             Action accepted, Action<ReplayProducerProof> changed, Action check, Action<ReplaySavePreparation> take)
         {
             PreparationOwner = Environment.CurrentManagedThreadId; childStopped = false;
+            files.DirectoryOwner(Path.GetDirectoryName(partial)).Native.BeforeNativeMutationForChecks = BeforeOutputMutation;
             preparation = new(files, ReplayInfo, interval, candidate, partial, check); take(preparation);
             preparation.Start((_, retained) => new ReplayStagedProcess((guard, ready, _) => {
                 changed(ProducerProof);
@@ -108,8 +110,11 @@ internal static class ReplayStagingCapacityHandoffChecks
         cache.SerializeNamespaceMutationForChecks = action => { publicationThread = Environment.CurrentManagedThreadId; action(); };
         var id = cache.RegisterSession(source);
         SaveSubmission first = null;
+        // More unrelated destination entries than the owned-workspace inventory limit.
+        var unrelated = Enumerable.Range(0, 4097).Select(n => Path.Combine(output, $"existing-{n}.clip")).ToArray();
         try
         {
+            foreach (string path in unrelated) File.WriteAllBytes(path, []);
             first = cache.TrySave(id, Stopwatch.GetTimestamp(), output);
             if (!first.Accepted || !source.QueryEntered.Wait(2000)) throw new IOException("Actual late read-only capacity policy did not block.");
             var stop = Stopwatch.StartNew(); cache.StopAcquisitionAsync(id).WaitAsync(TimeSpan.FromMilliseconds(500)).GetAwaiter().GetResult();
@@ -122,6 +127,22 @@ internal static class ReplayStagingCapacityHandoffChecks
                 && extent.Volume == source.CheckedOutput.Volume && extent.Length == 2048;
             var second = cache.TrySave(id, Stopwatch.GetTimestamp(), output);
             ReplaySaveResult repeated = second.Accepted ? second.Completion.WaitAsync(TimeSpan.FromSeconds(6)).GetAwaiter().GetResult() : null;
+            bool delayedPublication = false;
+            // Wait after both namespace locks and the last metadata read. A
+            // freshness check placed before either lock would allow this rename.
+            source.BeforeOutputMutation = () => {
+                if (requestClosures == 3 && !delayedPublication)
+                {
+                    delayedPublication = true;
+                    Thread.Sleep(ReplayCapacityPolicy.CoverageMilliseconds + 50);
+                }
+            };
+            var third = cache.TrySave(id, Stopwatch.GetTimestamp(), output);
+            var expired = third.Accepted ? third.Completion.WaitAsync(TimeSpan.FromSeconds(6)).GetAwaiter().GetResult() : null;
+            var published = Directory.GetFiles(output, "*.mp4").Where(path => !path.EndsWith(".partial.mp4", StringComparison.OrdinalIgnoreCase));
+            bool staleRenameRejected = delayedPublication && expired is { Succeeded: false }
+                && expired.Error?.Contains("storage observation exceeded", StringComparison.OrdinalIgnoreCase) == true
+                && published.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals([saved.File, repeated?.File]);
             using var claims = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "authority", "replay-volume-reservations.json")));
             int remainingClaims = claims.RootElement.GetProperty("Owners").GetArrayLength();
             bool authoritySessionClosed = !cache.AuthoritySessionOwnedForChecks;
@@ -129,10 +150,11 @@ internal static class ReplayStagingCapacityHandoffChecks
             var result = new { checkedPublicationPreserved, firstSaved = saved.Succeeded, saved.Error, stopMilliseconds, source.Stops,
                 originalOwnerThread = firstOwner, firstPublicationThread, delayCalls, completionThreads = completionThreads.ToArray(),
                 actualQueryCompletions = source.QueriesCompleted, secondAccepted = second.Accepted, second.Rejection,
-                repeatedSaved = repeated?.Succeeded, requestClosures, remainingClaims, authoritySessionClosed, diagnostics = rows,
+                repeatedSaved = repeated?.Succeeded, unrelatedEntries = unrelated.Length, staleRenameRejected, expiryError = expired?.Error,
+                requestClosures, remainingClaims, authoritySessionClosed, diagnostics = rows,
                 scope = "Actual native Cache/reservation/publication/cleanup; canceled simulated staged transport and controlled dummy validation, not media/feed/decoder qualification." };
             File.WriteAllText(Path.Combine(root, "result.json"), JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
-            if (!checkedPublicationPreserved || !second.Accepted || repeated?.Succeeded != true || requestClosures != 2
+            if (!checkedPublicationPreserved || !second.Accepted || repeated?.Succeeded != true || !staleRenameRejected || requestClosures != 3
                 || delayCalls != 0 || firstPublicationThread != firstOwner || source.QueriesCompleted != 1
                 || remainingClaims != 0 || !authoritySessionClosed || !source.OutputProducerStopped
                 || rows.Any(s => s.Contains("closure uncertain", StringComparison.Ordinal) || s.Contains("registry remains retained", StringComparison.Ordinal)))
@@ -145,6 +167,7 @@ internal static class ReplayStagingCapacityHandoffChecks
             if (first?.Completion != null) try { first.Completion.WaitAsync(TimeSpan.FromSeconds(3)).GetAwaiter().GetResult(); } catch (Exception) { }
             queue.CompleteAdding();
             if (!completion.Join(2000)) throw new IOException("Controlled capacity completion thread did not join.");
+            foreach (string path in unrelated) File.Delete(path);
         }
     }
 }

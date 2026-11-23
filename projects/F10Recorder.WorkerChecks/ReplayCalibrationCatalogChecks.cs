@@ -357,6 +357,24 @@ internal static partial class ReplayCalibrationCatalogChecks
         Write(catalog, fixture);
         Require(Load(catalog).Model?.CaptureHeadroom == headroom, "Qualified supplied capture terms must survive catalog loading.");
         cases.Add("capture-headroom-supplied-positive");
+        // Keep the paired observations consistent and training limits intact.
+        // A zero held-out growth sample must fail on the measurement itself.
+        Reject("capture-zero-poll-growth-paired", r => Legacy(
+            Source(r, 4, s => s with { CapturePollGrowthBytes = 0 }),
+            4, s => s with { CapturePollGrowthBytes = 0 }));
+        Reject("capture-zero-cohort-with-consistent-margin", r => {
+            var model = r.Model;
+            var marginOnly = headroom with { PollGrowthBytes = ReplayReferenceModel.CaptureAllowance(0, model.AllocationUnit) };
+            return r with {
+                Sources = r.Sources.Select(s => s with { CapturePollGrowthBytes = 0 }).ToArray(),
+                LegacyOutputs = r.LegacyOutputs.Select(s => s with { CapturePollGrowthBytes = 0 }).ToArray(),
+                Model = model with {
+                    CaptureHeadroom = marginOnly,
+                    Revision = ReplayCalibrationCatalog.ModelRevision(model.Scope, model.Volume, model.AllocationUnit,
+                        model.FinalResidual, model.SampledFinalizationExtra, model.TrainingReceipts, ControlledHost, marginOnly)
+                }
+            };
+        });
         Reject("capture-old-horizon-source", r => Source(r, 4, s => s with { CaptureObservationMilliseconds = 500 }));
         Reject("capture-capacity-coverage-missing", r => Source(r, 4, s => s with { MaximumCapacityGapMs = 0 }));
         Reject("capture-capacity-coverage-outage", r => Source(r, 4, s => s with { MaximumCapacityGapMs = ReplayCapacityPolicy.CoverageMilliseconds + 1 }));

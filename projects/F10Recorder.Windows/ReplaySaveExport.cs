@@ -39,6 +39,7 @@ internal sealed record ReplayExportRequest(ReplaySessionInfo Info, ReplayInterva
         Timing.ExportRecipe = recipe;
     }
     internal ReplayPublicationLease ValidatedOutput { get; private set; }
+    internal Action RequirePublicationFreshness { get; set; }
     Func<ReplayPublicationLease> nativePublication;
     bool nativePublicationUsed;
     internal void AttachNativePublication(Func<ReplayPublicationLease> open)

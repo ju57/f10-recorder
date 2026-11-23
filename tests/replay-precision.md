@@ -334,13 +334,13 @@ remain held through callback/producer closure. Known joined cancellation/failure
 releases ownership and admits another request without publishing either failed
 output. Another actual Cache control suspends a read-only capacity policy after
 controlled validation, preserves a checked2048byte dummy publication, and checks
-owner-thread cleanup plus a second successful save. Its deliberately inline
+owner-thread cleanup plus a second successful save with 4,097 unrelated empty files in the destination. A third request delays the rename past the capacity horizon and must leave only the two successful final MP4s. Its deliberately inline
 completion task can expose the former asynchronous thread migration; the staged
 path must keep that wait synchronous outside the Cache gate. A final control
 withholds one completed tail, requires reserved preparation to have started
 while no input snapshot has yet been materialized, then requires the complete
 protected set and checked publication after tail closure. Its timing asserts
-zero pre-tail protection and protection beginning at or after `TailClosed`. Bounds:1MiB/25seconds,
+zero pre-tail protection and protection beginning at or after `TailClosed`. Bounds: 1 MiB of payload plus metadata for 4,097 empty fixture files, 45 seconds,
 at most one empty job at a time, simulated transports and one bounded managed
 completion thread; no child processes, playable media, capture, audio, UI, profiles
 or account-catalog changes.

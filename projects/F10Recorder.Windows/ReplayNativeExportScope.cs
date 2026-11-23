@@ -305,10 +305,9 @@ internal sealed class ReplayNativeExportScope : IDisposable
             if (disposed) throw new IOException("Native output observer is closed.");
             RequireObservationHealthy();
             ReplayGuardDirectory.Observation main = null; bool conservative = false;
-            IReadOnlyList<ReplayStorage.DirectoryEntry> parentEntries = null;
-            if (!request.OwnWorkDirectory || !members.ContainsKey(request.Partial))
-                parentEntries = files.DirectoryOwner(Path.GetDirectoryName(request.Partial)).Native.EnumerateLeaves(4096);
-            if (!request.OwnWorkDirectory && parentEntries.Any(e => e.Path.Equals(request.WorkDirectory,StringComparison.OrdinalIgnoreCase)))
+            bool OutputLeafExists(string path) =>
+                files.DirectoryOwner(Path.GetDirectoryName(path)).Native.LeafExists(Path.GetFileName(path));
+            if (!request.OwnWorkDirectory && OutputLeafExists(request.WorkDirectory))
                 throw new IOException("Unowned entry appeared at the reserved workspace name.");
             if (lease != null) main = lease.ObserveNative();
             else if (members.TryGetValue(request.Partial, out var member)) main = member.Observer.Observe();
@@ -316,7 +315,7 @@ internal sealed class ReplayNativeExportScope : IDisposable
             {
                 // Absence is checked anew; a foreign reserved name is not
                 // silently adopted as a created output or allocation credit.
-                if (parentEntries.Any(e => e.Path.Equals(request.Partial, StringComparison.OrdinalIgnoreCase)))
+                if (OutputLeafExists(request.Partial))
                     throw new IOException("Unowned file appeared at the reserved output name.");
             }
             if (main != null) conservative |= main.Links != 1;

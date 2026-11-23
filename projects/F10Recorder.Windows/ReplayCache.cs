@@ -101,8 +101,13 @@ internal class ReplayFiles(ReplayFileMode mode = ReplayFileMode.Conservative)
     internal virtual void Publish(string partial, string final) => System.IO.File.Move(partial, final);
     internal virtual void Publish(ReplayExportRequest request, string final)
     {
-        if (request.ValidatedOutput == null) Publish(request.Partial, final);
-        else request.ValidatedOutput.Publish(final);
+        if (request.ValidatedOutput != null)
+            request.ValidatedOutput.Publish(final, request.RequirePublicationFreshness);
+        else
+        {
+            request.RequirePublicationFreshness?.Invoke();
+            Publish(request.Partial, final);
+        }
     }
     internal virtual void DeleteFile(string path) => System.IO.File.Delete(path);
     internal virtual void DeleteDirectory(string path, string workspacePartial = null) => ReplayCacheFileOperations.DeleteTree(path, workspacePartial);
@@ -1698,7 +1703,9 @@ internal sealed partial class ReplayCache : IDisposable
                 }
                 if(requiresPublicationFreshness)
                 {
-                    if(nativeObservation!=null)nativeObservation.RequireFreshness();else storageObservation.RequireFreshness();
+                    exportRequest.RequirePublicationFreshness = nativeObservation != null
+                        ? nativeObservation.RequireFreshness : storageObservation.RequireFreshness;
+                    exportRequest.RequirePublicationFreshness();
                 }
                 timing.Released = time.GetTimestamp();
                 timing.PublicationStarted = time.GetTimestamp();

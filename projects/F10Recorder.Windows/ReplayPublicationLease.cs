@@ -117,7 +117,7 @@ internal sealed class ReplayPublicationLease : IDisposable
             throw;
         }
     }
-    internal void Publish(string destination)
+    internal void Publish(string destination, Action requireFreshness = null)
     {
         if (published) throw new IOException("Validated replay output was already published.");
         destination = Path.GetFullPath(destination);
@@ -125,7 +125,7 @@ internal sealed class ReplayPublicationLease : IDisposable
         {
             if (!Path.GetDirectoryName(destination).Equals(nativeDirectory.OriginalPath, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("Rooted replay publication cannot change its admitted output parent.");
-            nativePublication.RenameTo(nativeDirectory, Path.GetFileName(destination));
+            nativePublication.RenameTo(nativeDirectory, Path.GetFileName(destination), requireFreshness);
             published = true;
             return;
         }
@@ -146,6 +146,7 @@ internal sealed class ReplayPublicationLease : IDisposable
         // ReplaceIfExists=false, RootDirectory=NULL: use the documented Win32
         // absolute-path form while anchoring the admitted target directory.
         BitConverter.GetBytes(name.Length).CopyTo(information, lengthOffset); name.CopyTo(information, nameOffset);
+        requireFreshness?.Invoke();
         if (!SetFileInformationByHandle(file, 3, information, (uint)information.Length)) throw new Win32Exception();
         published = true;
     }
