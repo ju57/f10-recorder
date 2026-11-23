@@ -54,5 +54,7 @@ The [live issue](https://github.com/ju57/f10-recorder/issues/83),
 retain all acceptance criteria, coverage, performance thresholds, evidence rules
 and quality/release gates. The
 [storage-policy reconciliation](../storage-admission.md#versioned-retained-evidence-coverage-issue-83-local-implementation)
-still has pending public criterion 7 wording; this clarification neither amends
-the issue nor establishes an accepted bridge, catalog activation or completion.
+had pending public criterion 7 wording at this checkpoint. The
+[23 November scope decision](https://github.com/ju57/f10-recorder/issues/83)
+records the later five-minute exception and assigns integrated endpoints to
+[issue 53](https://github.com/ju57/f10-recorder/issues/53).

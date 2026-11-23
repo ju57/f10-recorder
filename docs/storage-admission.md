@@ -182,15 +182,15 @@ endpoints: both confirmations need independent acceptance explicitly binding
 source, shared-clock and one-frame endpoint evidence. Missing confirmation or
 acceptance keeps the bridge rejected. No account catalog is activated by issuance.
 
-The locally agreed criterion 7 direction is: keep original calibration provenance
-and bind applicability to the exact target; after binary/recipe/context changes,
-remeasure affected claims and permit an explicitly reviewed conservative evidence
-bridge for unchanged mechanisms and covered domains, supported by targeted current
-confirmations. Hash-only rewriting and unsupported domain transfer are not
-qualification. **The public issue has not been edited to publish this reconciliation.**
-The separate twenty CURRENT-target five-minute saves (ten first/repeat workers,
-C01 as a prospective pilot prefix) and ordinary one/thirty-minute endpoint sessions
-remain required. Historical CE29 percentiles are not current-target measurements.
+On 23 November 2026 the maintainer recorded a five-minute C: exception in
+[issue 83, criterion 7](https://github.com/ju57/f10-recorder/issues/83).
+The [private receipt](#private-five-minute-receipt) preserves the original
+measured limits and binds applicability to the independently verified consumer.
+Other builds and durations require their own applicable storage evidence.
+The [accepted twenty-save cohort](https://github.com/ju57/f10-recorder/issues/83#issuecomment-7084988860)
+on `69b5f50` supplies the implementation result.
+[Issue 53](https://github.com/ju57/f10-recorder/issues/53) owns the ordinary
+one- and thirty-minute endpoint sessions and the integrated five-minute benchmark.
 The thirteen sessions/~91 minutes figure and first-fault stop describe the
 earlier proposal; subsequent user decisions are recorded in the
 [paused checkpoint](agents/issue-83-checkpoint.md). That proposal held recording

@@ -129,6 +129,17 @@ Issue 15's queue and installation/release remain separate.
 
 ### Evidence and remaining acceptance
 
+The maintainer recorded the implementation and integrated-product scopes on
+23 November 2026. [Issue 83](https://github.com/ju57/f10-recorder/issues/83)
+accepts the twenty-save measurement on `69b5f50` (2.670 s median, 3.024 s p95)
+and the [private five-minute storage exception](storage-admission.md#private-five-minute-receipt)
+on its verified consumer. [Issue 53](https://github.com/ju57/f10-recorder/issues/53)
+owns ordinary one- and thirty-minute live admission, two advancing overlapping
+saves per duration, and the integrated product's five-minute latency and
+physical feedback. [Issue 55](https://github.com/ju57/f10-recorder/issues/55)
+owns the concurrent-save CPU follow-up. Source integration and maintainer
+acceptance remain part of issue 83.
+
 Existing finite qualification, failure controls and worker receipts remain
 usable only for the exact product, recipe, destination and workload they
 actually establish. Reconciliation neither discards valid evidence nor marks
