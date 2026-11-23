@@ -128,6 +128,74 @@ namespace F10Recorder
             public void Dispose() { if (File != null) File.Dispose(); if (Profile != null) Profile.Dispose(); if (Parents != null) Parents.Dispose(); if (Storage != null) Storage.Dispose(); }
         }
         internal static bool IsSharingViolation(IOException error) { int code = error.HResult & 65535; return code == 32 || code == 33; }
+        // Request-owned directory capabilities; the shared file lock still
+        // exists only during one actual ledger operation, never the whole save.
+        internal sealed class LockDirectoryLease : IDisposable
+        {
+            readonly string root,profiles,sid,name,rootIdentity,profilesIdentity;
+            readonly IDisposable rootPins;
+            readonly ReplayGuardDirectory profilesOwner;
+            int active;
+            readonly object lifecycle=new();
+            bool disposed,uncertain;
+            string lockIdentity;
+            internal LockDirectoryLease(string root,string purpose)
+            {
+                this.root=Path.GetFullPath(root);profiles=Path.Combine(this.root,"profiles");
+                try
+                {
+                    CreatePrivateDirectory(this.root);rootPins=Acquire(this.root);
+                    rootIdentity=Native.DirectoryIdentity(this.root);CreatePrivateDirectory(profiles);
+                    profilesIdentity=Native.DirectoryIdentity(profiles);
+                    profilesOwner=new(profiles,profilesIdentity,ReplayStorage.ObserveCapacity(profiles).Volume);
+                    using var identity=WindowsIdentity.GetCurrent();sid=identity.User.Value;
+                    using var sha=SHA256.Create();name=Convert.ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(sid+":"+purpose)))+".lock";
+                }
+                catch{Dispose();throw;}
+            }
+            internal IDisposable AcquireOperation()
+            {lock(lifecycle)return AcquireOperationCore();}
+            IDisposable AcquireOperationCore()
+            {
+                if(disposed||uncertain)throw new IOException("Authority session closure is uncertain.");
+                using(var identity=WindowsIdentity.GetCurrent())if(identity.User.Value!=sid)throw new IOException("Authority user changed inside request.");
+                if(Native.DirectoryIdentity(root)!=rootIdentity||Native.DirectoryIdentity(profiles)!=profilesIdentity
+                    ||(File.GetAttributes(root)&FileAttributes.ReparsePoint)!=0||(File.GetAttributes(profiles)&FileAttributes.ReparsePoint)!=0)
+                    throw new IOException("Authority directory identity or namespace changed.");
+                Validate(new DirectoryInfo(root).GetAccessControl(AccessControlSections.Owner|AccessControlSections.Access));
+                Validate(new DirectoryInfo(profiles).GetAccessControl(AccessControlSections.Owner|AccessControlSections.Access));
+                ReplayGuardDirectory.FileTicket file=null;
+                try
+                {
+                    file=profilesOwner.OpenAuthorityLock(name);var observed=file.Observe();
+                    if(observed.Links!=1||lockIdentity!=null&&observed.Extent.Identity!=lockIdentity)throw new IOException("Authority lock object changed or is linked.");
+                    ValidateFile(Path.Combine(profiles,name));lockIdentity??=observed.Extent.Identity;
+                    active++;var result=new Operation(this,file);file=null;return result;
+                }
+                finally{file?.Dispose();}
+            }
+            sealed class Operation(LockDirectoryLease owner,ReplayGuardDirectory.FileTicket file):IDisposable
+            {
+                bool closed;
+                public void Dispose()
+                {
+                    lock(owner.lifecycle){
+                    if(closed)return;
+                    try{file.Dispose();closed=true;owner.active--;}
+                    catch{owner.uncertain=true;throw;}
+                    }
+                }
+            }
+            public void Dispose()
+            {lock(lifecycle)DisposeCore();}
+            void DisposeCore()
+            {
+                if(disposed)return;
+                if(active!=0||uncertain)throw new IOException("Authority operations remain owned.");
+                try{profilesOwner?.Dispose();rootPins?.Dispose();disposed=true;}
+                catch{uncertain=true;throw;}
+            }
+        }
         internal static IDisposable AcquireLock(string root, string purpose, string profile = null)
         {
             string bound; return AcquireLock(root, purpose, profile, out bound);

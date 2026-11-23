@@ -1,0 +1,22 @@
+# Worker lifecycle and soak verification
+
+Read the [launch-effects index](test-effects.md) and preview `./tests/worker.ps1 -Plan`
+before execution. Live capture requires current-task authorization; synthetic UI
+can also affect NVIDIA Instant Replay, as described below. The bounds and effects
+of the selected route apply in addition to its test assertions.
+
+## Synthetic lifecycle checks
+
+Run `./tests/worker.ps1` for worker integration and a two-minute synthetic NVENC soak, or `./tests/worker.ps1 -SoakSeconds 600` for ten minutes. It uses isolated settings, synthetic imagery/audio and a synthetic screenshot source, while exercising the production Avalonia client. **Even synthetic mode opens capture-excluded monitor-mode UI, which can turn off NVIDIA Instant Replay. Coordinate this test with the user, check replay state beforehand, and restore it afterward; do not run it when NVIDIA state must remain untouched.** For synthetic compatibility without those UI surfaces, use `./tests/window-capture.ps1` in its default headless mode. Checks cover UI termination/reconnection, encoder termination, display-change message routing, a simulated audio-health failure, invalid settings, output-path failure, pause persistence and saved-clip preservation. The audio device and physical display configuration remain unchanged; actual disk exhaustion is not simulated. The existing migration suite separately checks the controlled desktop fixture and available codecs.
+
+## Live desktop route
+
+With permission to record the display and system audio, run `./tests/worker.ps1 -LiveDesktop -SoakSeconds 1800` for thirty minutes of real Desktop Duplication/WASAPI/NVENC capture over a generated, animated borderless window. This verification-only window covers the primary monitor; the test uses a separate profile, native monitor resolution, H.264 at 60 FPS/20 Mbps and a one-minute replay buffer. It preserves the exact F10 sign-in startup registry entry and uses its original enabled state during settings tests. It also kills the production worker while the UI remains open, verifies automatic worker replacement and old-encoder cleanup, and routes unlock/resume messages. Both modes verify a UI crash during a save, rejection of Quit/settings replacement while saving, concurrent status readers, and immediate loss of readiness during explicit restart. Real lock/suspend, monitor hotplug, audio-device switches and disk exhaustion remain separate acceptance tasks. Allow at least 8 GiB of free space for a thirty-minute run. Optional `nvidia-smi` samples are stored in `gpu-samples.json`; those counters include every workload on the GPU and do not isolate F10's cost.
+
+## Reports and interpretation
+
+Local `worker-status.json` contains capture progress, buffer duration, encoded-frame and FFmpeg-reported drop/duplicate counts, process memory/CPU, cache bytes, recovery count and the latest save duration/size. Readiness is cleared immediately on explicit restart and is never advertised without an encoder PID; `Saving` identifies an in-flight replay. Worker diagnostics use `worker.log`; UI diagnostics use `recorder.log` so the processes do not contend for the same log file. The worker test writes `verification.json` and `measurements.json` under `artifacts/`, including save latency, decoded output and audio/video timestamp-boundary skew. CPU values are normalized across logical processors, with a fresh CPU baseline when the UI attaches. Synthetic and controlled desktop measurements do not establish gaming FPS, F10's isolated GPU cost, total capture-frame loss, perceptual lip-sync or performance parity with ShadowPlay.
+
+## Source-identity soak
+
+For a longer worker soak with decoded frame-identity checks on each saved soak clip, run `./tests/worker.ps1 -LiveDesktop -GpuFixture -FramesPerSecond 120 -SoakSeconds 1800`. It retains the worker lifecycle, readiness, cache-bound and startup-preservation checks. Clips saved during the soak receive the stricter source qualification and unchanged capture thresholds after the fixture exits. Saved replay windows sample the soak; they do not retain or decode every frame between saves. Each clip retains its decoded IDs, timestamps and stream metadata in its own `pacing-analysis` subdirectory. The verification executable's `--analyze-saved <worker-artifact-directory>` mode regenerates those measurements from existing clips and source logs without starting capture; it writes `pacing-reanalysis.json` and requires every sampled clip to pass.

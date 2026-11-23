@@ -1,7 +1,10 @@
 # Issue tracker: GitHub
 
 Issues and specs live in GitHub Issues for `ju57/f10-recorder`.
-Use the `gh` CLI from this repository.
+Read current issue state and criteria through the connected GitHub tools or the
+`gh` CLI from this repository. The CLI commands below are equivalent examples.
+See the [documentation responsibilities](../../README.md#documentation); agreed
+amendments identify the requirement and approval and link back from affected docs.
 
 ## Conventions
 
@@ -87,4 +90,5 @@ When it says "fetch the relevant ticket", read the referenced GitHub issue.
 
 ## Pull requests as a triage surface
 
-**PRs as a request surface: no.**
+Track requested implementation scope in issues. PRs describe delivery and review;
+link their scope and closeout disposition to the owning issues.

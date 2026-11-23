@@ -6,6 +6,22 @@ Published tracker: [consolidated specification #10](https://github.com/ju57/f10-
 
 This is the M0 planning baseline. It specifies intended behaviour, not completed implementation or release qualification. Q158 permits planning closeout with explicitly owned unresolved engineering work; **every release gate below remains mandatory**. No calendar release date is committed. Publication of this spec authorizes neither installation nor public binary release. ju57 retains approval of exact release artifacts.
 
+## Document responsibility and approved amendments
+
+The requirements below retain their version 1.0 baseline. Current issue state and
+scoped delivery belong to the tracker; current runtime mechanisms are described in
+[architecture](architecture.md). The [documentation map](../README.md#documentation)
+defines the other document roles. Historical interview wording and reports retain
+their dated provenance. A newer file alone does not amend a requirement.
+
+An approved amendment must name the affected requirement and approval/source and
+be linked from the affected documentation. Candidate implementation and supporting
+evidence do not establish issue acceptance or waive a mandatory gate.
+
+| Affected requirement | Explicit amendment/source | Remaining obligations |
+| --- | --- | --- |
+| Replay publication validation, issue #83 criterion 4 | [Normal-packet, exact-fallback and qualification contract](replay-save-validation.md#acceptance-reconciliation), with its recorded maintainer approval and published criterion | Preserve declared corruption/timing rejection, exact boundaries, ownership, full qualification decoding and every other issue/release requirement; normal packet saves do not claim fresh semantic decoding of every picture. |
+
 ## Problem Statement
 
 People need to save the gameplay that just happened or record an entire session without interrupting it. The current prototype does not deliver the complete agreed experience: replay exports can miss requested boundaries or take too long, manual recording and essential microphone controls need integration, and capture/exclusion/recovery are not qualified for the required fullscreen and NVIDIA coexistence cases. Recording state, accepted saves and recovery material must remain trustworthy even when the UI, source, device or storage fails.

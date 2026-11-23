@@ -11,7 +11,7 @@ Use the F10 checkout attached to the task. Read `docs/brand-guidelines.md` befor
 
 - Identity, type, palette, spacing and controls: `docs/brand-guidelines.md`.
 - Approved logo and asset provenance: `docs/m0-review/assets/ASSETS.md` and `docs/m0-review/assets/f10-logo-approved.json`.
-- Accepted layouts and behavior: the relevant screen section in `docs/m0-review/README.md`, then `docs/release-plan.md` for the corresponding decision. Historical proposals are superseded by later accepted decisions.
+- Accepted layouts: the relevant screen section in `docs/m0-review/README.md`. Product behavior: the relevant `docs/beta-spec.md` section and its linked approved amendments; the current issue owns scoped acceptance. Use `docs/release-plan.md` for dated decision rationale. A newer proposal alone does not supersede an accepted decision.
 - HTML examples: `docs/m0-review/wireframes.html` and `docs/m0-review/f10-theme.css`. These illustrate intent; they do not establish native behavior.
 
 ## Preserve the settled identity

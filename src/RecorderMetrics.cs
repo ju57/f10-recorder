@@ -21,6 +21,7 @@ namespace F10Recorder
         public long UiWorkingSetBytes;
         public double UiCpuPercent;
         public long CacheBytes;
+        public string CacheBytesObservedUtc;
         // Missing fields from an older worker never imply measured output demand.
         public string ReplayOutputDemandKind = "Unmeasured";
         public string ReplayOutputDemandRevision;
@@ -40,6 +41,8 @@ namespace F10Recorder
         public bool LastSaveLimitedHistory;
         public string LastSaveValidation;
         public long LastSaveDecodedFrames;
+        public long LastSaveCodedPictures, LastSaveAudioPackets;
         public double LastSaveValidationMilliseconds;
+        public ReplaySaveTiming LastSaveTiming;
     }
 }

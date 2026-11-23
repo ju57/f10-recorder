@@ -5,6 +5,10 @@ using Microsoft.Win32.SafeHandles;
 
 namespace F10Recorder;
 
+// Namespace observations carry no allocation credit. Capacity accounting uses
+// the separate handle-backed full inventory.
+internal readonly record struct ReplayNamespaceIdentity(string Volume, string Identity);
+
 internal sealed record ReplayFileExtent(string Volume, string Identity, long AllocatedBytes, long Length, long AllocationUnit)
 {
     internal long CopyBytes => checked((Length / AllocationUnit + (Length % AllocationUnit == 0 ? 0 : 1)) * AllocationUnit);
@@ -71,8 +75,15 @@ internal static class ReplayStorage
 
     static string Volume(SafeFileHandle file)
     {
-        var name = new StringBuilder(32768);
+        var name = new StringBuilder(256);
         uint length = GetFinalPathNameByHandle(file, name, (uint)name.Capacity, 1);
+        // Insufficient-buffer results include NUL; a required32768 still
+        // represents a32767-character path supported by the previous buffer.
+        if (length >= name.Capacity && length <= 32768)
+        {
+            name.EnsureCapacity(checked((int)length));
+            length = GetFinalPathNameByHandle(file, name, (uint)name.Capacity, 1);
+        }
         if (length == 0 || length >= name.Capacity) throw new IOException("Cannot identify the replay storage volume.", new Win32Exception());
         string resolved = name.ToString();
         int end = resolved.IndexOf("}\\", StringComparison.Ordinal);
@@ -109,7 +120,14 @@ internal static class ReplayStorage
     }
 
     internal static SafeFileHandle OpenInventory(string path) =>
-        CreateFile(Path.GetFullPath(path), 0x80, 7, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
+        CreateFile(Native.FullPathForNativeOpen(path), 0x80, 7, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
+
+    // Request data-read access (without reading payload): an attribute-only
+    // handle did not enforce no-delete sharing in the prospective control.
+    // Owned scratch remains writable, but cannot be renamed/replaced while its
+    // allocation observer is in use. Never used for rolling/manifests.
+    internal static SafeFileHandle OpenPinnedInventory(string path) =>
+        CreateFile(Native.FullPathForNativeOpen(path), 0x81, 3, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
 
     internal static ReplayFileExtent ObserveInventory(SafeFileHandle file, ReplayFileExtent enumerated)
     {
@@ -132,6 +150,34 @@ internal static class ReplayStorage
         if (file.IsInvalid || !GetFileInformationByHandleEx(file, 1, out var info, (uint)Marshal.SizeOf<StandardInformation>())) throw new Win32Exception();
         if (info.Directory != 0 || info.DeletePending != 0) throw new IOException("Replay inventory leaf is not an available regular file.");
         return Validate(verifiedIdentity with { AllocatedBytes = info.AllocationSize, Length = info.EndOfFile });
+    }
+
+    internal static Dictionary<string, ReplayNamespaceIdentity> InventoryNamespaces(IEnumerable<string> roots, ReplayFiles files,
+        int maximumFiles = int.MaxValue, int maximumDirectories = int.MaxValue)
+    {
+        var result = new Dictionary<string, ReplayNamespaceIdentity>(StringComparer.OrdinalIgnoreCase);
+        int directories = 0;
+        void Read(string directory)
+        {
+            if (++directories > maximumDirectories) throw new IOException("Replay namespace directory bound exceeded.");
+            if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0) throw new IOException("Replay namespace does not traverse reparse points.");
+            foreach (var entry in DirectoryEntries(directory))
+            {
+                if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("Replay namespace does not traverse reparse points.");
+                if ((entry.Attributes & FileAttributes.Directory) != 0) { Read(entry.Path); continue; }
+                if (result.Count >= maximumFiles) throw new IOException("Replay namespace file bound exceeded.");
+                string name = Path.GetFileName(entry.Path);
+                var identity = name.Equals("segments.csv", StringComparison.OrdinalIgnoreCase) || name.Equals("segments.csv.tmp", StringComparison.OrdinalIgnoreCase)
+                    ? files.ObserveManifestNamespace(entry.Path, entry.Extent) : files.ObserveNamespace(entry.Path, entry.Extent);
+                if (string.IsNullOrWhiteSpace(identity.Volume) || string.IsNullOrWhiteSpace(identity.Identity))
+                    throw new IOException("Replay namespace file identity is unknown.");
+                if (result.TryGetValue(entry.Path, out var prior) && prior != identity)
+                    throw new IOException("Replay namespace identity changed across overlapping roots.");
+                result[entry.Path] = identity;
+            }
+        }
+        foreach (string root in roots.Distinct(StringComparer.OrdinalIgnoreCase)) Read(root);
+        return result;
     }
 
     internal static Dictionary<string, ReplayFileExtent> Inventory(IEnumerable<string> roots, ReplayFiles files,
@@ -169,21 +215,33 @@ internal static class ReplayStorage
         return result;
     }
 
-    sealed record DirectoryEntry(string Path, FileAttributes Attributes, ReplayFileExtent Extent);
+    internal sealed record DirectoryEntry(string Path, FileAttributes Attributes, ReplayFileExtent Extent);
+    // Identity/attributes only. Callers must separately query native allocation
+    // through the matched file handle; directory EOF/allocation may lag writes.
+    internal static DirectoryEntry DirectoryLeaf(string path)
+    {
+        string full = Path.GetFullPath(path), directory = Path.GetDirectoryName(full);
+        if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+            throw new IOException("Output namespace does not traverse reparse points.");
+        return DirectoryEntries(directory).FirstOrDefault(e => e.Path.Equals(full, StringComparison.OrdinalIgnoreCase))
+            ?? throw new FileNotFoundException("Output namespace leaf is absent.", full);
+    }
     static IEnumerable<DirectoryEntry> DirectoryEntries(string directory)
     {
         using var anchor = Native.AnchorDirectory(directory);
         string identity = Native.DirectoryIdentity(anchor), volume = Volume(anchor);
         if (!GetDiskFreeSpace(volume, out uint sectors, out uint sectorBytes, out _, out _)) throw new Win32Exception();
         long unit = checked((long)sectors * sectorBytes);
-        var buffer = new byte[65536];
+        using var directoryBuffer = new ReplayDirectoryBuffer();
+        var buffer = directoryBuffer.Bytes;
         bool restart = true;
         while (true)
         {
             // FILE_ID_BOTH_DIR_INFO contains identity, EOF, allocation and attributes
             // in one directory query, without opening any child. Ordinary growing
             // media still uses handle observations below; directory metadata may lag.
-            if (!GetFileInformationByHandleEx(anchor, restart ? 11 : 10, buffer, (uint)buffer.Length))
+            directoryBuffer.Prepare();
+            if (!GetFileInformationByHandleEx(anchor, restart ? 11 : 10, buffer, ReplayDirectoryBuffer.Size))
             {
                 int error = Marshal.GetLastWin32Error();
                 if (error == 18) yield break; // ERROR_NO_MORE_FILES only.
@@ -193,10 +251,10 @@ internal static class ReplayStorage
             int offset = 0;
             while (true)
             {
-                if (offset < 0 || offset > buffer.Length - 104) throw new IOException("Invalid directory metadata offset.");
+                if (offset < 0 || offset > ReplayDirectoryBuffer.Size - 104) throw new IOException("Invalid directory metadata offset.");
                 uint next = BitConverter.ToUInt32(buffer, offset), bytes = BitConverter.ToUInt32(buffer, offset + 60);
-                if (bytes == 0 || bytes % 2 != 0 || bytes > buffer.Length - offset - 104
-                    || (next != 0 && (next % 8 != 0 || next < 104 + bytes || next > buffer.Length - offset - 104)))
+                if (bytes == 0 || bytes % 2 != 0 || bytes > ReplayDirectoryBuffer.Size - offset - 104
+                    || (next != 0 && (next % 8 != 0 || next < 104 + bytes || next > ReplayDirectoryBuffer.Size - offset - 104)))
                     throw new IOException("Invalid directory metadata length.");
                 string name = Encoding.Unicode.GetString(buffer, offset + 104, (int)bytes);
                 if (name != "." && name != "..")

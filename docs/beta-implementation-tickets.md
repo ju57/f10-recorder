@@ -1,5 +1,7 @@
 # F10 beta implementation tickets
 
+> **Ticket-publication snapshot, 25 October 2026.** This graph records the original delivery/dependency plan, not live readiness or completion. Follow each GitHub issue for its current criteria, dependencies and state. Original gate coverage remains useful; publication-time labels and blockers are not current-state assertions.
+
 Approved and published 25 October 2026. Parent: [consolidated spec #10](https://github.com/ju57/f10-recorder/issues/10). M0 planning is complete; all12 mandatory engineering/release gates remain open until their own evidence passes. Approval: “Approve and publish as drafted.”
 
 ## Published ticket graph
@@ -296,7 +298,7 @@ Each numbered item links to the published ticket with acceptance criteria, owner
 
 ## Starting frontier
 
-Immediate independent starting points: [T01 / #11](https://github.com/ju57/f10-recorder/issues/11), [T02 / #12](https://github.com/ju57/f10-recorder/issues/12), [T38 / #48](https://github.com/ju57/f10-recorder/issues/48), [T42 / #52](https://github.com/ju57/f10-recorder/issues/52). These are starting prerequisites, not authorization to run undeclared live tests.
+At publication, the independent starting points were: [T01 / #11](https://github.com/ju57/f10-recorder/issues/11), [T02 / #12](https://github.com/ju57/f10-recorder/issues/12), [T38 / #48](https://github.com/ju57/f10-recorder/issues/48), [T42 / #52](https://github.com/ju57/f10-recorder/issues/52). These are starting prerequisites, not authorization to run undeclared live tests.
 
 T40 signing approval/pipeline and T48 exact-artifact release are labelled ready-for-human; the other new tickets are ready-for-agent with their native blockers retained. No external role, host or tester is assumed to have agreed.
 

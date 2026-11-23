@@ -24,7 +24,7 @@ $fact.ExecutablePath=''
 Need (-not(Test-LookupAbsenceSnapshot $fact $birth $true 'Process.GetProcessById(Int32)' 'System.ArgumentException')) 'blank-image-not-pid-authority'
 foreach($name in @('version','nonzero','timeout','output-limit')){
  $childExit=if($name-eq'nonzero'){1}else{0}
- $args=switch($name){'version'{@('-version')};'nonzero'{@('-this-option-is-not-real')};'timeout'{@('-hide_banner','-nostdin','-re','-f','lavfi','-i','anullsrc','-t','10','-f','null','-')};'output-limit'{@('-version')}}
+ $args=switch($name){'version'{@('-version')};'nonzero'{@('-this-option-is-not-real')};'timeout'{@('-hide_banner','-nostdin','-re','-f','lavfi','-i','sine','-t','10','-f','null','-')};'output-limit'{@('-version')}}
  $receipt=[pscustomobject]@{ProcessId=42;ProcessStartedUtc=$birth;ExitCode=$childExit;ProducerAbsent=$true;ActualExitObserved=$true;ResourcesFinal=$true;ResourceError=$null;
   CapturedBytes=0;Success=($name-eq'version');Failure=$(switch($name){'version'{$null};'nonzero'{'exit-nonzero'};'timeout'{'timeout'};'output-limit'{'output-limit'}});
   CaptureComplete=$true;TimedOut=($name-eq'timeout');OutputLimitExceeded=($name-eq'output-limit')}

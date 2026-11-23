@@ -7,6 +7,11 @@
     <UseWindowsForms>true</UseWindowsForms>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../F10Recorder.CoreChecks/ReplayMp4Checks.cs" Link="ReplaySaveOperations/ReplayMp4Checks.cs" />
+    <Compile Include="../F10Recorder.CoreChecks/ReplayTransportChecks.cs" Link="ReplaySaveOperations/ReplayTransportChecks.cs" />
+    <Compile Include="../F10Recorder.CoreChecks/ReplayTransportWriter.cs" Link="ReplaySaveOperations/ReplayTransportWriter.cs" />
+  </ItemGroup>
   <ItemGroup Condition="'$(QualificationProductDirectory)' == ''">
     <ProjectReference Include="../F10Recorder.Windows/F10Recorder.Windows.csproj" />
   </ItemGroup>

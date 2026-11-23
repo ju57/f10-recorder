@@ -1,5 +1,7 @@
 # Early prototype integration — 20 October 2026
 
+> **Historical integration snapshot, 20 October 2026.** “Latest”, “current” and remaining-work statements below refer to this integration. For the working-tree candidate use the [README](../README.md) and [architecture](architecture.md); for accepted product requirements use the [beta specification](beta-spec.md). The bounded evidence and original limits below are preserved.
+
 This source integration includes the independent Windows worker, replay controls
 and passive notices, common acquisition clock, replay save cutoff correction,
 native audio packet continuity, and optional experimental window capture.

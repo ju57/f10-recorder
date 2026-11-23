@@ -22,7 +22,8 @@ internal static class ReplayCalibrationStartup
         string buffer = Path.GetFullPath(expectedCacheRoot ?? Path.Combine(cell, "buffer")).TrimEnd(Path.DirectorySeparatorChar);
         Require(string.Equals(Path.GetDirectoryName(session), buffer, StringComparison.OrdinalIgnoreCase), "Startup capture escaped private buffer.");
         var normalized = arguments.Select(v => v.StartsWith(@"\\.\pipe\F10Recorder-", StringComparison.Ordinal)
-            ? "<audio-pipe>" : Regex.Replace(v, "setpts='[^']+'", "<clock>")).ToArray();
+            ? "<audio-pipe>" : v.StartsWith("ddagrab=f10_delay_epoch=", StringComparison.Ordinal)
+                ? CaptureSession.NormalizeDelayedGraph(v) : Regex.Replace(v, "setpts='[^']+'", "<clock>")).ToArray();
         normalized[^1] = Path.Combine("<session>", Path.GetFileName(target));
         return normalized;
     }
@@ -122,13 +123,13 @@ internal static class ReplayCalibrationStartup
             RecorderRuntime.CaptureArgumentObserver = arguments =>
             {
                 var normalized = NormalizeCaptureArguments(arguments, cell);
-                Require(normalized.SequenceEqual(ReplayCalibrationRun.CaptureTemplate(Native.PrimaryOutputIndex().ToString(CultureInfo.InvariantCulture))), "Startup reference capture recipe changed.");
+                Require(normalized.SequenceEqual(ReplayCalibrationRun.ExpectedCaptureTemplate(plan, Native.PrimaryOutputIndex().ToString(CultureInfo.InvariantCulture))), "Startup reference capture recipe changed.");
                 Write(cell, "capture-arguments", arguments);
             };
             var settings = new Settings { ReplayMinutes = 5, FramesPerSecond = 60, BitrateMbps = 20, VideoCodec = "h264_nvenc",
                 SystemAudio = true, CaptureMode = "monitor", DisplayIndex = -1, OutputDirectory = cell };
             creating = Task.Run(() => new CaptureSession(settings, Path.Combine(cell, "buffer"), false,
-                () => cancel.IsCancellationRequested || sampler.Failure != null || GetForegroundWindow() != hwnd));
+                () => cancel.IsCancellationRequested || sampler.Failure != null || GetForegroundWindow() != hwnd, null, qualifyDesktopTiming: true));
             var bootstrap = Stopwatch.StartNew();
             while (!creating.IsCompleted)
             { Check(); Require(bootstrap.Elapsed.TotalSeconds < 35 && GetForegroundWindow() == hwnd, "Startup bootstrap/focus deadline."); Thread.Sleep(50); }

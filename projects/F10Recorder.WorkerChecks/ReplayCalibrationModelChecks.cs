@@ -41,18 +41,18 @@ internal static class ReplayCalibrationModelChecks
         });
         Check("rounded-output-and-finalization-peak", () =>
         {
-            Require(Model(1234, 8192).PeakBytes(1000) == 33_566_720,
-                "Peak must include rounded final prediction, sampled excess and independently rounded finalization guard.");
+            Require(Model(1234, 8192).PeakBytes(1000) == 201_342_976,
+                "Peak must include rounded final prediction, sampled excess, finalization guard and all three scratch claims.");
         });
         Check("independent-final-and-peak-coverage", () =>
         {
             var model = Model(1234, 8192);
-            Require(model.CoversObservations(1000, 16_779_450, 16_781_312, 33_566_720), "Exact final and peak boundaries must pass.");
-            Require(!model.CoversObservations(1000, 16_779_451, 16_781_312, 33_566_720), "Final EOF exceedance must fail.");
+            Require(model.CoversObservations(1000, 16_779_450, 16_781_312, 201_342_976), "Exact final and peak boundaries must pass.");
+            Require(!model.CoversObservations(1000, 16_779_451, 16_781_312, 201_342_976), "Final EOF exceedance must fail.");
             // 16,785,408 is one allocation unit above the final prediction but below the peak allowance.
-            Require(!model.CoversObservations(1000, 16_779_450, 16_785_408, 33_566_720),
+            Require(!model.CoversObservations(1000, 16_779_450, 16_785_408, 201_342_976),
                 "Final allocation exceedance must not consume finalization headroom.");
-            Require(!model.CoversObservations(1000, 16_779_450, 16_781_312, 33_570_816), "Sampled peak exceedance must fail.");
+            Require(!model.CoversObservations(1000, 16_779_450, 16_781_312, 201_347_072), "Sampled peak exceedance must fail.");
         });
         Check("arithmetic-overflow-rejected", () =>
         {
@@ -60,6 +60,23 @@ internal static class ReplayCalibrationModelChecks
             Overflow(() => Model(long.MaxValue).FinalBytes(1000));
             Overflow(() => Model(0, long.MaxValue).PeakBytes(1000));
             Overflow(() => ReplayReferenceModel.Round(long.MaxValue, 4096));
+        });
+        Check("duration-cells-use-distinct-hard-eligibility-and-open-tail-cover", () =>
+        {
+            Require(ReplayReferenceModel.InputLimit(1) == 200_000_000L && ReplayReferenceModel.InputLimit(5) == 1_000_000_000L
+                && ReplayReferenceModel.InputLimit(30) == 5_000_000_000L, "Cell limits must retain 64-bit thirty-minute input sizes.");
+            Require(ReplayReferenceModel.InputCountLimit(1) == 65 && ReplayReferenceModel.InputCountLimit(30) == 1805,
+                "Each cell must cover its completed input count and preceding head.");
+            Require(ReplayReferenceModel.SnapshotEnvelope(4096, 30) == 5_008_445_440L,
+                "Thirty-minute open snapshot must charge rounded 5GB payload, 1805 allocation units and 1MiB concat.");
+            Require(ReplayReferenceModel.ConcatLimit(30) == 1048576 && !ReplayReferenceModel.SupportedMinutes(2),
+                "Unsupported profiles must not inherit a nearby cell.");
+            foreach (int minutes in new[] { 1, 5, 30 })
+            {
+                var model = Model() with { ReplayMinutes = minutes };
+                Require(model.PeakBytes(model.InputByteLimit) > model.InputByteLimit * 2,
+                    "Open-tail reservations must include output plus coexisting full assembly scratch.");
+            }
         });
 
         // Null paths deliberately make a native/path query fail if an eligibility guard regresses.

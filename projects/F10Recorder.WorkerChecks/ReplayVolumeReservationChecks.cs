@@ -263,16 +263,18 @@ internal static class ReplayVolumeReservationChecks
         Check("unreserved-literal-capacity-and-materialized-prefix", directory =>
         {
             var files = new CapacityFiles(); var store = new ReplayVolumeReservations(Path.Combine(directory, "private"));
-            store.Update(Owner(), [Claim(directory, "held", 6000)], files);
+            string owner = Owner(); store.Update(owner, [Claim(directory, "held", 6000)], files);
             var before = store.ObserveUnreserved(directory, files);
             Require(before == ("volume-a", 1L, 4000L), "10000 free minus6000 remaining must report4000 unreserved.");
             string held = Path.Combine(directory, "held"); File.WriteAllBytes(held, new byte[1]); files.Allocations[held] = 2000; files.Free = 8000;
             var after = new ReplayVolumeReservations(Path.Combine(directory, "private")).ObserveUnreserved(directory, files);
-            Require(after == ("volume-a", 1L, 4000L), "2000 materialized plus fresh8000 must leave4000 unreserved.");
+            Require(after == ("volume-a", 1L, 2000L), "Periodic capacity must debit the full6000 commitment without prefix credit.");
+            store.Update(owner, [Claim(directory, "held", 6000)], files); // Actual materialization boundary preserves identity.
             files.Free = 3999;
-            Require(store.ObserveUnreserved(directory, files).Bytes == -1, "A deficit must remain negative, never clamp to zero.");
+            Require(store.ObserveUnreserved(directory, files).Bytes == -2001, "A conservative deficit must remain negative, never clamp to zero.");
             File.Move(held, held + ".old");
-            Reject(() => store.ObserveUnreserved(directory, files));
+            Require(store.ObserveUnreserved(directory, files).Bytes == -2001, "Unknown leaf state must not grant capacity credit.");
+            Reject(() => store.Update(Owner(), [Claim(directory, "incoming", 1)], files));
         });
         Check("unreserved-excludes-other-volume-growth", directory =>
         {
@@ -282,15 +284,18 @@ internal static class ReplayVolumeReservationChecks
             store.Update(Owner(), [Claim(directory, "held", 6000)], files);
             Require(store.ObserveUnreserved(other, files) == ("volume-b", 1L, 5000L), "Another volume's6000 promise reduced this volume's5000 free.");
         });
-        Check("unreserved-unknown-metadata-and-identity-reject", directory =>
+        Check("unreserved-uncertainty-retains-full-claim-admission-still-rejects", directory =>
         {
             var files = new CapacityFiles(); var store = new ReplayVolumeReservations(Path.Combine(directory, "private"));
             string held = Path.Combine(directory, "held"); File.WriteAllBytes(held, new byte[1]); files.Allocations[held] = 2000;
             store.Update(Owner(), [Claim(directory, "held", 6000)], files);
             string other = Path.Combine(directory, "other"); Directory.CreateDirectory(other); files.Volumes[other] = ("volume-b", 5000);
-            files.Unknown = true; Reject(() => store.ObserveUnreserved(other, files)); files.Unknown = false;
+            files.Unknown = true;
+            Require(store.ObserveUnreserved(other, files).Bytes == 5000, "Polling must not query unrelated holder metadata.");
+            Reject(() => store.Update(Owner(), [Claim(directory, "incoming", 1)], files)); files.Unknown = false;
             File.Move(held, held + ".old"); File.WriteAllBytes(held, new byte[1]);
-            Reject(() => store.ObserveUnreserved(directory, files));
+            Require(store.ObserveUnreserved(directory, files).Bytes == 4000, "Identity uncertainty must retain the full6000 promise.");
+            Reject(() => store.Update(Owner(), [Claim(directory, "incoming", 1)], files));
         });
         Check("grouped-future-growth-updates-and-reopens", directory =>
         {
@@ -333,11 +338,13 @@ internal static class ReplayVolumeReservationChecks
             var files = new CapacityFiles(); string security = Path.Combine(directory, "private"); var store = new ReplayVolumeReservations(security);
             store.Update(Owner(), [Claim(target, ".known-input-growth", 6000) with { Kind = ReplayVolumeClaimKind.UnmaterializedGrowth }], files);
             files.Volumes[target] = ("changed-volume", 10000);
-            Reject(() => new ReplayVolumeReservations(security).ObserveUnreserved(directory, files));
+            Require(new ReplayVolumeReservations(security).ObserveUnreserved(directory, files).Bytes == 4000, "Changed holder volume cannot grant capacity credit.");
+            Reject(() => store.Update(Owner(), [Claim(directory, "incoming", 1)], files));
             files.Volumes.Clear();
             Require(store.ObserveUnreserved(directory, files).Bytes == 4000, "Volume failure erased the grouped obligation.");
             Directory.Move(target, target + ".old"); Directory.CreateDirectory(target);
-            Reject(() => new ReplayVolumeReservations(security).ObserveUnreserved(directory, files));
+            Require(new ReplayVolumeReservations(security).ObserveUnreserved(directory, files).Bytes == 4000, "Changed holder anchor cannot erase its obligation.");
+            Reject(() => store.Update(Owner(), [Claim(directory, "incoming", 1)], files));
         });
         Check("legacy-ledger-missing-kind-defaults-to-file-peak", directory =>
         {
@@ -346,8 +353,8 @@ internal static class ReplayVolumeReservationChecks
             store.Update(Owner(), [Claim(directory, "held", 6000)], files);
             string ledger = Path.Combine(security, "replay-volume-reservations.json");
             string text = File.ReadAllText(ledger); Require(text.Contains("\"Kind\":0"), "Default kind was not serialized in the new fixture.");
-            File.WriteAllText(ledger, text.Replace(",\"Kind\":0", ""));
-            Require(new ReplayVolumeReservations(security).ObserveUnreserved(directory, files).Bytes == 6000, "Legacy missingKind stopped using its2000 allocated prefix.");
+            File.WriteAllText(ledger, text.Replace(",\"Kind\":0", "").Replace("\"Version\":3", "\"Version\":2"));
+            Require(new ReplayVolumeReservations(security).ObserveUnreserved(directory, files).Bytes == 4000, "Legacy missingKind must retain the full file-peak commitment through schema transition.");
         });
         Check("group-subunit-remaining-is-not-rounded-again", directory =>
         {
@@ -371,7 +378,7 @@ internal static class ReplayVolumeReservationChecks
             Reject(() => store.Update(owner, [Claim(directory, "second", 3001)], files));
             Require(store.ObserveUnreserved(directory, files).Bytes == 100, "Rejectedflooroverrun changed acceptedgrowth.");
         });
-        Check("exclude-only-named-owner-still-validates-its-identity", directory =>
+        Check("exclude-only-named-owner-admission-still-validates-all-identities", directory =>
         {
             var files = new CapacityFiles(); var store = new ReplayVolumeReservations(Path.Combine(directory, "private"));
             string first = Owner(), second = Owner(), held = Path.Combine(directory, "first");
@@ -379,12 +386,15 @@ internal static class ReplayVolumeReservationChecks
             store.Update(first, [Claim(directory, "first", 6000)], files);
             store.Update(second, [Claim(directory, "second", 3000)], files);
             Require(store.ObserveUnreserved(directory, files, first).Bytes == 7000, "ExcludingA incorrectly retainedA or excludedB.");
-            Require(store.ObserveUnreserved(directory, files, second).Bytes == 6000, "ExcludingB incorrectly retainedB or excludedA.");
-            Require(store.ObserveUnreserved(directory, files, Owner()).Bytes == 3000, "Unknownvalidowner excluded anotherholder.");
+            Require(store.ObserveUnreserved(directory, files, second).Bytes == 4000, "ExcludingB must still chargeA's full peak.");
+            Require(store.ObserveUnreserved(directory, files, Owner()).Bytes == 1000, "Unknownvalidowner excluded anotherholder.");
             Reject(() => store.ObserveUnreserved(directory, files, "not-guid"));
-            files.Unknown = true; Reject(() => store.ObserveUnreserved(directory, files, first)); files.Unknown = false;
+            files.Unknown = true;
+            Require(store.ObserveUnreserved(directory, files, first).Bytes == 7000, "An excluded owner cannot trigger metadata polling or erase other commitments.");
+            Reject(() => store.Update(Owner(), [Claim(directory, "incoming", 1)], files)); files.Unknown = false;
             File.Move(held, held + ".old"); File.WriteAllBytes(held, new byte[1]);
-            Reject(() => store.ObserveUnreserved(directory, files, first));
+            Require(store.ObserveUnreserved(directory, files, first).Bytes == 7000, "Changed excluded identity must not alter other commitments.");
+            Reject(() => store.Update(Owner(), [Claim(directory, "incoming", 1)], files));
         });
         Check("owner-bound-preserves-ledger", directory =>
         {
@@ -426,8 +436,14 @@ internal static class ReplayVolumeReservationChecks
             finally
             {
                 File.WriteAllText(gate + ".continue", "continue");
-                if (!first.HasExited) first.Kill();
-                if (second != null) { if (!second.HasExited) second.Kill(); second.Dispose(); }
+                bool firstAbsent = false, secondAbsent = second == null;
+                try { if (!first.HasExited) first.Kill(); firstAbsent = first.WaitForExit(2000); }
+                finally
+                {
+                    if (second != null) try { if (!second.HasExited) second.Kill(); secondAbsent = second.WaitForExit(2000); }
+                        finally { second.Dispose(); }
+                }
+                Require(firstAbsent && secondAbsent, "Owned reservation child absence is unconfirmed.");
             }
         });
         string report = Path.Combine(root, "volume-reservation-checks.json");

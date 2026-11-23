@@ -19,6 +19,7 @@ internal sealed class ReplayStorageStopLatch
     readonly string profileDirectory, securityRoot;
     readonly object gate = new();
     ReplayStorageHold observedFailure;
+    internal Action BeforeReadForChecks;
     sealed record HoldDocument(int Version, string ProfileIdentity, string HoldId, string Reason, string StoppedAtUtc, string Mode = null,
         ReplayProducerProof Producer = null, bool ProducerAbsent = false);
     sealed class ReadLease : IDisposable
@@ -40,6 +41,7 @@ internal sealed class ReplayStorageStopLatch
             try
             {
                 using var lease = AcquireExisting();
+                BeforeReadForChecks?.Invoke();
                 var result = ReadHold(lease.BasePath, lease.Identity, out _);
                 if (result.Held) return result;
                 return observedFailure ?? result;
@@ -281,6 +283,7 @@ internal sealed class ReplayStorageCaptureGuard
     internal string HoldId { get; }
     internal bool Stopped { get { lock (gate) return stopped; } }
     internal ReplayStorageCaptureGuard(ReplayStorageStopLatch latch, string holdId) { this.latch = latch; HoldId = holdId; }
+    internal void RequestStop() { lock (gate) stopped = true; }
     internal ReplayStorageHold Stop(string reason)
     {
         lock (gate)

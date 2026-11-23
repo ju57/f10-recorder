@@ -36,7 +36,7 @@ internal static class RecorderWorker
         double uiCpuAt = 0, uiCpuSeconds = 0, uiCpuPercent = 0;
         void Event(string kind, string message = null, bool success = false, string title = null, int notificationKind = 0, int duration = 0)
         {
-            events.Enqueue(new WorkerEvent { Sequence = ++sequence, Kind = kind, Message = message, Success = success, Title = title, NotificationKind = notificationKind, Duration = duration });
+            events.Enqueue(new WorkerEvent { Sequence = ++sequence, CreatedQpc = Stopwatch.GetTimestamp(), Kind = kind, Message = message, Success = success, Title = title, NotificationKind = notificationKind, Duration = duration });
             while (events.Count > 64) events.Dequeue();
         }
         bool UiAlive()

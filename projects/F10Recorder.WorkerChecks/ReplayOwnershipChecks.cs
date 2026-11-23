@@ -52,9 +52,14 @@ internal static class ReplayOwnershipChecks
         internal string ExporterIdentity = "controlled-exporter-v1";
         public string OutputDemandIdentity => ExporterIdentity;
         internal bool ProducerAbsent = true;
+        internal Action ValidationAction;
         public bool OutputProducerStopped => ProducerAbsent; // Controlled ownership observation; no actual media process.
         public ReplayValidation ValidateOutput(string path, ReplayInterval interval, Action<ReplayProducerProof> changed, Action check)
-            => new("ControlledNonmedia", (long)Math.Round(interval.Seconds * ReplayInfo.FramesPerSecond), 0);
+        {
+            ValidationAction?.Invoke();
+            return new("ControlledNonmedia", (long)Math.Round(interval.Seconds * ReplayInfo.FramesPerSecond), 0);
+        }
+        internal void StorageBurst(int count) { for (int n = 0; n < count; n++) ObserveExportStorage(); }
         public ReplayOutputDemand EstimateOutput(ReplayOutputSelection selection) => OutputEstimate?.Invoke(selection)
             ?? ReplayOutputDemand.Unmeasured("Controlled source has no qualified estimate.");
 
@@ -129,8 +134,8 @@ internal static class ReplayOwnershipChecks
             {
                 contents.Add(ReadContent(Path.Combine(snapshot, entry[6..^1])));
                 // This synchronous stand-in must cooperate like the real process
-                // runner while reading a full replay. A single >500ms read still
-                // fails the unchanged guard; aggregate small reads need not.
+                // runner while reading a full replay. A single read beyond the
+                // capacity coverage fails; aggregate smaller reads need not.
                 if (Stopwatch.GetElapsedTime(contentObserved).TotalMilliseconds >= 100)
                 {
                     ObserveExportStorage(); contentObserved = Stopwatch.GetTimestamp();
@@ -194,6 +199,12 @@ internal static class ReplayOwnershipChecks
             base.Publish(partial, final);
             Published?.Invoke();
         }
+        internal override void Publish(ReplayExportRequest request, string final)
+        {
+            if (request.ValidatedOutput == null) { base.Publish(request, final); return; }
+            if (FailPublish) throw new IOException("controlled publication failure");
+            base.Publish(request, final); Published?.Invoke();
+        }
         internal override void DeleteFile(string path)
         {
             Cleaned.Enqueue(path);
@@ -201,11 +212,11 @@ internal static class ReplayOwnershipChecks
             base.DeleteFile(path);
             DeletedFile?.Invoke(path);
         }
-        internal override void DeleteDirectory(string path)
+        internal override void DeleteDirectory(string path, string workspacePartial = null)
         {
             Cleaned.Enqueue(path);
             if (FailCleanup) throw new UnauthorizedAccessException("controlled directory cleanup failure");
-            base.DeleteDirectory(path);
+            base.DeleteDirectory(path, workspacePartial);
             DeletedDirectory?.Invoke(path);
         }
     }
@@ -245,7 +256,7 @@ internal static class ReplayOwnershipChecks
     }
 
     internal static int Run(string root) => RunAsync(root).GetAwaiter().GetResult();
-    static async Task CheckExportReadCadence(string path, bool stalled)
+    static async Task CheckExportReadCadence(string path, bool stalled, int cooperativeReadMilliseconds = 110)
     {
         using var f = new Fixture(path, reservations: new ReplayVolumeReservations(Path.Combine(path, "authority")));
         f.Source.Segments(0, 6);
@@ -253,17 +264,26 @@ internal static class ReplayOwnershipChecks
         f.Source.OutputEstimate = selection => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-read-cadence",
             selection.Identity, selection.ExporterIdentity, capacity.Volume, capacity.AllocationUnit,
             ReplayReferenceModel.Round(16384, capacity.AllocationUnit), false, null);
-        f.Source.BeforeContentRead = () => Thread.Sleep(stalled ? 650 : 110);
+        int coverageMilliseconds = ReplayCapacityPolicy.CoverageMilliseconds;
+        int readMilliseconds = stalled ? coverageMilliseconds + 250 : cooperativeReadMilliseconds;
+        bool published = false; f.Files.Published = () => published = true;
+        f.Source.BeforeContentRead = () => Thread.Sleep(readMilliseconds);
         var accepted = f.Save(6); Require(accepted.Accepted, accepted.Rejection);
         var saved = await accepted.Completion.WaitAsync(Deadline);
-        File.WriteAllText(Path.Combine(path, "read-cadence.json"), JsonSerializer.Serialize(new { stalled, saved, f.Source.ExportObservation }));
+        File.WriteAllText(Path.Combine(path, "read-cadence.json"), JsonSerializer.Serialize(new {
+            stalled, readMilliseconds, coverageMilliseconds, published, saved, f.Source.ExportObservation
+        }, new JsonSerializerOptions { IncludeFields = true }));
         if (stalled)
-            Require(!saved.Succeeded && saved.Error.Contains("500 ms")
+            Require(!saved.Succeeded && saved.Error.Contains(coverageMilliseconds.ToString(CultureInfo.InvariantCulture) + " ms")
+                && f.Source.ContentReads == 1 && f.Source.MaximumContentReadMilliseconds > coverageMilliseconds && !published
                 && !Directory.GetFiles(f.Destination, "Replay-*.mp4").Any(file => !file.EndsWith(".partial.mp4", StringComparison.Ordinal)),
-                "One uninterrupted stale read must retain the unchanged 500ms rejection before publication.");
+                "One over-horizon read must reject stale storage before publication: " + saved.Error);
         else
-            Require(saved.Succeeded && f.Source.ContentReads == 6 && f.Source.ContentReadMilliseconds >= 600
-                && f.Source.StorageChecks >= 3 && f.Source.Contents == "picture-0|picture-1|picture-2|picture-3|picture-4|picture-5",
+            Require(saved.Succeeded && published && f.Source.ContentReads == 6 && f.Source.ContentReadMilliseconds >= 600
+                && f.Source.MaximumContentReadMilliseconds < coverageMilliseconds
+                && (cooperativeReadMilliseconds <= 500 || f.Source.MaximumContentReadMilliseconds > 500)
+                && f.Source.StorageChecks >= 3 && saved.Timing.StorageChecks.CapacityCompletions > 0
+                && f.Source.Contents == "picture-0|picture-1|picture-2|picture-3|picture-4|picture-5",
                 "Aggregate slow reads must preserve contents and real storage freshness: " + saved.Error);
     }
     internal static int RunExportCadence(string root)
@@ -276,7 +296,9 @@ internal static class ReplayOwnershipChecks
             try { CheckExportReadCadence(Path.Combine(root, stalled ? "uninterrupted-stall" : "cooperative-reads"), stalled).GetAwaiter().GetResult(); }
             catch (Exception error) { failed++; Console.Error.WriteLine(error); }
         }
-        Console.WriteLine($"Export read cadence: {2 - failed}/2 passed"); return failed == 0 ? 0 : 1;
+        try { CheckExportReadCadence(Path.Combine(root, "under-horizon-reads"), false, 650).GetAwaiter().GetResult(); }
+        catch (Exception error) { failed++; Console.Error.WriteLine(error); }
+        Console.WriteLine($"Export read cadence: {3 - failed}/3 passed"); return failed == 0 ? 0 : 1;
     }
     internal static int RunContention(string root)
     {
@@ -286,9 +308,10 @@ internal static class ReplayOwnershipChecks
         foreach (bool persistent in new[] { false, true })
         {
             string path = Path.Combine(root, persistent ? "persistent" : "transient"); Directory.CreateDirectory(path);
-            using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
-            ReplayStorageCoordinator coordinator = null; Fixture f = null; Thread releaser = null;
-            int armed = 0, injected = 0; bool stopped = false;
+            ReplayStorageCoordinator coordinator = null; Fixture f = null;
+            IDisposable ledgerLock = null;
+            Task releaseLock = null;
+            int injected = 0; bool stopped = false;
             var clock = Stopwatch.StartNew(); ReplaySaveResult saved = null; Exception failure = null;
             try
             {
@@ -296,7 +319,7 @@ internal static class ReplayOwnershipChecks
                 f = new Fixture(path, reservations: store, replaySeconds: 300);
                 f.Source.Segments(0, 300); f.Files.RealHardLinks = true;
                 var capacity = ReplayStorage.ObserveCapacity(path); string scope = new('C', 64);
-                var headroom = new ReplayCaptureHeadroom(scope, capacity.Volume, capacity.AllocationUnit, 4096, 8192);
+                var headroom = new ReplayCaptureHeadroom(scope, capacity.Volume, capacity.AllocationUnit, 4096, 8192, ReplayCapacityPolicy.CoverageMilliseconds);
                 var model = new ReplayReferenceModel("controlled-contention", scope, capacity.Volume, capacity.AllocationUnit, 0, 0, [], headroom);
                 f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-contention", s.Identity,
                     s.ExporterIdentity, capacity.Volume, capacity.AllocationUnit, ReplayReferenceModel.Round(16384, capacity.AllocationUnit), false, null);
@@ -304,32 +327,19 @@ internal static class ReplayOwnershipChecks
                 coordinator = new(new ReplayStorageStopLatch(Path.Combine(path, "profile"), Path.Combine(path, "private")), store,
                     f.Files, () => new(model, null), (_, _) => true);
                 coordinator.BeginCapture(scope, f.Source.ReplayInfo.Directory, f.Destination, () => stopped = true);
-                f.Files.CapacityObservation = directory =>
-                {
-                    if (Volatile.Read(ref armed) == 1 && Thread.CurrentThread.Name == "Capture storage safety"
-                        && Interlocked.CompareExchange(ref injected, 1, 0) == 0)
-                    {
-                        entered.Set();
-                        if (!release.Wait(5000)) throw new IOException("Controlled supervisor lock release deadline.");
-                    }
-                    return ReplayStorage.ObserveCapacity(directory);
-                };
                 f.Files.BeforeLink = () =>
                 {
-                    if (Interlocked.CompareExchange(ref armed, 1, 0) != 0) return;
-                    // Refresh immediately before the forced short locked poll.
-                    coordinator.Poll(); coordinator.StartSupervision();
-                    if (!entered.Wait(5000)) throw new IOException("Supervisor did not enter its actual locked capacity observation.");
+                    if (injected != 0) return;
+                    ledgerLock = TrustedStorage.AcquireLock(Path.Combine(path, "private"), "replay-volume-reservations");
+                    injected++;
+                    coordinator.StartSupervision();
                     if (!persistent)
-                    {
-                        releaser = new Thread(() => { Thread.Sleep(80); release.Set(); }) { IsBackground = true };
-                        releaser.Start();
-                    }
+                        releaseLock = Task.Run(async () => { await Task.Delay(80); Interlocked.Exchange(ref ledgerLock, null)?.Dispose(); });
                 };
                 var submission = f.Save(300);
                 Require(submission.Accepted, "Controlled initial admission rejected: " + submission.Rejection);
                 saved = submission.Completion.WaitAsync(TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
-                Require(injected == 1, "The accepted snapshot never overlapped the real supervisor's ledger lock.");
+                Require(injected == 1, "The accepted snapshot never overlapped a held reservation ledger lock.");
                 if (persistent)
                 {
                     Require(!saved.Succeeded && saved.Error.Contains("lock is busy") && f.Source.ExportCount == 0
@@ -344,7 +354,8 @@ internal static class ReplayOwnershipChecks
             catch (Exception ex) { failure = ex; failures++; }
             finally
             {
-                release.Set(); releaser?.Join(1000);
+                releaseLock?.GetAwaiter().GetResult();
+                Interlocked.Exchange(ref ledgerLock, null)?.Dispose();
                 coordinator?.CompleteCapture(true); coordinator?.Dispose(); f?.Dispose();
             }
             results.Add(new { name = persistent ? "persistent-accepted-contention-retains-before-export" : "transient-accepted-contention-completes-300-input-snapshot",
@@ -355,28 +366,31 @@ internal static class ReplayOwnershipChecks
             string profile = Path.Combine(path, "profile"), authority = Path.Combine(path, "private"); Directory.CreateDirectory(profile);
             var store = new ReplayVolumeReservations(authority, ReplayStorageSafety.MinimumBytes);
             var capacity = ReplayStorage.ObserveCapacity(path); string scope = new('C', 64);
-            var headroom = new ReplayCaptureHeadroom(scope, capacity.Volume, capacity.AllocationUnit, 4096, 8192);
+            var headroom = new ReplayCaptureHeadroom(scope, capacity.Volume, capacity.AllocationUnit, 4096, 8192, ReplayCapacityPolicy.CoverageMilliseconds);
             var model = new ReplayReferenceModel("controlled-stale-contention", scope, capacity.Volume, capacity.AllocationUnit, 0, 0, [], headroom);
-            var latch = new ReplayStorageStopLatch(profile, authority); bool stopped = false; Exception failure = null;
+            var latch = new ReplayStorageStopLatch(profile, authority); using var stop = new ManualResetEventSlim(); Exception failure = null;
             using var coordinator = new ReplayStorageCoordinator(latch, store, catalog: () => new(model, null), applicable: (_, _) => true);
             try
             {
                 var freshness = Stopwatch.StartNew();
-                coordinator.BeginCapture(scope, path, path, () => stopped = true);
+                coordinator.BeginCapture(scope, path, path, stop.Set);
                 using (TrustedStorage.AcquireLock(authority, "replay-volume-reservations"))
                 {
                     coordinator.StartSupervision();
-                    var deadline = Stopwatch.StartNew();
-                    while (!stopped && deadline.ElapsedMilliseconds < 1500) Thread.Sleep(5);
-                    Require(stopped && coordinator.Stopped && latch.Read().Held,
-                        "Persistent contention refreshed stale evidence instead of preserving the500ms stop/hold.");
+                    Require(stop.Wait(ReplayStorageCoordinator.MaximumObservationGapMilliseconds + 1000) && coordinator.Stopped,
+                        "Persistent contention refreshed stale evidence beyond its qualified coverage.");
                     Require(freshness.ElapsedMilliseconds >= ReplayStorageCoordinator.MaximumObservationGapMilliseconds,
                         "Contention stopped before the declared freshness interval.");
                 }
+                coordinator.CompleteCapture(true);
+                var hold = latch.Read();
+                Require(hold.Held && hold.Durable && !coordinator.CapturePending
+                    && (hold.Reason.Contains("cover", StringComparison.OrdinalIgnoreCase) || hold.Reason.Contains("lock is busy")),
+                    "Confirmed producer closure must preserve the durable capacity or contention stop cause: " + hold.Reason);
             }
             catch (Exception ex) { failure = ex; failures++; }
             finally { coordinator.CompleteCapture(true); }
-            results.Add(new { name = "persistent-capture-contention-stops-at-unchanged-freshness-boundary", passed = failure == null, error = failure?.ToString(), stopped });
+            results.Add(new { name = "persistent-capture-contention-stops-at-unchanged-freshness-boundary", passed = failure == null, error = failure?.ToString(), stopped = stop.IsSet });
         }
         foreach (bool sealing in new[] { true, false })
         {
@@ -460,6 +474,7 @@ internal static class ReplayOwnershipChecks
 
         await Check("aggregate-content-reads-keep-storage-fresh", path => CheckExportReadCadence(path, stalled: false));
         await Check("uninterrupted-content-read-rejects-stale-storage", path => CheckExportReadCadence(path, stalled: true));
+        await Check("under-horizon-content-reads-keep-storage-fresh", path => CheckExportReadCadence(path, stalled: false, cooperativeReadMilliseconds: 650));
 
         await Check("shared-volume-ordinary-replay-admission", async path =>
         {
@@ -535,16 +550,60 @@ internal static class ReplayOwnershipChecks
             using var f = new Fixture(path, reservations: authority);
             f.Source.Segments(0, 1); f.Source.StopCapture();
             var target = ReplayStorage.ObserveCapacity(f.Destination); long free = 3_000_000_000;
-            f.Files.CapacityObservation = _ => target with { AvailableBytes = Volatile.Read(ref free) };
+            long promise = 2 * target.AllocationUnit;
+            long coveredFree = ReplayStorageSafety.MinimumBytes + promise - 1;
+            var coveredSamples = Signal(); int coveredQueries = 0, pressureQueries = 0, callbacks = 0;
+            f.Files.CapacityObservation = _ =>
+            {
+                long sample = Volatile.Read(ref free);
+                if (sample == coveredFree && Interlocked.Increment(ref coveredQueries) >= 2) coveredSamples.TrySetResult();
+                if (sample == promise - 1) Interlocked.Increment(ref pressureQueries);
+                return target with { AvailableBytes = sample };
+            };
+            f.Cache.StorageObservedForChecks = trace => { if (trace.Scope == "Callback") Interlocked.Increment(ref callbacks); };
             f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-pressure", s.Identity,
-                s.ExporterIdentity, target.Volume, target.AllocationUnit, 2 * target.AllocationUnit, false, null);
+                s.ExporterIdentity, target.Volume, target.AllocationUnit, promise, false, null);
+            bool published = false; f.Files.Published = () => published = true;
             f.Source.ExportRelease = Signal();
             var accepted = f.Save(1); await f.Source.ExportEntered.Task.WaitAsync(Deadline);
-            Volatile.Write(ref free, ReplayStorageSafety.MinimumBytes + 2 * target.AllocationUnit - 1);
+            // Capture's acquisition floor is distinct from accepted-work cover.
+            // Two queries prove the single pending observer consumed the first
+            // below-floor sample and continued polling while export remained held.
+            Volatile.Write(ref free, coveredFree);
+            await coveredSamples.Task.WaitAsync(Deadline);
+            Require(!accepted.Completion.IsCompleted && Volatile.Read(ref callbacks) >= 2,
+                "Covered stopped-capture export must remain active and guarded below the acquisition floor.");
+            Volatile.Write(ref free, promise - 1);
             var result = await Finish(accepted);
+            File.WriteAllText(Path.Combine(path, "pressure-evidence.json"), JsonSerializer.Serialize(new {
+                promise, coveredFree, pressureFree = promise - 1, coveredQueries, pressureQueries, callbacks, published,
+                result, f.Source.ExportObservation }));
             Require(!result.Succeeded && f.Source.ExportCount == 1 && File.Exists(f.Source.Chunk(0))
                 && Directory.GetDirectories(f.Source.ReplayInfo.Directory, "save-*").Length == 1,
                 "Pressure while acquisition is stopped must fail the owned export and retain its inputs without retry.");
+            Require(pressureQueries > 0 && !published && result.Error.Contains("no longer covers all outstanding commitments"),
+                "Actual commitment undercoverage must reach the guard and fail before publication: " + result.Error);
+        });
+        await Check("accepted-export-materialization-preserves-minimum-floor", async path =>
+        {
+            var authority = new ReplayVolumeReservations(Path.Combine(path, "authority"), ReplayStorageSafety.MinimumBytes);
+            using var f = new Fixture(path, reservations: authority);
+            f.Source.Segments(0, 1); f.Source.StopCapture();
+            var target = ReplayStorage.ObserveCapacity(f.Destination); long free = 3_000_000_000;
+            f.Files.CapacityObservation = _ => target with { AvailableBytes = Volatile.Read(ref free) };
+            f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-materialization-floor", s.Identity,
+                s.ExporterIdentity, target.Volume, target.AllocationUnit, 2 * target.AllocationUnit, false, null);
+            bool published = false; f.Files.Published = () => published = true;
+            f.Source.ExportRelease = Signal();
+            var accepted = f.Save(1); await f.Source.ExportEntered.Task.WaitAsync(Deadline);
+            // Still covers the complete accepted promise, but final allocation
+            // validation must preserve the configured minimum-unreserved floor.
+            Volatile.Write(ref free, ReplayStorageSafety.MinimumBytes - 1);
+            f.Source.ExportRelease.TrySetResult();
+            var result = await Finish(accepted);
+            Require(!result.Succeeded && !published && result.Error.Contains("minimum unreserved floor")
+                && File.Exists(f.Source.Chunk(0)) && Directory.GetDirectories(f.Source.ReplayInfo.Directory, "save-*").Length == 1,
+                "Materialization must retain its minimum floor and unpublished evidence: " + result.Error);
         });
         await Check("shared-volume-qualified-exporter-absence", async path =>
         {
@@ -651,6 +710,77 @@ internal static class ReplayOwnershipChecks
             }
             finally { block?.Dispose(); f.Source.OutputWritten = null; }
         });
+        await Check("output-storage-routine-refresh-coalesces", async path =>
+        {
+            using var f = new Fixture(path);
+            var capacity = ReplayStorage.ObserveCapacity(path);
+            f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-cadence",
+                s.Identity, s.ExporterIdentity, capacity.Volume, capacity.AllocationUnit,
+                ReplayReferenceModel.Round(16384, capacity.AllocationUnit), false, null);
+            f.Source.ExportAction = () => f.Source.StorageBurst(1000);
+            var saved = await Finish(f.Save());
+            Require(saved.Succeeded && saved.Timing.StorageChecks is { Coalesced: >= 900, Observations: >= 3 },
+                "Routine numeric-demand callbacks must coalesce while initial/export/validation boundaries actually refresh.");
+        });
+        await Check("optional-storage-traces-correlate-real-callbacks", async path =>
+        {
+            using var f = new Fixture(path);
+            var capacity = ReplayStorage.ObserveCapacity(path);
+            f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-trace",
+                s.Identity, s.ExporterIdentity, capacity.Volume, capacity.AllocationUnit, 16384, false, null);
+            var traces = new List<ReplayStorageTrace>();
+            f.Cache.StorageObservedForChecks = traces.Add;
+            f.Source.ExportAction = () => f.Source.StorageBurst(4);
+            var saved = await Finish(f.Save());
+            Require(saved.Succeeded && traces.Any(t => t.Scope == "Callback") && traces.Any(t => t.Scope == "FullObservation")
+                && traces.Any(t => t.Scope == "Capacity" && t.ParentOrdinal != 0), "Actual nested storage trace missing.");
+            foreach (var trace in traces)
+            {
+                Require(trace.Error == null && trace.CompletedQpc >= trace.StartedQpc && trace.Phases.All(s => s.StartedQpc >= trace.StartedQpc
+                    && s.CompletedQpc >= s.StartedQpc && s.CompletedQpc <= trace.CompletedQpc), "Invalid trace clock/error.");
+                if (trace.ParentOrdinal != 0) Require(traces.Any(t => t.Ordinal == trace.ParentOrdinal), "Missing trace parent.");
+            }
+            f.Cache.StorageObservedForChecks = null;
+        });
+        await Check("optional-trace-observer-cannot-mask-storage-failure", async path =>
+        {
+            using var f = new Fixture(path);
+            var capacity = ReplayStorage.ObserveCapacity(path);
+            f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, "controlled-trace-error",
+                s.Identity, s.ExporterIdentity, capacity.Volume, capacity.AllocationUnit, 16384, false, null);
+            var traces = new List<ReplayStorageTrace>();
+            f.Cache.StorageObservedForChecks = trace => {
+                traces.Add(trace);
+                if (trace.Error != null) throw new IOException("diagnostic observer sentinel");
+            };
+            f.Source.OutputWritten = _ => f.Files.CapacityObservation = _ => throw new IOException("primary storage sentinel");
+            try
+            {
+                var saved = await Finish(f.Save());
+                Require(!saved.Succeeded && saved.Error.Contains("primary storage sentinel", StringComparison.Ordinal)
+                    && traces.Any(t => t.Error?.Contains("primary storage sentinel", StringComparison.Ordinal) == true
+                        && t.ObserverError?.Contains("diagnostic observer sentinel", StringComparison.Ordinal) == true),
+                    "Optional observer replaced or hid the real storage failure.");
+            }
+            finally { f.Files.CapacityObservation = null; f.Cache.StorageObservedForChecks = null; }
+        });
+        foreach (bool duringValidation in new[] { false, true })
+            await Check("output-storage-forced-check-detects-fast-" + (duringValidation ? "validation" : "export") + "-demand-change", async path =>
+            {
+                using var f = new Fixture(path);
+                var capacity = ReplayStorage.ObserveCapacity(path); bool changed = false;
+                f.Source.OutputEstimate = s => new(ReplayOutputEvidenceKind.CalibratedEstimate, changed ? "controlled-new" : "controlled-original",
+                    s.Identity, s.ExporterIdentity, capacity.Volume, capacity.AllocationUnit,
+                    ReplayReferenceModel.Round(16384, capacity.AllocationUnit), false, null);
+                if (duringValidation) f.Source.ValidationAction = () => changed = true;
+                else f.Source.OutputWritten = _ => changed = true;
+                var saved = await Finish(f.Save());
+                Require(!saved.Succeeded && saved.Error.Contains("calibration", StringComparison.OrdinalIgnoreCase)
+                    && !Directory.GetFiles(f.Destination, "Replay-*.mp4").Any(file => !file.EndsWith(".partial.mp4", StringComparison.Ordinal)),
+                    "A changed demand inside the coalesced interval must fail its forced check before publication.");
+                Require(Directory.GetDirectories(f.Source.ReplayInfo.Directory, "save-*").Length == 1,
+                    "Forced storage-evidence rejection must retain its protected snapshot.");
+            });
         await Check("output-reservation-actual-volume-tracer", async path =>
         {
             using var f = new Fixture(path);

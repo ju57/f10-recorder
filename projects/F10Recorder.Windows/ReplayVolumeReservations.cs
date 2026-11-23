@@ -21,11 +21,26 @@ internal sealed class ReplayVolumeReservations
     internal const int AcceptedWorkLockWaitMilliseconds = 200;
     readonly string root, ledgerPath;
     readonly long minimumUnreservedBytes;
+    readonly ReplayReservationObservations observations;
+    TrustedStorage.LockDirectoryLease requestDirectory;
+    internal Action BeforeReleaseForChecks,AfterUpdatePersistForChecks,BeforeRequestCloseForChecks;
+    internal Action BeforeSetProducerForChecks;
+    internal Action BeforeReleasePersistForChecks;
+    internal IDisposable BeginRequestSession()
+    {
+        if(requestDirectory!=null)throw new IOException("An authority request session is already owned.");
+        requestDirectory=new(root,LockPurpose);return new RequestSession(this,requestDirectory);
+    }
+    sealed class RequestSession(ReplayVolumeReservations owner,TrustedStorage.LockDirectoryLease directory):IDisposable
+    {
+        bool closed;
+        public void Dispose(){if(closed)return;owner.BeforeRequestCloseForChecks?.Invoke();directory.Dispose();if(owner.requestDirectory!=directory)throw new IOException("Authority request session changed owner.");owner.requestDirectory=null;closed=true;}
+    }
     static readonly JsonSerializerOptions Json = new() { MaxDepth = 16 };
 
     sealed record HeldClaim(ReplayVolumeClaim Claim, string Identity, string Anchor, string AnchorIdentity);
     sealed record Holder(string Owner, List<HeldClaim> Claims, ReplayProducerProof Producer = null);
-    sealed record Ledger(int Version, List<Holder> Owners);
+    sealed record Ledger(int Version, List<Holder> Owners, string Revision = null);
     sealed record Observation(HeldClaim Held, long Allocated);
 
     // Claims in one snapshot share directory ancestry. Keep one set of native
@@ -54,21 +69,31 @@ internal sealed class ReplayVolumeReservations
         }
     }
     internal ReplayVolumeReservations(string storageRoot, long minimumUnreservedBytes = 0)
+        : this(storageRoot, minimumUnreservedBytes, new ReplayReservationObservations()) { }
+    ReplayVolumeReservations(string storageRoot, long minimumUnreservedBytes,
+        ReplayReservationObservations observations)
     {
         if (minimumUnreservedBytes < 0) throw new ArgumentOutOfRangeException(nameof(minimumUnreservedBytes));
         this.minimumUnreservedBytes = minimumUnreservedBytes;
+        this.observations = observations;
         root = Path.GetFullPath(storageRoot);
         ledgerPath = Path.Combine(root, "replay-volume-reservations.json");
     }
+    internal ReplayVolumeReservations CreatePeer() => new(root, minimumUnreservedBytes, observations);
+    internal ReplayReservationObservations.Registration RegisterObservation(string owner,
+        Func<ReplayReservationObservations.Registration, ReplayVolumeClaim, string, string, ReplayReservationFact> observe)
+        => observations.Register(owner, observe);
 
     IDisposable Acquire(bool acceptedWork = false)
     {
         var wait = Stopwatch.StartNew();
         while (true)
         {
-            try { return TrustedStorage.AcquireLock(root, LockPurpose); }
-            catch (IOException ex) when (TrustedStorage.IsSharingViolation(ex))
+            try { return requestDirectory?.AcquireOperation()??TrustedStorage.AcquireLock(root, LockPurpose); }
+            catch (Exception error) when (error is IOException io&&TrustedStorage.IsSharingViolation(io)
+                ||requestDirectory!=null&&error is System.ComponentModel.Win32Exception native&&native.NativeErrorCode is 32 or 33)
             {
+                var ex=error as IOException??new IOException("Native authority lock is busy.",error);
                 // New admission and polling stay nonblocking. Already accepted
                 // snapshot/export work may wait one polling interval for a
                 // competing reader/writer; callers still enforce their500ms
@@ -99,14 +124,16 @@ internal sealed class ReplayVolumeReservations
         return claim with { Path = path, Directory = directory };
     }
 
-    Ledger Read()
+    Ledger Read() => Read(out _);
+    Ledger Read(out byte[] readBytes)
     {
+        readBytes = null;
         try
         {
             TrustedStorage.ValidateFile(ledgerPath);
             using var stream = new FileStream(ledgerPath, FileMode.Open, FileAccess.Read, FileShare.Read);
             if (stream.Length <= 0 || stream.Length > MaximumBytes) throw new IOException("Replay volume reservation ledger size is invalid.");
-            byte[] bytes = new byte[checked((int)stream.Length)];
+            byte[] bytes = readBytes = new byte[checked((int)stream.Length)];
             stream.ReadExactly(bytes);
             var ledger = JsonSerializer.Deserialize<Ledger>(bytes, Json);
             ValidateLedger(ledger);
@@ -118,7 +145,8 @@ internal sealed class ReplayVolumeReservations
 
     static void ValidateLedger(Ledger ledger)
     {
-        if (ledger == null || ledger.Version is not (1 or 2) || ledger.Owners == null || ledger.Owners.Count > MaximumOwners)
+        if (ledger == null || ledger.Version is not (1 or 2 or 3) || ledger.Owners == null || ledger.Owners.Count > MaximumOwners
+            || ledger.Version == 3 && !Guid.TryParseExact(ledger.Revision, "N", out _))
             throw new IOException("Replay volume reservation ledger is invalid.");
         var owners = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int count = 0;
@@ -149,10 +177,14 @@ internal sealed class ReplayVolumeReservations
 
     void Persist(Ledger ledger)
     {
-        ledger = ledger with { Version = 2 }; // Older writers must reject rather than discard recovery evidence.
+        // Every committed mutation gets a distinct epoch, including a return to
+        // identical claims. Older writers reject this version instead of writing
+        // an unversioned round trip during an unlocked free-space query.
+        ledger = ledger with { Version = 3, Revision = Guid.NewGuid().ToString("N") };
         ValidateLedger(ledger);
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(ledger, Json);
         if (bytes.Length > MaximumBytes) throw new IOException("Replay volume reservation ledger byte bound exceeded.");
+        // The caller owns the shared ledger lock through durable publication.
         string temporary = Path.Combine(root, "replay-volume-reservations-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
@@ -189,9 +221,21 @@ internal sealed class ReplayVolumeReservations
         }
     }
 
-    static Observation Observe(ReplayVolumeClaim input, HeldClaim prior, ReplayFiles files, DirectoryObservations pins)
+    static Observation Observe(ReplayVolumeClaim input, HeldClaim prior, ReplayFiles files, DirectoryObservations pins,ReplayReservationEvidence evidence=null,
+        ReplayReservationObservations observations=null, string owner=null)
     {
         var claim = ValidateClaim(input);
+        var fact=evidence?.Observe(claim,prior?.Anchor,prior?.AnchorIdentity)
+            ?? observations?.Observe(owner,claim,prior?.Anchor,prior?.AnchorIdentity);
+        if(fact!=null)
+        {
+            var extent=ReplayStorage.Validate(fact.Extent);
+            if(prior!=null&&claim.Kind!=prior.Claim.Kind||claim.Kind!=ReplayVolumeClaimKind.FilePeak
+                ||extent.Volume!=claim.Volume||extent.AllocationUnit!=claim.AllocationUnit
+                ||prior?.Identity!=null&&prior.Identity!=extent.Identity || extent.AllocatedBytes>claim.PeakAllocatedBytes)
+                throw new IOException("Owned reservation native evidence changed identity/kind/volume/unit.");
+            return new(new(claim,extent.Identity,fact.Anchor,fact.AnchorIdentity),extent.AllocatedBytes);
+        }
         if (prior != null)
         {
             if (claim.Kind != prior.Claim.Kind) throw new IOException("Replay reservation kind changed without explicit release.");
@@ -232,13 +276,14 @@ internal sealed class ReplayVolumeReservations
         return new(new(claim, identity, prior?.Anchor ?? anchor, prior?.AnchorIdentity ?? anchorIdentity), allocated);
     }
 
-    List<(string Owner, List<Observation> Claims)> Refresh(Ledger ledger, ReplayFiles files, DirectoryObservations pins)
+    List<(string Owner, List<Observation> Claims)> Refresh(Ledger ledger, ReplayFiles files, DirectoryObservations pins,string evidenceOwner=null,ReplayReservationEvidence evidence=null)
     {
         // Refresh every holder before sampling capacity, including holders in
         // other worker processes. Unknown metadata never releases a promise.
         var refreshed = new List<(string Owner, List<Observation> Claims)>();
         foreach (var holder in ledger.Owners)
-            refreshed.Add((holder.Owner, holder.Claims.Select(h => Observe(h.Claim, h, files, pins)).ToList()));
+            refreshed.Add((holder.Owner, holder.Claims.Select(h => Observe(h.Claim, h, files, pins,holder.Owner==evidenceOwner?evidence:null,
+                observations,holder.Owner)).ToList()));
         // First appearance is durable evidence even when the incoming
         // proposal later fails. Checkpoint only existing holders, preserving
         // every obligation; proposed owners never enter this checkpoint.
@@ -300,6 +345,7 @@ internal sealed class ReplayVolumeReservations
         ValidateOwner(owner);
         if (!ReplayProducerProof.Valid(producer)) throw new IOException("Replay reservation producer identity is invalid.");
         using var lease = Acquire(acceptedWork);
+        BeforeSetProducerForChecks?.Invoke();
         var ledger = Read();
         int index = ledger.Owners.FindIndex(h => h.Owner == owner);
         if (index < 0) return;
@@ -309,17 +355,19 @@ internal sealed class ReplayVolumeReservations
         ledger.Owners[index] = ledger.Owners[index] with { Producer = producer };
         Persist(ledger);
     }
-    internal void Update(string owner, IReadOnlyList<ReplayVolumeClaim> claims, ReplayFiles files, ReplayProducerProof producer = null, bool acceptedWork = false)
+    internal void Update(string owner, IReadOnlyList<ReplayVolumeClaim> claims, ReplayFiles files, ReplayProducerProof producer = null, bool acceptedWork = false,ReplayReservationEvidence evidence=null)
     {
         ValidateOwner(owner);
         if (claims == null || files == null || claims.Count > MaximumClaims) throw new IOException("Replay reservation update is incomplete or exceeds its bound.");
+        if(evidence!=null&&evidence.Owner!=owner)throw new IOException("Reservation evidence belongs to another request owner.");
         using var lease = Acquire(acceptedWork);
         if (producer != null && !ReplayProducerProof.Valid(producer)) throw new IOException("Replay reservation producer identity is invalid.");
-        var ledger = RecoverExited(Read());
+        var ledger = Read();
+        ledger = RecoverExited(ledger);
         var pins = new DirectoryObservations();
         try
         {
-            var refreshed = Refresh(ledger, files, pins);
+            var refreshed = Refresh(ledger, files, pins,owner,evidence);
             var oldProducer = ledger.Owners.FirstOrDefault(h => h.Owner == owner)?.Producer;
             if (producer != null && oldProducer != null && (oldProducer with { Sealed = producer.Sealed }) != producer)
                 throw new IOException("Replay reservation producer identity changed without closure.");
@@ -329,7 +377,7 @@ internal sealed class ReplayVolumeReservations
             {
                 string path = ValidateClaim(claim).Path;
                 var old = prior.FirstOrDefault(o => string.Equals(o.Held.Claim.Path, path, StringComparison.OrdinalIgnoreCase));
-                incoming.Add(Observe(claim, old?.Held, files, pins));
+                incoming.Add(Observe(claim, old?.Held, files, pins,evidence,observations,owner));
             }
             refreshed.RemoveAll(h => string.Equals(h.Owner, owner, StringComparison.OrdinalIgnoreCase));
             if (incoming.Count != 0) refreshed.Add((owner, incoming));
@@ -353,6 +401,7 @@ internal sealed class ReplayVolumeReservations
                 if (volume.Value > available[volume.Key] - minimumUnreservedBytes)
                     throw new IOException("Shared replay storage capacity cannot hold remaining growth and its minimum unreserved floor on the target volume.");
             Persist(proposed);
+            AfterUpdatePersistForChecks?.Invoke();
         }
         finally { pins.Dispose(); }
     }
@@ -361,31 +410,65 @@ internal sealed class ReplayVolumeReservations
     {
         if (excludeOwner != null) ValidateOwner(excludeOwner);
         if (files == null) throw new IOException("Replay capacity observation needs a filesystem provider.");
-        using var lease = Acquire();
         using var pins = new DirectoryObservations();
         directory = Path.GetFullPath(directory);
         pins.Pin(ExistingDirectory(directory));
-        var refreshed = Refresh(RecoverExited(Read()), files, pins);
-        var all = refreshed.SelectMany(h => h.Claims).ToList();
-        var growth = RemainingGrowth(all);
-        // Validation always includes the excluded capture owner. Only its
-        // remaining-growth subtraction is omitted, so the policy can compare
-        // its own stop margin without charging that same margin twice.
-        if (excludeOwner != null)
-            growth = RemainingGrowth(refreshed.Where(h => !string.Equals(h.Owner, excludeOwner, StringComparison.OrdinalIgnoreCase)).SelectMany(h => h.Claims));
-        foreach (var claim in CapacityClaims(all)) _ = ObserveCapacity(claim, files);
-        // This final sample follows every allocation observation. Other volumes
-        // cannot subsidize this one; negative headroom is meaningful to polling.
-        var capacity = ReplayStorage.ValidateCapacity(files.ObserveCapacity(directory));
+        Ledger ledger;
+        byte[] checkpoint;
+        ReplayVolumeCapacity capacity;
+        using (var lease = Acquire())
+        {
+            ledger = Read(out checkpoint);
+            if (ledger.Version != 3)
+            {
+                // Legacy holders are preserved byte-for-byte in meaning. This
+                // one-time format transition grants no allocation/recovery credit.
+                Persist(ledger); ledger = Read(out checkpoint);
+            }
+        }
+        // Native capacity may block. It owns neither the ledger lock nor any
+        // caller stop lock. Revalidate the exact durable epoch afterwards, so
+        // admission/release during this query cannot turn old free space into
+        // uncharged capacity. One caller query remains in flight, without retry.
+        capacity = ReplayStorage.ValidateCapacity(files.ObserveCapacity(directory));
+        using (var lease = Acquire())
+        {
+            _ = Read(out var current);
+            if (current == null || !checkpoint.AsSpan().SequenceEqual(current))
+                throw new ReplayVolumeReservationBusyException("Replay commitments changed during capacity sampling; no fresh evidence.", null);
+        }
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var growth = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var holder in ledger.Owners)
+            foreach (var held in holder.Claims)
+            {
+                var claim = held.Claim;
+                if (!paths.Add(claim.Path)) throw new IOException("Replay reservation paths overlap between owners.");
+                // Periodic capacity needs no holder metadata or recovery I/O.
+                // Charge the WHOLE promise, even if already partly allocated or
+                // aliased. Caller-free already charges those bytes too: this
+                // deliberate overreservation never grants uncertain credit.
+                // Admission/materialization still do full identity/allocation
+                // validation in Update; release still requires owner closure.
+                if (!string.Equals(holder.Owner, excludeOwner, StringComparison.OrdinalIgnoreCase))
+                    growth[claim.Volume] = checked(growth.GetValueOrDefault(claim.Volume) + claim.PeakAllocatedBytes);
+            }
+        // The capture owner applies its own growth+stop threshold separately.
+        // One fresh target-volume sample follows the protected ledger read.
+        // Other volumes cannot subsidize this one; negative cover is a stop.
         return (capacity.Volume, capacity.AllocationUnit, checked(capacity.AvailableBytes - growth.GetValueOrDefault(capacity.Volume)));
     }
 
     internal void Release(string owner, bool acceptedWork = false)
     {
         ValidateOwner(owner);
+        BeforeReleaseForChecks?.Invoke();
         using var lease = Acquire(acceptedWork);
         var ledger = Read();
-        if (ledger.Owners.RemoveAll(h => string.Equals(h.Owner, owner, StringComparison.OrdinalIgnoreCase)) != 0) Persist(ledger);
+        observations.Revoke(owner);
+        if (ledger.Owners.RemoveAll(h => string.Equals(h.Owner, owner, StringComparison.OrdinalIgnoreCase)) != 0)
+        { BeforeReleasePersistForChecks?.Invoke(); Persist(ledger); }
+        observations.Released(owner);
     }
 }
 

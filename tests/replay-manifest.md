@@ -34,3 +34,33 @@ Changing the capture arguments or Windows assembly invalidates previous model
 qualifications. Never rewrite a historical receipt to the new exporter identity.
 The production catalog loader must continue to return `Unmeasured` until a fresh
 qualified receipt matches the corrected consumer, host, scope and destination.
+
+## Launch effects
+
+These route-specific declarations are indexed by [test-effects.md](test-effects.md).
+Read the selected route's complete effects and bounds before execution.
+
+### tests/replay-manifest.ps1 -AssemblyPath
+
+`tests/replay-manifest.ps1 -AssemblyPath <reviewed-helper> -DataDirectory <fresh-root>`
+previews the completed-segment publication checks. Add `-Run` and the exact
+`-ExpectedAssemblySha256` to execute tiny CSV fixtures, native replacement
+conflict sensitivity, concurrent managed publication/read/storage observation,
+malformed/failed publication, bounded shutdown drain and a30-minute metadata
+window. Under2MiB remains; cumulative ordinary writes are about128MB. It starts
+no engine, worker, child, GPU, capture/audio, window/shortcut or settings/startup
+action. This is not proof of the corrected real-engine stdout or live media path.
+
+### tests/replay-manifest-software.ps1
+
+`tests/replay-manifest-software.ps1` previews a hash-bound two-child software
+verification plan; `-Run` is separate execution. It uses the actual CaptureSession
+with a verification-only argument probe: generated640x360/30fps video and a
+generated440Hz tone, CPU MPEG2/AAC, one natural EOF and one graceful stdin-q stop.
+It plays no audio, acquires no desktop/device input, opens no window, uses no GPU,
+changes no profile/startup/vendor preference and activates no model. Limits are
+two media children,60seconds/32MiB under a65second outer controller, with no retry.
+It checks real stdout progress/CSV dispatch, concurrent readers/inventory, final
+segment metadata, normal producer absence and absence of rename diagnostics.
+It must receive its own resource authorization when earlier child ceilings have
+already been consumed; it does not replay or relabel an earlier failed batch.

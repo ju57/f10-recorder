@@ -32,7 +32,8 @@ internal static partial class ReplayCalibrationRun
             RecordingProfile.Load(data).Commit(settings, false, false, false);
             previousAuthority = ProfileOwnership.RootDirectory;
             ProfileOwnership.RootDirectory = Path.Combine(Path.GetDirectoryName(root), "calibration-ownership");
-            ReplayCalibrationCatalog.CandidateForChecks = () => new(model, null);
+            ReplayCalibrationCatalog.CandidateForChecks = minutes => minutes == model.ReplayMinutes ? new(model, null)
+                : new(null, "The private qualification belongs to another replay duration.");
             CaptureSession.StartingForChecks = capture =>
             {
                 Require(Interlocked.Increment(ref acquisitions) == 1, "No additional native acquisition is admitted on worker recovery.");
@@ -100,7 +101,8 @@ internal static partial class ReplayCalibrationRun
                         Write(Path.Combine(root, "worker-publication.json"), current);
                         return new ReplaySaveResult(done.Success, done.Success ? done.Message : null, done.Success ? null : done.Message,
                             m.LastSaveBytes, m.LastSaveMilliseconds, interval,
-                            done.Success ? new ReplayValidation(m.LastSaveValidation, m.LastSaveDecodedFrames, m.LastSaveValidationMilliseconds) : null);
+                            done.Success ? new ReplayValidation(m.LastSaveValidation, m.LastSaveDecodedFrames, m.LastSaveValidationMilliseconds,
+                                m.LastSaveCodedPictures, m.LastSaveAudioPackets) : null);
                     }
                     Require(current.Error == null && wait.Elapsed.TotalSeconds < 130 && acquisitions == 1, "Real worker save failed, recovered or timed out.");
                     await Task.Delay(100); current = Call("status", after: sequence);

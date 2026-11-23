@@ -22,10 +22,11 @@ internal sealed class FrozenCalibrationHistory : IDisposable
     static extern uint WaitForSingleObject(ChangeNotification handle, uint milliseconds);
     sealed class ChangeNotification : SafeHandleZeroOrMinusOneIsInvalid
     {
-        ChangeNotification(IntPtr value) : base(true) { SetHandle(value); }
+        internal readonly string Root;
+        ChangeNotification(IntPtr value, string root) : base(true) { Root = root; SetHandle(value); }
         internal static ChangeNotification Create(string path)
         {
-            var handle = new ChangeNotification(FindFirstChangeNotificationW(NativePath(path), true, 0x11f));
+            var handle = new ChangeNotification(FindFirstChangeNotificationW(NativePath(path), true, 0x11f), path);
             if (handle.IsInvalid) { int error = Marshal.GetLastWin32Error(); handle.Dispose(); throw new Win32Exception(error, path); }
             return handle;
         }
@@ -35,6 +36,7 @@ internal sealed class FrozenCalibrationHistory : IDisposable
         internal uint State => WaitForSingleObject(this, 0);
     }
     readonly List<SafeFileHandle> leases = new();
+    readonly List<IDisposable> selectedParents = new();
     readonly List<ChangeNotification> watchers = new();
     readonly Dictionary<string, long> allocations = new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<string, ReplayFileExtent> inventory;
@@ -48,8 +50,10 @@ internal sealed class FrozenCalibrationHistory : IDisposable
     internal IReadOnlyDictionary<string, ReplayFileExtent> Inventory => inventory;
     static string Key(ReplayFileExtent extent) => extent.Volume + ":" + extent.Identity;
 
-    internal FrozenCalibrationHistory(string[] roots, int fileLimit, int directoryLimit)
+    internal FrozenCalibrationHistory(string[] roots, int fileLimit, int directoryLimit, Action<object> admissionReport = null,
+        string[] selectedFiles = null)
     {
+        using var diagnostics = admissionReport == null ? null : new FrozenHistoryAdmissionEvents(roots);
         try
         {
             var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -77,6 +81,38 @@ internal sealed class FrozenCalibrationHistory : IDisposable
             DirectoryCount = directories.Count;
             inventory = ReplayStorage.Inventory(roots, new LeaseFiles(this), fileLimit, directoryLimit,
                 ReplayCalibrationRun.ValidateMediaAttributes);
+            // The fixed retained-minute route leases exactly its selected objects.
+            // Never recurse into their session or watch unrelated session writes.
+            // Held ancestor directories prevent path replacement; GENERIC_READ /
+            // FILE_SHARE_READ denies data writes and unlink through every alias.
+            if (selectedFiles != null)
+            {
+                if (selectedFiles.Length is < 1 or > 65 || selectedFiles.Distinct(StringComparer.OrdinalIgnoreCase).Count() != selectedFiles.Length)
+                    throw new IOException("Selected retained files require 1–65 distinct exact paths.");
+                foreach (string path in selectedFiles)
+                {
+                    if (!Path.IsPathFullyQualified(path) || Path.GetFullPath(path) != path || inventory.ContainsKey(path)
+                        || inventory.Count >= fileLimit) throw new IOException("Selected retained path or count bound.");
+                    string parent = Path.GetDirectoryName(path);
+                    if (directories.Add(parent))
+                    {
+                        if (directories.Count > directoryLimit) throw new IOException("Selected retained directory bound.");
+                        selectedParents.Add(TrustedStorage.PinDirectories(parent));
+                        var capacity = ReplayStorage.ObserveCapacity(parent);
+                        if (!Volumes.Any(v => v.Identity.Equals(capacity.Volume, StringComparison.OrdinalIgnoreCase)))
+                            Volumes.Add(new(parent, capacity.Volume, capacity.AllocationUnit));
+                    }
+                    var attributes = File.GetAttributes(path);
+                    if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Compressed | FileAttributes.SparseFile)) != 0)
+                        throw new IOException("Selected retained allocation/reparse attributes unsupported.");
+                    ReplayCalibrationRun.ValidateMediaAttributes(path, attributes);
+                    var handle = Open(path, directory: false);
+                    leases.Add(handle);
+                    var observed = ReplayStorage.ObserveInventory(handle, ReplayStorage.Observe(path));
+                    inventory.Add(path, observed);
+                }
+                DirectoryCount = directories.Count;
+            }
             foreach (var extent in inventory.Values)
             {
                 string key = Key(extent);
@@ -86,8 +122,15 @@ internal sealed class FrozenCalibrationHistory : IDisposable
             }
             AllocatedBytes = allocations.Values.Aggregate(0L, (sum, bytes) => checked(sum + bytes));
             Check();
+            diagnostics?.Complete(admissionReport, null);
         }
-        catch { Dispose(); throw; }
+        catch (Exception error)
+        {
+            Dispose();
+            try { diagnostics?.Complete(admissionReport, error.Message); }
+            catch (Exception reportError) { Console.Error.WriteLine("Historical admission diagnostic: " + reportError.Message); }
+            throw;
+        }
     }
     static SafeFileHandle Open(string path, bool directory)
     {
@@ -122,8 +165,8 @@ internal sealed class FrozenCalibrationHistory : IDisposable
         foreach (var watcher in watchers)
         {
             uint status = watcher.State;
-            if (status == 0) Invalidate("Historical namespace or allocation metadata changed.");
-            else if (status != 258) Invalidate("Historical native change monitor failed.");
+            if (status == 0) Invalidate("Historical namespace or allocation metadata changed; root=" + watcher.Root + "; waitStatus=0.");
+            else if (status != 258) Invalidate("Historical native change monitor failed; root=" + watcher.Root + "; waitStatus=" + status + ".");
         }
         string error = Volatile.Read(ref invalidation);
         if (error != null) throw new IOException(error);
@@ -147,6 +190,8 @@ internal sealed class FrozenCalibrationHistory : IDisposable
         if (Interlocked.Exchange(ref disposed, 1) != 0) return;
         foreach (var watcher in watchers) watcher.Dispose();
         foreach (var handle in leases) handle.Dispose();
+        foreach (var parent in selectedParents) parent.Dispose();
+        selectedParents.Clear();
         watchers.Clear(); leases.Clear();
     }
 }

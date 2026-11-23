@@ -7,7 +7,7 @@ internal static class ReplayStorageRuntimeChecks
     static readonly string Scope = new('D', 64);
     static ReplayCalibrationAvailability Qualification()
     {
-        var headroom = new ReplayCaptureHeadroom(Scope, @"\\?\Volume{00000000-0000-0000-0000-000000000001}\", 4096, 4096, 8192);
+        var headroom = new ReplayCaptureHeadroom(Scope, @"\\?\Volume{00000000-0000-0000-0000-000000000001}\", 4096, 4096, 8192, ReplayCapacityPolicy.CoverageMilliseconds);
         return new(new("controlled-runtime", Scope, headroom.Volume, 4096, 0, 0, [], headroom), null);
     }
     sealed class CapacityFiles(long bytes) : ReplayFiles
@@ -133,7 +133,7 @@ internal static class ReplayStorageRuntimeChecks
             string profile = Path.Combine(root, "qualified-profile"), security = Path.Combine(root, "qualified-security");
             Directory.CreateDirectory(profile);
             string scope = new('A', 64);
-            var headroom = new ReplayCaptureHeadroom(scope, @"\\?\Volume{00000000-0000-0000-0000-000000000001}\", 4096, 4096, 8192);
+            var headroom = new ReplayCaptureHeadroom(scope, @"\\?\Volume{00000000-0000-0000-0000-000000000001}\", 4096, 4096, 8192, ReplayCapacityPolicy.CoverageMilliseconds);
             var model = new ReplayReferenceModel("controlled", scope, headroom.Volume, 4096, 0, 0, [], headroom);
             ReplayCalibrationAvailability available = new(model, null);
             var files = new CapacityFiles(9_000_000_000);
@@ -144,9 +144,9 @@ internal static class ReplayStorageRuntimeChecks
             coordinator.BeginCapture(scope, profile, profile, () => stopped = true);
             Require(!stopped && !coordinator.Hold.Held, "Safe qualified admission must permit acquisition.");
             Require(store.ObserveUnreserved(profile, files).Bytes == 8_999_987_712, "Capture must charge its 12288-byte poll plus stop promise.");
-            coordinator.Poll();
+            Observe(coordinator);
             Require(!stopped, "Watcher must exclude its own promise before applying its qualified threshold.");
-            available = new(null, "Controlled withdrawal."); coordinator.Poll();
+            available = new(null, "Controlled withdrawal."); Observe(coordinator);
             Require(stopped && latch.Read().Held, "Withdrawal must stop capture and retain its durable guard.");
             coordinator.CompleteCapture(false);
             Require(store.ObserveUnreserved(profile, files).Bytes == 8_999_987_712, "Unknown absence must retain capture growth.");
@@ -167,15 +167,15 @@ internal static class ReplayStorageRuntimeChecks
             var store = new ReplayVolumeReservations(security, 2_000_000_000);
             string scope = new('B', 64), owner = Guid.NewGuid().ToString("N");
             string volume = @"\\?\Volume{00000000-0000-0000-0000-000000000001}\";
-            var headroom = new ReplayCaptureHeadroom(scope, volume, 4096, 4096, 8192);
+            var headroom = new ReplayCaptureHeadroom(scope, volume, 4096, 4096, 8192, ReplayCapacityPolicy.CoverageMilliseconds);
             var model = new ReplayReferenceModel("controlled", scope, volume, 4096, 0, 0, [], headroom);
             store.Update(owner, [new(Path.Combine(profile, "export-growth"), profile, volume, 4096, 900_000_000, ReplayVolumeClaimKind.UnmaterializedGrowth)], files);
             var latch = new ReplayStorageStopLatch(profile, security);
             using var coordinator = new ReplayStorageCoordinator(latch, store, files, () => new(model, null), (_, _) => true);
             bool stopped = false; coordinator.BeginCapture(scope, profile, profile, () => stopped = true);
-            files.Bytes = 2_900_012_289; coordinator.Poll();
+            files.Bytes = 2_900_012_289; Observe(coordinator);
             Require(!stopped, "One byte above other commitments plus 2GB plus own margin must keep acquisition.");
-            files.Bytes = 2_900_012_288; coordinator.Poll();
+            files.Bytes = 2_900_012_288; Observe(coordinator);
             Require(stopped, "Exact stop boundary must stop with other profile growth still charged.");
             coordinator.CompleteCapture(true);
             Require(store.ObserveUnreserved(profile, files).Bytes == 2_000_012_288, "Capture closure must preserve the accepted export promise.");
@@ -187,12 +187,12 @@ internal static class ReplayStorageRuntimeChecks
             using (var coordinator = new ReplayStorageCoordinator(latch, new ReplayVolumeReservations(security), files, Qualification, (_, _) => true))
             {
                 bool stopped = false; coordinator.BeginCapture(Scope, profile, profile, () => stopped = true);
-                Thread.Sleep(550); coordinator.Poll();
+                Thread.Sleep(2050); Observe(coordinator);
                 Require(stopped && latch.Read().Held, "A late observation must stop acquisition.");
                 coordinator.CompleteCapture(false);
             }
             string scope = new('C', 64), volume = @"\\?\Volume{00000000-0000-0000-0000-000000000001}\";
-            var headroom = new ReplayCaptureHeadroom(scope, volume, 4096, 4096, 8192);
+            var headroom = new ReplayCaptureHeadroom(scope, volume, 4096, 4096, 8192, ReplayCapacityPolicy.CoverageMilliseconds);
             var model = new ReplayReferenceModel("controlled", scope, volume, 4096, 0, 0, [], headroom);
             using var restarted = new ReplayStorageCoordinator(latch, new ReplayVolumeReservations(security), files, () => new(model, null), (_, _) => true);
             try { restarted.RequireResume(profile, profile); throw new Exception("Restart manufactured absence proof."); }
@@ -206,8 +206,8 @@ internal static class ReplayStorageRuntimeChecks
             using var coordinator = new ReplayStorageCoordinator(latch, new ReplayVolumeReservations(security), files, Qualification, (_, _) => true);
             bool stopped = false; coordinator.BeginCapture(Scope, profile, profile, () => stopped = true);
             files.BeforeCapacity = () => Thread.Sleep(550);
-            coordinator.Poll();
-            Require(stopped && latch.Read().Held, "A slow filesystem sample must not refresh qualified freshness after its deadline.");
+            Observe(coordinator);
+            Require(!stopped, "A550ms successful sample remains within explicit2000ms cover.");
             coordinator.CompleteCapture(true);
         });
         Check("shared lock contention retries only while prior observation is fresh", () =>
@@ -219,7 +219,7 @@ internal static class ReplayStorageRuntimeChecks
             using (TrustedStorage.AcquireLock(security, "replay-volume-reservations"))
             {
                 coordinator.Poll(); Require(!stopped, "Immediate Busy within the fresh interval may retry.");
-                Thread.Sleep(550); coordinator.Poll();
+                Thread.Sleep(2050); Observe(coordinator);
                 Require(stopped, "Busy cannot extend freshness indefinitely.");
             }
             coordinator.CompleteCapture(true);
@@ -249,7 +249,7 @@ internal static class ReplayStorageRuntimeChecks
                 string fixture = Path.Combine(root, stopDuringDrain ? "late-stop" : "normal-stop"), profile = Path.Combine(fixture, "profile"), security = Path.Combine(fixture, "security");
                 Directory.CreateDirectory(profile);
                 string session = Path.Combine(profile, "session-fixture"); Directory.CreateDirectory(session);
-                string footage = Path.Combine(session, "retained.ts"); File.WriteAllText(footage, "tiny retained footage sentinel; not playable media");
+                string footage = Path.Combine(session, "chunk-000000000.ts"); File.WriteAllText(footage, "tiny owned chunk sentinel; not playable media");
                 var source = new DrainSource(session);
                 var files = new CapacityFiles(9_000_000_000);
                 var latch = new ReplayStorageStopLatch(profile, security);
@@ -263,7 +263,7 @@ internal static class ReplayStorageRuntimeChecks
                 try
                 {
                     Require(source.Entered.Wait(TimeSpan.FromSeconds(3)), "Source did not enter the controlled drain.");
-                    if (stopDuringDrain) { files.Bytes = 2_000_000_000; coordinator.Poll(); Require(requested, "Low storage must arrive while source drain is blocked."); }
+                    if (stopDuringDrain) { files.Bytes = 2_000_000_000; Observe(coordinator); Require(requested, "Low storage must arrive while source drain is blocked."); }
                 }
                 finally { source.Release.Set(); }
                 stopping.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
@@ -351,5 +351,9 @@ internal static class ReplayStorageRuntimeChecks
         return failures == 0 ? 0 : 1;
     }
     static void Require(bool value, string message) { if (!value) throw new IOException(message); }
+    static void Observe(ReplayStorageCoordinator coordinator)
+    {
+        Require(System.Threading.SpinWait.SpinUntil(coordinator.Poll, 3000), "Capacity observation did not finish within its controlled test window.");
+    }
 }
 

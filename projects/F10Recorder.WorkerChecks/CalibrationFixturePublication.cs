@@ -9,7 +9,7 @@ internal static class CalibrationFixturePublication
 {
     internal const string ReadyName = "fixture-ready.json", PendingName = ".fixture-ready.pending";
     internal const int MaximumBytes = 4096;
-    internal static bool IsVolatile(string path) => Path.GetFileName(path).Equals(ReadyName, StringComparison.OrdinalIgnoreCase)
+    internal static bool IsVolatile(string path) => CalibrationPresentationReference.IsVolatile(path)||Path.GetFileName(path).Equals(ReadyName, StringComparison.OrdinalIgnoreCase)
         || Path.GetFileName(path).Equals(PendingName, StringComparison.OrdinalIgnoreCase);
     internal static void Publish(string root, object value, Action<string> duringWrite = null)
     {

@@ -45,6 +45,7 @@ internal sealed class WorkerRequest
 internal sealed class WorkerEvent
 {
     public long Sequence;
+    public long CreatedQpc;
     public string Kind, Title, Message;
     public int NotificationKind, Duration;
     public bool Success;

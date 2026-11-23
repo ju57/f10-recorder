@@ -1,5 +1,7 @@
 <Project>
   <PropertyGroup>
+    <!-- Qualification receipts bind exact assembly bytes across checkout locations. -->
+    <ContinuousIntegrationBuild Condition="'$(F10QueueEnginePath)' != ''">true</ContinuousIntegrationBuild>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <!-- Keep ordinary build locks stable when publishing a RID-specific package. -->
     <NuGetLockFilePath Condition="'$(RuntimeIdentifier)' != ''">packages.$(RuntimeIdentifier).lock.json</NuGetLockFilePath>

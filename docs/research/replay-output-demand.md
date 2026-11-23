@@ -1,5 +1,7 @@
 # Replay output demand and finalization
 
+> **Historical research baseline, 26 October 2026.** Recommendations, implementation status and open-work statements below apply to the named baseline. Follow the [current storage contract](../storage-admission.md) for implemented/candidate admission policy and the [owning issue](https://github.com/ju57/f10-recorder/issues/13) for live acceptance state. This research does not override later approved requirements or qualify a different build/profile.
+
 Research baseline: `ecdedc69f390cc5f63cfcbeb8a96974232c58a1a` (merged PR70), 26 October 2026. Issue #13 remains partial; its four criteria and the twelve release gates remain open. This report changes no production behavior.
 
 ## Recommendation

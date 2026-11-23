@@ -7,7 +7,12 @@ namespace F10Recorder;
 internal static class CalibrationForeground
 {
     internal const int DeadlineSeconds = 10;
+    internal const int UserHandoffSeconds = 180;
     internal static void Wait(Func<bool> ready, Func<bool> exited, Action health, Action pause, Func<double> seconds)
+        => WaitBounded(ready, exited, health, pause, seconds, DeadlineSeconds);
+    internal static void WaitForUserHandoff(Func<bool> ready, Func<bool> exited, Action health, Action pause, Func<double> seconds)
+        => WaitBounded(ready, exited, health, pause, seconds, UserHandoffSeconds);
+    static void WaitBounded(Func<bool> ready, Func<bool> exited, Action health, Action pause, Func<double> seconds, int maximumSeconds)
     {
         double previous = 0;
         while (true)
@@ -15,12 +20,12 @@ internal static class CalibrationForeground
             health();
             if (exited()) throw new IOException("Controlled fixture exited before foreground admission; no capture admitted.");
             double at = seconds();
-            if (!double.IsFinite(at) || at < previous || at > DeadlineSeconds)
+            if (!double.IsFinite(at) || at < previous || at > maximumSeconds)
                 throw new IOException("Controlled fixture foreground deadline or clock failed; no capture admitted.");
             previous = at;
             if (ready()) return;
-            if (at >= DeadlineSeconds)
-                throw new IOException("Controlled fixture did not become foreground within10seconds. Click the pattern when it appears; no capture admitted.");
+            if (at >= maximumSeconds)
+                throw new IOException("Controlled fixture did not become foreground within its declared " + maximumSeconds + " seconds. Click the pattern when it appears; no capture admitted.");
             pause();
         }
     }
@@ -39,6 +44,131 @@ internal static class CalibrationForeground
             if (polls != 4) throw new IOException("A marker alone admitted capture before actual foreground."); });
         Check("timeout-never-admits", () =>
         { int ticks = 0; Reject(() => Wait(() => false, () => false, () => { }, () => ticks++, () => ticks)); if (ticks != DeadlineSeconds) throw new IOException("Deadline moved."); });
+        Check("manual-handoff-can-finish-after-ordinary-deadline", () =>
+        { int ticks = 0; WaitForUserHandoff(() => ticks == 40, () => false, () => { }, () => ticks++, () => ticks);
+            if (ticks != 40) throw new IOException("Operator wait was not bounded separately."); });
+        Check("verified-handoff-after-previous-sixty-second-limit", () =>
+        { int ticks = 0; WaitForUserHandoff(() => ticks == 90, () => false, () => { }, () => ticks++, () => ticks);
+            if (ticks != 90) throw new IOException("Disarmed handoff could not complete in its declared window."); });
+        Check("fixture-survives-latest-handoff-and-full-acquisition", () =>
+        {
+            foreach (var bound in new[] { (capture: 330, lifetime: CalibrationPattern.ManualLifetimeSeconds),
+                (capture: 580, lifetime: ReplayWorkerLatencyPilot.FixtureLifetimeSeconds) })
+            {
+                for (int second = 0; second <= UserHandoffSeconds + bound.capture + 14; second++)
+                    if (CalibrationPattern.LifetimeExpired(second, bound.lifetime))
+                        throw new IOException("Fixture watchdog can expire during an admitted handoff/acquisition.");
+                if (!CalibrationPattern.LifetimeExpired(bound.lifetime + 1, bound.lifetime))
+                    throw new IOException("Fixture watchdog lost its finite bound.");
+            }
+        });
+        Check("manual-handoff-timeout-never-admits", () =>
+        { int ticks = 0; Reject(() => WaitForUserHandoff(() => false, () => false, () => { }, () => ticks++, () => ticks));
+            if (ticks != UserHandoffSeconds) throw new IOException("Operator deadline moved."); });
+        Check("moving-barcode-covers-entire-admitted-fixture-lifetime", () =>
+        {
+            foreach (int lifetime in new[] { 350, CalibrationPattern.ManualLifetimeSeconds, ReplayWorkerLatencyPilot.FixtureLifetimeSeconds })
+            {
+                int maximum = CalibrationPattern.MaximumAnimatedFrame(lifetime), previous = -1;
+                for (int frame = 0; frame <= maximum; frame++)
+                {
+                    int offset = CalibrationPattern.BarcodeOffset(frame, lifetime);
+                    if (offset < previous || offset < 0 || offset >= 25000)
+                        throw new IOException("Moving source ID wraps or exceeds the unchanged catalog range.");
+                    previous = offset;
+                }
+                Reject(() => CalibrationPattern.BarcodeOffset(maximum + 1, lifetime));
+                if (lifetime != 350)
+                {
+                    var sampled = new[] { 183, 333, 483 }.Select(second => CalibrationPattern.BarcodeOffset(
+                        second * 1000 / CalibrationPattern.TimerIntervalMilliseconds, lifetime)).ToArray();
+                    if (!(sampled[0] < sampled[1] && sampled[1] < sampled[2]))
+                        throw new IOException("Late-handoff moving inspection IDs do not progress.");
+                }
+            }
+        });
+        Check("manual-handoff-owner-loss-never-admits", () =>
+            Reject(() => WaitForUserHandoff(() => true, () => true, () => { }, () => { }, () => 0)));
+        Check("foreground-alone-cannot-release-controller-handoff", () =>
+        {
+            var release = CalibrationForegroundRelease.Create("T01", 123, 456);
+            int ticks = 0;
+            Reject(() => WaitForUserHandoff(() => release.IsReleased(root), () => false, () => { }, () => ticks++, () => ticks));
+            if (ticks != UserHandoffSeconds) throw new IOException("Focused fixture started without controller release.");
+        });
+        Check("controller-release-still-requires-current-foreground", () =>
+        {
+            var release = CalibrationForegroundRelease.Create("T01", 123, 456);
+            string path = Path.Combine(root, CalibrationForegroundRelease.FileName);
+            File.WriteAllText(path, JsonSerializer.Serialize(release));
+            try
+            {
+                int ticks = 0;
+                WaitForUserHandoff(() => release.IsReleased(root) && ticks == 4, () => false, () => { }, () => ticks++, () => ticks);
+                if (ticks != 4) throw new IOException("Release bypassed live foreground.");
+            }
+            finally { File.Delete(path); }
+        });
+        Check("controller-release-rejects-other-fixture-or-stale-challenge", () =>
+        {
+            var release = CalibrationForegroundRelease.Create("T01", 123, 456);
+            string path = Path.Combine(root, CalibrationForegroundRelease.FileName);
+            try
+            {
+                foreach (var wrong in new[] { release with { Label = "T02" }, release with { Pid = 124 },
+                    release with { Hwnd = 457 }, CalibrationForegroundRelease.Create("T01", 123, 456) })
+                {
+                    File.WriteAllText(path, JsonSerializer.Serialize(wrong));
+                    Reject(() => release.IsReleased(root));
+                }
+                File.WriteAllText(path, JsonSerializer.Serialize(release));
+                if (!release.IsReleased(root)) throw new IOException("Exact release refused.");
+            }
+            finally { File.Delete(path); }
+        });
+        Check("controller-release-refuses-empty-malformed-or-oversized-response", () =>
+        {
+            var release = CalibrationForegroundRelease.Create("T01", 123, 456);
+            string path = Path.Combine(root, CalibrationForegroundRelease.FileName);
+            try
+            {
+                foreach (string invalid in new[] { "", "{", "null", new string(' ', 4097) })
+                { File.WriteAllText(path, invalid); Reject(() => release.IsReleased(root)); }
+            }
+            finally { File.Delete(path); }
+        });
+        Check("composite-operator-handoff-has-distinct-admission", () =>
+        {
+            string resourceFile = Path.Combine(root, "foreground-resources.json");
+            File.WriteAllText(resourceFile, "{\"parentHandles\":32768}");
+            var resourceFiles = new Dictionary<string,string> { [resourceFile] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(resourceFile))) };
+            var p = new CalibrationPlan(Path.Combine(root, "unused-composite"), "unused", "pure-admission-control", resourceFiles,
+                ["T01", "T02", "T03", "H02", "H01", "H03"], [root], 0, 0, MaximumChildren: 61,
+                DeadlineSeconds: 5400, RetainedOfflineSeconds: 0, MetadataHandleRoots: [root], ReuseCurrentMetadataHandles: true,
+                DirectoryLimit: 16384, OutputComponentBytes: 2_000_000_000, RetainedBudgetBytes: 30_000_000_000, OutsideBuildAllowanceBytes: 10_000_000_000,
+                FileLimit: 32768, OfflineDeadlineSeconds: 1200, FreezeRetainedAllocations: true,
+                ReplayExporterRecipe: ReplaySaveExport.PolicyIdentity, ValidationChildren: 18, CompositeQualification: true, CopyFallbackReserveBytes: 1_000_000_000) { EvidenceRoles = new Dictionary<string,string> { ["resources"] = resourceFile } };
+            ReplayCalibrationRun.ValidateResources(p);
+            Reject(() => ReplayCalibrationRun.ValidateResources(p with { RetainedBudgetBytes = 24_000_000_000 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(p with { OutsideBuildAllowanceBytes = 1_000_000_000 }));
+            ReplayCalibrationRun.ValidateResources(p with { CompositeManualForegroundHandoff = true });
+            ReplayCalibrationRun.ValidateResources(p with { CompositeManualForegroundHandoff = true, CompositeExplicitForegroundRelease = true });
+            Reject(() => ReplayCalibrationRun.ValidateResources(p with { CompositeExplicitForegroundRelease = true }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(p with { CompositeQualification = false,
+                CompositeManualForegroundHandoff = true, CompositeExplicitForegroundRelease = true }));
+            var continued = p with { CompositeTrainingRoot = p.RetainedRoots[0], Order = ["T03", "H02", "H01", "H03"],
+                RetainedChildren = 21, MaximumChildren = 58, ValidationChildren = 12, RetainedElapsedSeconds = 1106,
+                RetainedOfflineSeconds = 70, RetainedBudgetBytes = 30_000_000_000, OutsideBuildAllowanceBytes = 10_000_000_000 };
+            ReplayCalibrationRun.ValidateResources(continued);
+            Reject(() => ReplayCalibrationRun.ValidateResources(continued with { Order = p.Order }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(continued with { RetainedChildren = 20 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(continued with { MaximumChildren = 53 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(continued with { RetainedBudgetBytes = 24_000_000_000 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(continued with { OutsideBuildAllowanceBytes = 1_000_000_000 }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(continued with { CompositeQualification = false }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(p with { CompositeQualification = false, CompositeManualForegroundHandoff = true }));
+            Reject(() => ReplayCalibrationRun.ValidateResources(p with { CompositeManualForegroundHandoff = true, UserForegroundHandoff = true }));
+        });
         Check("exited-fixture-even-if-stale-ready", () => Reject(() => Wait(() => true, () => true, () => { }, () => { }, () => 0)));
         Check("health-failure-never-admits", () => Reject(() => Wait(() => true, () => false, () => throw new IOException("Controlled storage failure"), () => { }, () => 0)));
         Check("backwards-clock-never-admits", () =>
@@ -260,6 +390,6 @@ internal static class CalibrationForeground
         });
         File.WriteAllText(Path.Combine(root, "foreground-checks.json"), JsonSerializer.Serialize(new {
             result = "passed", results, effects = "Pure admission delegates and tiny receipt; no window, input injection, child, engine, sound or capture." }, new JsonSerializerOptions { WriteIndented = true }));
-        Console.WriteLine("Foreground/resource admission controls: 7/7 passed"); return 0;
+        Console.WriteLine("Foreground/resource admission controls: " + results.Count + "/" + results.Count + " passed"); return 0;
     }
 }

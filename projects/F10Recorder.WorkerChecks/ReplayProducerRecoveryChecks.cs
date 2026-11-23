@@ -102,15 +102,18 @@ internal static class ReplayProducerRecoveryChecks
                     CloseHandle(retainedJob); retainedJob = IntPtr.Zero;
                     Require(child.WaitForExit(5000), "Closing the last owned job handle did not confirm child exit.");
                     Require(latch.ProducerAbsenceConfirmed() == sealedLaunch, "Only a sealed, exited producer group can establish recovery proof.");
-                    Require(store.ObserveUnreserved(profile, new Files()).Bytes == (sealedLaunch ? 9_000_000_000 : 8_999_995_904), "Recovery released the wrong future obligation.");
+                    Require(store.ObserveUnreserved(profile, new Files()).Bytes == 8_999_995_904,
+                        "A periodic capacity read must keep charging the claim until explicit recovery.");
                     Require(latch.Read().Held && File.ReadAllText(sentinel) == "protected fixture footage", "Recovery must preserve the stop and retained material.");
                     string scope = new('A', 64);
-                    var headroom = new ReplayCaptureHeadroom(scope, Volume, 4096, 4096, 8192);
+                    var headroom = new ReplayCaptureHeadroom(scope, Volume, 4096, 4096, 8192, ReplayCapacityPolicy.CoverageMilliseconds);
                     var model = new ReplayReferenceModel("controlled-recovery", scope, Volume, 4096, 0, 0, [], headroom);
                     using var coordinator = new ReplayStorageCoordinator(latch, store, new Files(), () => new(model, null), (_, _) => true);
                     if (sealedLaunch)
                     {
                         coordinator.RequireResume(profile, profile);
+                        Require(store.ObserveUnreserved(profile, new Files()).Bytes == 9_000_000_000,
+                            "Resume did not release the previous producer's future obligation after confirming its exit.");
                         Require(latch.Read().Held, "Successful safe checks alone must not clear the stop.");
                         coordinator.BeginCapture(scope, profile, profile, () => { }, explicitResume: true);
                         Require(!coordinator.Hold.Held, "Explicit safe Resume must arm a fresh owned capture guard.");
@@ -136,7 +139,7 @@ internal static class ReplayProducerRecoveryChecks
             string profile = Path.Combine(root, "normal-profile"), security = Path.Combine(root, "normal-security"); Directory.CreateDirectory(profile);
             var latch = new ReplayStorageStopLatch(profile, security);
             string scope = new('B', 64);
-            var headroom = new ReplayCaptureHeadroom(scope, Volume, 4096, 4096, 8192);
+            var headroom = new ReplayCaptureHeadroom(scope, Volume, 4096, 4096, 8192, ReplayCapacityPolicy.CoverageMilliseconds);
             var model = new ReplayReferenceModel("controlled-normal-recovery", scope, Volume, 4096, 0, 0, [], headroom);
             using (var coordinator = new ReplayStorageCoordinator(latch, new ReplayVolumeReservations(security), new Files(), () => new(model, null), (_, _) => true))
             {

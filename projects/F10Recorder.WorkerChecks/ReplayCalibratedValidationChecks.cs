@@ -157,7 +157,7 @@ internal static partial class ReplayCalibrationRun
             evidence?.CaptureClosed();
             var source = new CalibratedClosedSource(session, p.GetProperty("media").GetString(), engine, model, reencode, evidence);
             var claims = new ReplayVolumeReservations(Path.Combine(current, "calibration-ownership"), ReplayStorageSafety.MinimumBytes);
-            using var cache = new ReplayCache(native ? new ReplayFiles() : new RetainFiles(sampler, true), cacheDirectory: Path.Combine(cell, "buffer"), volumeReservations: claims);
+            using var cache = new ReplayCache(native ? null : new RetainFiles(sampler, true), cacheDirectory: Path.Combine(cell, "buffer"), volumeReservations: claims);
             bool nativeReader = typeof(ReplayCache).GetField("snapshotInventory", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(cache) != null;
             Require(nativeReader == native, "Diagnostic provider did not select the expected snapshot reader.");
             string failure = null; ReplaySaveResult result = null;

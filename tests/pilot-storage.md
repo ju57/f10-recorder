@@ -177,3 +177,27 @@ to a changed supplied contract while converting it to preparation JSON.
 | N12/N13 | Engine/process/trust/lease/producer cleanup adapters deferred. Wrapper only supervises its own nonmedia verification invocation. |
 | N14 | Existing project links/seams reused; early kernel-storage route, maintained headless CI check, no production policy changes. |
 | N15 | No system-audio/NVENC/source-clock/IDR/CSV/speed/tail/physical-peak/margin or release qualification. Original issue13 criteria, #9/#12 and all release gates remain open. |
+
+## Launch effects
+
+These route-specific declarations are indexed by [test-effects.md](test-effects.md).
+Read the selected route's complete effects and bounds before execution.
+
+### ./tests/pilot-storage.ps1 -Plan
+
+`./tests/pilot-storage.ps1 -Plan` (also the default) only describes the storage
+route, without target stat/hash/build/mkdir or process/native observation.
+Explicit `-Checks/-Observe -NoBuild` uses the task-built WorkerChecks DLL's early
+storage-only entry point through the explicit pinned dotnet host. Execution
+requires an explicit assembly path/reviewed SHA256; own-DLL hashing precedes
+launch, missing/mismatched identities reject without a helper/PID. Inert
+`pilot-storage-launch-checks.ps1` invokes rejection/preview cases in-process with
+a harmless mismatched sentinel and impossible SDK path, never loading a DLL.
+Overall effects
+include fresh owned-root/marker/tiny-text initialization and bounded retained
+report/launch-record writes; native metadata observation itself is read-only.
+The wrapper limits its sole owned invocation to60seconds/128KiB, records exact
+identity/exit and retains failures. The helper spawns no nested child and opens
+no worker/UI/shortcut/engine/probe/GPU/capture/startup/vendor route. No prior
+root/file is reused or deleted. See [actual tiny-root storage](pilot-storage.md)
+for the bounded inventory, mixed provenance and deferred media/process domains.

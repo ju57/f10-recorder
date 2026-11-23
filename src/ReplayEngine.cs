@@ -32,12 +32,18 @@ namespace F10Recorder
         volatile bool producerLaunchSealed;
         internal ReplayProducerProof ProducerProof => ReplayProducerProof.Current(job.Name, producerLaunchSealed);
         ReplayProducerProof IReplaySessionSource.ProducerProof => ProducerProof;
+        bool IReplaySessionSource.SupportsOwnedExport => true;
+        internal bool StagedPreparationEnabled = true;
+        ReplaySavePreparation preparation;
+        internal ReplayStagedProcessTiming LastPreparationTiming => preparation?.Timing;
+        bool IReplaySessionSource.SupportsStagedPreparation => StagedPreparationEnabled;
         readonly Stopwatch clock = Stopwatch.StartNew();
         Process process;
         LoopbackAudio audio;
         NamedPipeServerStream pipe;
         double progress, progressAt;
         ReplaySaveClock saveClock;
+        internal MediaClock AcquisitionClock { get; private set; }
         double lastSegmentEnd, lastSegmentAt;
         long encodedFrames, reportedDrops, reportedDuplicates;
         double encodingSpeed, metricsAt, cpuSeconds, cpuPercent;
@@ -52,25 +58,37 @@ namespace F10Recorder
         internal ReplayOutputSelection LastOutputSelection;
         internal ReplayOutputDemand LastOutputDemand;
         internal ReplayExportProcessReceipt LastExport;
+        readonly List<ReplayExportProcessReceipt> exportProcesses = new();
+        internal IReadOnlyList<ReplayExportProcessReceipt> LastExportProcesses => exportProcesses.ToArray();
         internal ReplayExportProcessReceipt LastValidation;
+        internal ReplayManagedMuxReceipt LastManagedMux { get; private set; }
+        internal ReplayTransportBatchTiming LastIndexBatch { get; private set; }
+        internal ReplayIntegrityGateTiming LastIntegrityGate { get; private set; }
+        internal ReplaySaveTiming LastExportTiming { get; private set; }
         internal string[] ValidationArguments { get; private set; }
         internal Action<IReadOnlyList<string>> ValidationArgumentObserver;
         internal string ReferenceScope { get; private set; }
         internal string[] CaptureArguments { get; private set; }
         internal string[] ExportArguments { get; private set; }
-        volatile bool exportProducerStopped = true;
+        readonly ReplayExportLifetime exportLifetime = new();
         string IReplaySessionSource.OutputDemandIdentity => ObserveOutputDemand || OutputCalibration != null ? ReplayReferenceModel.ExporterIdentity : null;
-        bool IReplaySessionSource.OutputProducerStopped => exportProducerStopped;
+        bool IReplaySessionSource.OutputProducerStopped => exportLifetime.Stopped && (preparation?.Joined ?? true);
         ReplayOutputDemand IReplaySessionSource.OutputDemandStatus => LastOutputDemand ?? ReplayOutputDemand.Unmeasured(outputCalibrationReason);
         ReplayOutputDemand IReplaySessionSource.EstimateOutput(ReplayOutputSelection selection)
         {
             LastOutputSelection = selection;
+            return LastOutputDemand = RecheckOutputDemand(selection);
+        }
+        ReplayOutputDemand IReplaySessionSource.RecheckOutputDemand(ReplayOutputSelection selection) => RecheckOutputDemand(selection);
+        ReplayOutputDemand RecheckOutputDemand(ReplayOutputSelection selection)
+        {
             var qualification = ObserveOutputDemand
-                ? new ReplayCalibrationAvailability(OutputCalibration, outputCalibrationReason) : ReplayCalibrationCatalog.Load();
+                ? new ReplayCalibrationAvailability(OutputCalibration, outputCalibrationReason)
+                : ReplayCalibrationCatalog.Load(replayInfo.ReplaySeconds / 60);
             if (!ObserveOutputDemand && OutputCalibration != null && qualification.Model?.Revision != OutputCalibration.Revision)
-                return LastOutputDemand = ReplayOutputDemand.Unmeasured(qualification.Reason
+                return ReplayOutputDemand.Unmeasured(qualification.Reason
                     ?? "Reference calibration changed after this capture session started.");
-            return LastOutputDemand = qualification.Estimate(selection, ReferenceScope, directory);
+            return qualification.Estimate(selection, ReferenceScope, directory);
         }
         ReplaySessionInfo IReplaySessionSource.ReplayInfo { get { return replayInfo; } }
         bool IReplaySessionSource.Stopped { get { return stopped; } }
@@ -80,6 +98,7 @@ namespace F10Recorder
         void IReplaySessionSource.StopCapture() { StopCapture(); }
         void IReplaySessionSource.CheckCaptureHealth(double end) { CheckCaptureHealth(end); }
         List<Segment> IReplaySessionSource.ReadSegments() => manifestStream.Read();
+        double IReplaySessionSource.InputPrerollSeconds => ReplaySaveExport.Preroll(replayInfo);
         public string ErrorTail = "";
         public string DirectoryPath { get { return directory; } }
         internal int ProcessId { get { return process == null || stopped || process.HasExited ? 0 : process.Id; } }
@@ -115,7 +134,23 @@ namespace F10Recorder
             }
         }
         public CaptureSession(Settings config, string root, bool synthetic, Func<bool> cancelled = null) : this(config, root, synthetic, cancelled, null) { }
-        internal CaptureSession(Settings config, string root, bool synthetic, Func<bool> cancelled, WindowTargetSnapshot target, Func<bool> sourceStillValid = null, Action<CaptureSession> beforeLaunch = null, Action<CaptureSession> afterLaunch = null)
+        // Closed, task-private replay of retained inputs for qualification. No
+        // acquisition/device/probe path is entered; all exports/validation still
+        // use the same owned jobs, request scopes and publication gates below.
+        internal static CaptureSession OpenRetainedForQualification(ReplaySessionInfo info, string originalScope, double end)
+            => new(info, originalScope, end);
+        CaptureSession(ReplaySessionInfo info, string originalScope, double end)
+        {
+            if (info.ReplaySeconds != 60 || info.Codec != "h264_nvenc" || info.FramesPerSecond != 60 || !info.RecordAudio
+                || info.Extension != ".ts" || !double.IsFinite(end) || end < 60 || string.IsNullOrWhiteSpace(originalScope))
+                throw new IOException("Retained qualification requires the fixed one-minute reference pair.");
+            settings = new Settings { ReplayMinutes = 1, FramesPerSecond = 60, BitrateMbps = 20, VideoCodec = "h264_nvenc", SystemAudio = true };
+            directory = info.Directory; manifest = info.Manifest; replayInfo = info; recordAudio = true;
+            manifestStream = new ReplayManifestStream(directory, ".ts", 65); manifestStream.Complete();
+            stopped = true; stoppedPosition = end; producerLaunchSealed = true; RetainEvidence = true;
+            ReferenceScope = originalScope; ObserveOutputDemand = true;
+        }
+        internal CaptureSession(Settings config, string root, bool synthetic, Func<bool> cancelled, WindowTargetSnapshot target, Func<bool> sourceStillValid = null, Action<CaptureSession> beforeLaunch = null, Action<CaptureSession> afterLaunch = null, bool qualifyDesktopTiming = false)
         {
             settings = config;
             recordAudio = synthetic || settings.SystemAudio;
@@ -135,19 +170,34 @@ namespace F10Recorder
                 string executable = MediaDependency.ResolveExecutable();
                 if (settings.CaptureMode == "window" && !synthetic && (target == null || !target.Available)) throw new InvalidOperationException("A validated window target is required; monitor fallback is disabled.");
                 if (!synthetic && settings.SystemAudio) audio = new LoopbackAudio();
+                bool referenceDesktop = !synthetic && ReplayReferenceModel.ReferenceSettings(settings)
+                    && Native.DisplayBounds(IntPtr.Zero) is { Width: 1920, Height: 1080 };
+                bool delayedDesktop = MediaDependency.SupportsDelayedDesktop && referenceDesktop;
+                var delayedCalibration = delayedDesktop && RecorderRuntime.CaptureArgumentProbe == null
+                    ? ReplayCalibrationCatalog.Load(settings.ReplayMinutes) : null;
+                bool requireDelayedSurface = qualifyDesktopTiming || delayedCalibration?.Model != null;
                 MediaClock mediaClock = synthetic ? null : MediaClock.Capture();
+                AcquisitionClock = mediaClock;
                 if (mediaClock != null) saveClock = new ReplaySaveClock(mediaClock);
                 if (mediaClock != null) Log.Write("Media clock: QPC=" + mediaClock.QpcEpoch + "; frequency=" + mediaClock.QpcFrequency + "; UTC microseconds=" + mediaClock.UnixMicroseconds + "; bridge bracket ticks=" + mediaClock.BridgeUncertaintyTicks);
                 var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-y", "-stats_period", "0.25", "-progress", "pipe:1" };
-                string source = settings.CaptureMode == "window" && !synthetic ? WindowVideoSource(target, captureRateLimit)
-                    : "ddagrab=framerate=" + captureRateLimit + ":output_idx=" + (synthetic ? 0 : settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex) + ":draw_mouse=1";
+                string videoGraph = null;
+                if (!synthetic)
+                {
+                    string source = settings.CaptureMode == "window" ? WindowVideoSource(target, captureRateLimit) : null;
+                    int output = source != null ? -1 : settings.DisplayIndex < 0 ? Native.PrimaryOutputIndex() : settings.DisplayIndex;
+                    source ??= "ddagrab=framerate=" + captureRateLimit + ":output_idx=" + output + ":draw_mouse=1";
+                    videoGraph = delayedDesktop ? DelayedDesktopGraph(output.ToString(CultureInfo.InvariantCulture),
+                        mediaClock.QpcEpoch.ToString(CultureInfo.InvariantCulture), mediaClock.UnixMicroseconds.ToString(CultureInfo.InvariantCulture), requireDelayedSurface)
+                        : source + "," + mediaClock.VideoTimestampFilter + ",fps=fps=" + settings.FramesPerSecond + ":round=near";
+                }
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=" + settings.FramesPerSecond });
                 // ddagrab's rate is a polling ceiling, not a guaranteed output clock.
                 // Allow acquisition headroom, then pace the GPU frames in the graph.
                 // Output-only CFR resampling still showed intermittent motion loss.
                 // Audio/video use independent input queues but still share the
                 // FFmpeg scheduler; delayed audio can throttle video acquisition.
-                else if (!settings.SystemAudio) args.AddRange(new[] { "-filter_complex", source + "," + mediaClock.VideoTimestampFilter + ",fps=fps=" + settings.FramesPerSecond + ":round=near[video]" });
+                else if (!settings.SystemAudio) args.AddRange(new[] { "-filter_complex", videoGraph + "[video]" });
                 if (synthetic) args.AddRange(new[] { "-re", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000" });
                 else if (settings.SystemAudio)
                 {
@@ -163,7 +213,7 @@ namespace F10Recorder
                     // gfxcapture 7fd2be97b9 subtracts its first SystemRelativeTime.
                     // Re-anchor that relative timeline once at first delivery;
                     // its unknown first-frame delivery delay needs live A/V qualification.
-                    args.AddRange(new[] { "-thread_queue_size", "32", "-f", "lavfi", "-i", source + "," + mediaClock.VideoTimestampFilter + ",fps=fps=" + settings.FramesPerSecond + ":round=near" });
+                    args.AddRange(new[] { "-thread_queue_size", "32", "-f", "lavfi", "-i", videoGraph });
                 }
                 args.AddRange(new[] { "-map", synthetic ? "0:v:0" : !settings.SystemAudio ? "[video]" : "1:v:0" });
                 if (synthetic || settings.SystemAudio) args.AddRange(new[] { "-map", synthetic ? "1:a:0" : "0:a:0", "-af", synthetic ? "aresample=async=1:first_pts=0" : AudioPacketClock.ResamplerFilter, "-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "192k" });
@@ -181,23 +231,19 @@ namespace F10Recorder
                 if (argumentProbe != null) args = argumentProbe(args);
                 CaptureArguments = args.ToArray();
                 RecorderRuntime.CaptureArgumentObserver?.Invoke(CaptureArguments);
-                if (!synthetic && argumentProbe == null && ReplayReferenceModel.ReferenceSettings(settings))
+                if (referenceDesktop && argumentProbe == null)
                 {
-                    var bounds = Native.DisplayBounds(IntPtr.Zero);
-                    if (bounds.Width == 1920 && bounds.Height == 1080)
-                    {
-                        var normalized = args.Select(a => a.Replace(directory, "<session>")
-                            .Replace(mediaClock.VideoTimestampFilter, "<common-clock-filter>"))
-                            .Select(a => a.StartsWith(@"\\.\pipe\F10Recorder-", StringComparison.Ordinal) ? "<audio-pipe>" : a).ToArray();
-                        ReferenceScope = ReplayReferenceModel.Hash(new { arguments = normalized, width = bounds.Width, height = bounds.Height,
-                            endpoint = audio.EndpointId, audio.SampleRate, audio.Channels, audio.FfmpegFormat,
-                            exporter = ReplayReferenceModel.ExporterIdentity });
-                    }
+                    var normalized = args.Select(a => NormalizeDelayedGraph(a).Replace(directory, "<session>")
+                        .Replace(mediaClock.VideoTimestampFilter, "<common-clock-filter>"))
+                        .Select(a => a.StartsWith(@"\\.\pipe\F10Recorder-", StringComparison.Ordinal) ? "<audio-pipe>" : a).ToArray();
+                    ReferenceScope = new ReplayQualificationContext(normalized, 1920, 1080,
+                        audio.EndpointId, audio.SampleRate, audio.Channels, audio.FfmpegFormat)
+                        .Scope(ReplayReferenceModel.ExporterIdentity, settings.ReplayMinutes);
                 }
                 if (!synthetic && settings.CaptureMode == "window") Log.Write("Experimental window capture arguments: " + string.Join(" ", args.Select(Quote)));
                 if (ReferenceScope != null)
                 {
-                    var qualification = ReplayCalibrationCatalog.Load();
+                    var qualification = delayedCalibration ?? ReplayCalibrationCatalog.Load(settings.ReplayMinutes);
                     OutputCalibration = qualification.Model;
                     outputCalibrationReason = qualification.Reason ?? "Waiting for a closed reference replay selection.";
                 }
@@ -267,6 +313,21 @@ namespace F10Recorder
             }
             catch { Dispose(); throw; }
         }
+        // A supported surface already emits epoch-relative 1/60 PTS. If the native
+        // probe falls back to microsecond desktop frames, use the original RTC bridge and FPS filter.
+        internal static string DelayedDesktopGraph(string output, string epoch, string utcMicroseconds, bool requireDelayedSurface) =>
+            "ddagrab=f10_delay_epoch=" + epoch + (requireDelayedSurface ? ":f10_require_delay=1" : "") + ":framerate=240:output_idx=" + output + ":draw_mouse=1,"
+            + "setpts='if(eq(TB,1/60),PTS," + MediaClock.VideoTimestampExpression(utcMicroseconds)
+            + ")',fps=fps=60:round=near:f10_passthrough_clocked=1";
+
+        internal static string NormalizeDelayedGraph(string graph)
+        {
+            if (!graph.StartsWith("ddagrab=f10_delay_epoch=", StringComparison.Ordinal)) return graph;
+            // Mask only the dynamic operands. Preserve the entire fallback expression and option set.
+            graph = Regex.Replace(graph, @"(?<=^ddagrab=f10_delay_epoch=)[1-9][0-9]{0,18}(?=:)", "<qpc-epoch>");
+            return Regex.Replace(graph, @"(?<=print\(RTCTIME,24\)-)[1-9][0-9]{0,18}(?=[)]/1000000/TB)", "<utc-us>");
+        }
+
         internal static string WindowVideoSource(WindowTargetSnapshot target, int rate)
         {
             if (target == null || !target.Available) throw new InvalidOperationException("A live selected window is required.");
@@ -367,19 +428,117 @@ namespace F10Recorder
             }
         }
         void IReplaySessionSource.Export(IReadOnlyList<string> arguments, string snapshot)
-            => Export(arguments, snapshot, null);
+            => ExportSingle(arguments, snapshot, null, null);
+        void IReplaySessionSource.Export(ReplayExportRequest request, string snapshot, Action<ReplayProducerProof> producerChanged, Action checkStorage)
+            => ExportRequest(request, snapshot, producerChanged, checkStorage, ReplaySaveExport.DefaultConstruction);
+        ReplaySavePreparation IReplaySessionSource.BeginPreparation(ReplayRootedFiles files, ReplayInterval interval, Segment candidate,
+            string partial, Action requireAccepted, Action<ReplayProducerProof> producerChanged, Action checkStorage, Action<ReplaySavePreparation> takeOwnership)
+        {
+            if (!StagedPreparationEnabled || preparation is { Joined: false }) throw new IOException("Staged preparation is unavailable or still owned.");
+            requireAccepted();
+            exportProcesses.Clear(); LastExport = LastValidation = null;
+            ExportArguments = ValidationArguments = null;
+            var owned = new ReplaySavePreparation(files, replayInfo, interval, candidate, partial, checkStorage);
+            owned.RecordReceipt = receipt => { LastExport = receipt; exportProcesses.Add(receipt); };
+            preparation = owned;
+            takeOwnership(owned);
+            owned.Start((arguments, retained) => {
+                ExportArguments = arguments.ToArray();
+                producerLaunchSealed = false;
+                producerChanged?.Invoke(ProducerProof);
+                RecorderRuntime.ExportArgumentObserver?.Invoke(ExportArguments);
+                return new ReplayStagedProcess(MediaDependency.ExecutablePath, arguments, Path.GetDirectoryName(partial), job,
+                    requireAccepted, checkStorage,
+                    started: _ => { producerLaunchSealed = true; producerChanged?.Invoke(ProducerProof); },
+                    producerStopped: absent => { if (!absent) { producerLaunchSealed = false; producerChanged?.Invoke(ProducerProof); } },
+                    retainedOwner: new object[] { this, retained, files });
+            });
+            return owned;
+        }
+        internal void ExportRequest(ReplayExportRequest request, string snapshot, Action<ReplayProducerProof> producerChanged,
+            Action checkStorage, ReplaySaveExport.Construction construction)
+        {
+            using var activity = exportLifetime.Begin();
+            if (request.Preparation == null) { exportProcesses.Clear(); LastExport = null; ExportArguments = null; }
+            LastValidation = null; ValidationArguments = null;
+            LastManagedMux = null; LastIndexBatch = null;
+            LastIntegrityGate = request.IntegrityGateTiming; LastExportTiming = request.Timing;
+            request.ExternalProducersAbsent = () => exportLifetime.ChildrenAbsent && (request.Preparation?.Stopped ?? true);
+            try { ReplaySaveExport.Run(request, (arguments, guard) => Export(arguments, snapshot, producerChanged, guard, inputLease: request.SourceProtection), checkStorage, construction); }
+            finally
+            {
+                LastManagedMux = request.ManagedMux; LastIndexBatch = request.IndexBatch;
+                exportLifetime.ObserveRequest(request);
+            }
+        }
         void IReplaySessionSource.Export(IReadOnlyList<string> arguments, string snapshot, Action<ReplayProducerProof> producerChanged)
-            => Export(arguments, snapshot, producerChanged);
+            => ExportSingle(arguments, snapshot, producerChanged, null);
         void IReplaySessionSource.Export(IReadOnlyList<string> arguments, string snapshot, Action<ReplayProducerProof> producerChanged, Action checkStorage)
-            => Export(arguments, snapshot, producerChanged, checkStorage);
+            => ExportSingle(arguments, snapshot, producerChanged, checkStorage);
+        void ExportSingle(IReadOnlyList<string> arguments, string snapshot, Action<ReplayProducerProof> producerChanged, Action checkStorage)
+        {
+            using var activity = exportLifetime.Begin();
+            exportProcesses.Clear(); LastExport = LastValidation = null;
+            ExportArguments = ValidationArguments = null;
+            LastManagedMux = null; LastIndexBatch = null; LastIntegrityGate = null; LastExportTiming = null;
+            Export(arguments, snapshot, producerChanged, checkStorage);
+        }
         ReplayValidation IReplaySessionSource.ValidateOutput(string path, ReplayInterval interval,
             Action<ReplayProducerProof> producerChanged, Action checkStorage)
         {
-            Export(ReplayExactExport.DecodeArguments(path, recordAudio, settings.FramesPerSecond), Path.GetDirectoryName(path), producerChanged, checkStorage,
-                ReplayExactExport.Deadline(interval), validation: true);
-            return ReplayExactExport.ReadValidation(LastValidation, interval, settings.FramesPerSecond);
+            using var activity = exportLifetime.Begin();
+            return ValidateFullOutput(path, interval, producerChanged, checkStorage);
         }
-        void Export(IReadOnlyList<string> arguments, string snapshot, Action<ReplayProducerProof> producerChanged, Action checkStorage = null, int timeoutMilliseconds = 3_600_000, bool validation = false)
+        ReplayValidation IReplaySessionSource.ValidateOutput(ReplayExportRequest request,
+            Action<ReplayProducerProof> producerChanged, Action checkStorage)
+        {
+            using var activity = exportLifetime.Begin();
+            try
+            {
+            if (request.Integrity == null)
+            {
+                if (request.Recipe != ReplayExactExport.Recipe)
+                    throw new IOException("Replay exporter failed to supply the required source-byte proof.");
+                return ValidateFullOutput(request.Partial, request.Interval, producerChanged, checkStorage, request);
+            }
+            LastValidation = null; ValidationArguments = null; LastIntegrityGate = request.IntegrityGateTiming;
+            long started = Stopwatch.GetTimestamp();
+            var result = ReplayOutputIntegrity.Read(request, checkStorage, retainForPublication: true);
+            return new(ReplayOutputIntegrity.Kind, 0, Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                result.CodedPictures, result.AudioPackets, request.Recipe, request.Integrity.Fingerprint,
+                request.ValidatedOutput?.CheckedIdentity);
+            }
+            finally { exportLifetime.ObserveRequest(request); }
+        }
+        ReplayValidation ValidateFullOutput(string path, ReplayInterval interval, Action<ReplayProducerProof> producerChanged,
+            Action checkStorage, ReplayExportRequest request = null)
+        {
+            LastValidation = null; ValidationArguments = null;
+            LastIntegrityGate = request?.IntegrityGateTiming;
+            long started = Stopwatch.GetTimestamp();
+            var input = new ReplayDecodeLease(path);
+            try
+            {
+                input.BindObservation(request);
+                Export(ReplayExactExport.DecodeArguments(path, recordAudio, settings.FramesPerSecond), Path.GetDirectoryName(path), producerChanged, checkStorage,
+                    ReplayExactExport.Deadline(interval), validation: true, inputLease: input);
+                if (!exportLifetime.ChildrenAbsent) throw new IOException("Full decoder closure is unconfirmed; its input remains pinned.");
+                var result = ReplayExactExport.ReadValidation(LastValidation, interval, settings.FramesPerSecond);
+                input.VerifyUnchanged(); checkStorage?.Invoke();
+                var checkedOutput = input.CheckedIdentity;
+                if (request != null) input.TransferTo(request);
+                return result with { Milliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                    ExportRecipe = request?.Recipe, CheckedOutput = checkedOutput };
+            }
+            finally
+            {
+                // Run retains this exact input together with its child handle
+                // on unknown exit. A later exit cannot certify this failed save.
+                input.EndObservation(uncertain: !exportLifetime.ChildrenAbsent);
+                if (exportLifetime.ChildrenAbsent) input.Dispose();
+            }
+        }
+        void Export(IReadOnlyList<string> arguments, string snapshot, Action<ReplayProducerProof> producerChanged, Action checkStorage = null, int timeoutMilliseconds = 3_600_000, bool validation = false, IDisposable inputLease = null)
         {
             if (validation) { ValidationArguments = arguments.ToArray(); ValidationArgumentObserver?.Invoke(ValidationArguments); }
             else { ExportArguments = arguments.ToArray(); RecorderRuntime.ExportArgumentObserver?.Invoke(ExportArguments); }
@@ -398,9 +557,10 @@ namespace F10Recorder
                         producerLaunchSealed = false;
                         producerChanged?.Invoke(ProducerProof);
                     }
-                    exportProducerStopped = absent;
-                }, timeoutMilliseconds: timeoutMilliseconds, checkStorage: checkStorage);
-            if (validation) LastValidation = receipt; else LastExport = receipt;
+                    exportLifetime.ChildStopped(absent);
+                }, timeoutMilliseconds: timeoutMilliseconds, checkStorage: checkStorage, inputLease: inputLease);
+            if (validation) LastValidation = receipt;
+            else { LastExport = receipt; exportProcesses.Add(receipt); }
             if (!receipt.Success)
             {
                 if (receipt.ProducerAbsent)
@@ -486,7 +646,7 @@ namespace F10Recorder
                 {
                     var result = session == null ? new RecorderMetrics() : session.Metrics;
                     result.SampledUtc = DateTime.UtcNow.ToString("o");
-                    var storage = replays.Status;
+                    var storage = replays.LastKnownStatus;
                     var save = storage.LastSave;
                     result.Recoveries = recoveries; result.LastSaveMilliseconds = save == null ? 0 : save.Milliseconds;
                     result.LastSaveBytes = save == null ? 0 : save.Bytes; result.LastSaveSucceeded = save != null && save.Succeeded;
@@ -497,13 +657,17 @@ namespace F10Recorder
                     result.LastSaveLimitedHistory = save?.Interval?.LimitedHistory ?? false;
                     result.LastSaveValidation = save?.Validation?.Kind;
                     result.LastSaveDecodedFrames = save?.Validation?.Frames ?? 0;
+                    result.LastSaveCodedPictures = save?.Validation?.CodedPictures ?? 0;
+                    result.LastSaveAudioPackets = save?.Validation?.AudioPackets ?? 0;
                     result.LastSaveValidationMilliseconds = save?.Validation?.Milliseconds ?? 0;
+                    result.LastSaveTiming = save?.Timing;
                     if (sessionId.HasValue)
                     {
                         var buffer = replays.GetStatus(sessionId.Value);
                         result.BufferedSeconds = buffer.BufferedSeconds;
                     }
                     result.CacheBytes = storage.CacheBytes ?? -1; // Unknown inventory is not an empty cache.
+                    result.CacheBytesObservedUtc = storage.CacheBytesObservedUtc;
                     storage.OutputDemand.WriteMetrics(result);
                     result.ReplayStorageError = ReplayOutputDemand.Bounded(storage.StorageError, 512);
                     this.storage.WriteMetrics(result);
@@ -541,7 +705,7 @@ namespace F10Recorder
             try
             {
                 replays = new ReplayCache(cacheDirectory: cache, cacheBudgetBytes: config.ReplayCacheBudgetBytes, retainedDirectories: ReplayCacheLocations.Roots(config, dataDirectory),
-                    volumeReservations: new ReplayVolumeReservations(ProfileOwnership.RootDirectory, ReplayStorageSafety.MinimumBytes));
+                    volumeReservations: storage.CreateExportReservations());
                 worker = new Thread(Run) { IsBackground = true, Name = "Capture supervisor" }; worker.Start();
             }
             catch { cacheLease.Dispose(); throw; }
@@ -565,7 +729,7 @@ namespace F10Recorder
         internal void RequireStorageResume()
         {
             RequireResumeReady();
-            storage.RequireResume(cache, settings.OutputDirectory);
+            storage.RequireResume(cache, settings.OutputDirectory, settings.ReplayMinutes);
         }
         void ForwardStorageWarning(string reason) => StorageWarning?.Invoke(reason);
         void BeforeCaptureLaunch(CaptureSession source)
@@ -584,7 +748,7 @@ namespace F10Recorder
                     try { source.StopCapture(); }
                     catch (Exception ex) { Log.Write("Storage stop could not confirm capture closure: " + ex); }
                 });
-            }, resume, source.ProducerProof);
+            }, resume, source.ProducerProof, settings.ReplayMinutes);
             try { replays.ValidateBudget(settings.ReplayCacheBudgetBytes); }
             catch (ReplayCacheBudgetExceededException ex) { storage.StopForStorageFailure(ex.Message); throw; }
             storage.StartSupervision();

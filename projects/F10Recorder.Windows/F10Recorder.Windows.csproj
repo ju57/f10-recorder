@@ -5,6 +5,21 @@
     <Nullable>disable</Nullable>
     <NoWarn>$(NoWarn);SYSLIB0014;SYSLIB0050</NoWarn>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(F10QueueEnginePath)' != ''">
+    <DefineConstants>$(DefineConstants);F10_QUEUE_ENGINE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(F10QueueEnginePath)' != ''">
+    <Content Include="$(F10QueueEnginePath)" Link="engine/ffmpeg-queue.exe" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(F10PrivateReceiptPublicKey)' != ''">
+    <EmbeddedResource Include="$(F10PrivateReceiptPublicKey)" LogicalName="F10Recorder.PrivateFiveMinuteIssuer" />
+  </ItemGroup>
+  <Target Name="VerifyQueueEngine" BeforeTargets="PrepareForBuild" Condition="'$(F10QueueEnginePath)' != ''">
+    <GetFileHash Files="$(F10QueueEnginePath)" Algorithm="SHA256">
+      <Output TaskParameter="Hash" PropertyName="QueueEngineHash" />
+    </GetFileHash>
+    <Error Condition="'$(QueueEngineHash)' != 'AC62892E9CF5F384B25ED2BBEC7F7DB3CF31F7C65C144E39B2C1C42B4F0D61B2'" Text="The supplied queue engine differs from the approved binary." />
+  </Target>
   <ItemGroup>
     <InternalsVisibleTo Include="F10Recorder.WorkerChecks" />
     <ProjectReference Include="../F10Recorder.Core/F10Recorder.Core.csproj" />
@@ -18,7 +33,5 @@
     <Compile Include="../../src/EncoderCapabilities.cs" Link="EncoderCapabilities.cs" />
     <Compile Include="../../src/ApplicationFolders.cs" Link="ApplicationFolders.cs" />
     <Compile Include="../../src/ScreenshotCapture.cs" Link="ScreenshotCapture.cs" />
-    <InternalsVisibleTo Include="F10Recorder.Desktop" />
-    <InternalsVisibleTo Include="F10Recorder.MigrationTests" />
   </ItemGroup>
 </Project>

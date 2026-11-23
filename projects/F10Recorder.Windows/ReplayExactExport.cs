@@ -3,7 +3,11 @@ using System.Text.RegularExpressions;
 
 namespace F10Recorder;
 
-internal sealed record ReplayValidation(string Kind, long Frames, double Milliseconds);
+// Frames is the number freshly decoded by this check. Coded pictures and AAC
+// packets are separate evidence; source-byte inspection never claims decoding.
+internal sealed record ReplayValidation(string Kind, long Frames, double Milliseconds,
+    long CodedPictures = 0, long AudioPackets = 0, string ExportRecipe = null, string SourceProofHash = null,
+    ReplayFileExtent CheckedOutput = null, bool PublicationIdentityBound = false);
 
 // Correctness-first candidate from the precision experiment: decode the closed
 // input interval, trim actual pictures/samples, then encode a new independent MP4.
@@ -17,7 +21,7 @@ internal static class ReplayExactExport
         double inputStart, string concat, string partial)
     {
         double start = interval.Start - inputStart, end = interval.End - inputStart;
-        var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-xerror", "-y", "-copyts",
+        var args = new List<string> { "-hide_banner", "-loglevel", "warning", "-xerror", "-err_detect", "explode", "-y", "-copyts",
             "-f", "concat", "-safe", "1", "-protocol_whitelist", "file", "-segment_time_metadata", "1", "-i", concat,
             "-map", "0:v:0", "-vf", "select=concatdec_select,settb=1/48000,setpts=round((PTS*TB+" + Number(inputStart) + ")*"
                 + info.FramesPerSecond + ")*48000/" + info.FramesPerSecond + ",trim=start=" + Number(interval.Start) + ":end=" + Number(interval.End)
@@ -59,7 +63,7 @@ internal static class ReplayExactExport
             //1024chars keeps even64 worst-case escaped events below the wire cap.
             throw new IOException(ReplayOutputDemand.Bounded("Replay MP4 failed full decode or frame-duration validation: "
                 + receipt.Error + " " + receipt.StandardError, 1024));
-        return new("FullDecode", count, receipt.ElapsedMilliseconds);
+        return new("FullDecode", count, receipt.ElapsedMilliseconds, count);
     }
 
     // Finite deadline scales with the selected workload; it is not a latency claim.

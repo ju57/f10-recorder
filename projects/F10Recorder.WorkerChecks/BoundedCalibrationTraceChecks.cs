@@ -21,6 +21,32 @@ internal static class BoundedCalibrationTraceChecks
     }
     static void Require(bool value, string reason) { if (!value) throw new IOException(reason); }
     static bool Rejects(Action action) { try { action(); return false; } catch (IOException) { return true; } }
+    internal static object PostCleanup()
+    {
+        var bytes = new MemoryStream();
+        var trace = new BoundedCalibrationTrace(null, () => bytes, capacity: 4);
+        trace.Append("first"); trace.Append("second"); trace.CompleteAndCheck();
+        object drained = trace.Receipt; trace.Dispose();
+        string serialized = System.Text.Json.JsonSerializer.Serialize(trace.Receipt);
+        using var final = System.Text.Json.JsonDocument.Parse(serialized);
+        var row = final.RootElement;
+        Require(ReferenceEquals(drained, trace.Receipt) && row.GetProperty("final").GetBoolean()
+            && row.GetProperty("writerAbsent").GetBoolean() && row.GetProperty("failure").ValueKind == System.Text.Json.JsonValueKind.Null
+            && row.GetProperty("enqueued").GetInt64() == 2 && row.GetProperty("written").GetInt64() == 2
+            && row.GetProperty("bytes").GetInt64() == bytes.ToArray().Length
+            && row.GetProperty("persistedBytes").GetInt64() == bytes.ToArray().Length && row.GetProperty("capacity").GetInt32() == 4,
+            "Post-disposal receipt lost final persistence/closure facts.");
+        using var failed = new ManualResetEventSlim();
+        var fault = new BoundedCalibrationTrace(null, () => new WriteControlStream(new MemoryStream(), () =>
+        { failed.Set(); throw new IOException("post-cleanup writer failure"); }));
+        try { fault.Append("fault"); } catch (IOException) { }
+        Require(failed.Wait(1000) && Rejects(fault.Dispose), "Faulted writer did not close with its original failure.");
+        using var error = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.Serialize(fault.Receipt));
+        Require(error.RootElement.GetProperty("final").GetBoolean() && error.RootElement.GetProperty("writerAbsent").GetBoolean()
+            && error.RootElement.GetProperty("failure").GetString() == "post-cleanup writer failure", "Post-cleanup receipt erased the failed outcome.");
+        return new { result = "passed", immutableAfterDrain = ReferenceEquals(drained, trace.Receipt),
+            success = trace.Receipt, failedWriter = fault.Receipt, pattern = "drain, dispose, then serialize final receipt" };
+    }
     internal static object Run()
     {
         var receipts = new List<object>();

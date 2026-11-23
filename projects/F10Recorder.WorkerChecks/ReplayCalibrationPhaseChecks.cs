@@ -18,7 +18,7 @@ internal static class ReplayCalibrationPhaseChecks
             catch (Exception ex) { failed++; results.Add(new { name, passed = false, error = ex.ToString() }); }
         }
         CalibrationPlan Plan(string path) => new(path, "unused-no-engine", "nonmedia-phase-control",
-            new(), [], [], 0, 0, BudgetBytes: 3_000_000_000, StopBytes: 2_500_000_000, FloorBytes: 0, DeadlineSeconds: 30);
+            new(), ["T01"], [], 0, 0, BudgetBytes: 3_000_000_000, StopBytes: 2_500_000_000, FloorBytes: 0, DeadlineSeconds: 30);
 
         Check("anchored-inventory-attributes-enforce-media-policy", path =>
         {
@@ -43,7 +43,7 @@ internal static class ReplayCalibrationPhaseChecks
 
         Check("inspection-frame-positions-match-rounded-duration", path =>
         {
-            foreach (double seconds in new[] { 0.05, 0.1, 0.2, 0.249, 0.5, 1.0, 1.2, 2.0, 298.0, 299.2341926, 300.1 })
+            foreach (double seconds in new[] { 0.05, 0.1, 0.2, 0.249, 0.5, 1.0, 1.2, 2.0, 298.0, 299.2341926, 300.1, 311.0, 1800.0 })
             {
                 int[] frames = ReplayCalibrationRun.InspectionFrames(seconds);
                 Require(frames.Length == 3 && frames[0] < frames[1] && frames[1] < frames[2] && frames[0] >= 0 && frames[2] < Math.Floor(seconds * 60),
@@ -51,7 +51,7 @@ internal static class ReplayCalibrationPhaseChecks
                 if (seconds >= 1) Require(frames.SequenceEqual(new[] { 15, (int)(seconds * 30), (int)(seconds * 60) - 15 }), "Main/ordinary inspection positions drifted.");
             }
             Require(ReplayCalibrationRun.InspectionFrames(0.2).SequenceEqual(new[] { 3, 6, 9 }), "T02 twelve-frame regression was not covered.");
-            foreach (double seconds in new[] { double.NaN, double.PositiveInfinity, -1.0, 0.0, 0.049, 311.0 })
+            foreach (double seconds in new[] { double.NaN, double.PositiveInfinity, -1.0, 0.0, 0.049, Math.BitIncrement(1800.0) })
             {
                 bool rejected = false; try { ReplayCalibrationRun.InspectionFrames(seconds); } catch (IOException) { rejected = true; }
                 Require(rejected, "Invalid or insufficient inspection duration was admitted.");
@@ -75,19 +75,42 @@ internal static class ReplayCalibrationPhaseChecks
             sampler.EndActive();
             Require(Volatile.Read(ref sampler.Observations) > before,
                 "A terminal observation must start after producer absence, not reuse an older row.");
-            Require(sampler.MaximumActiveGap is > 0 and <= 500, "Active coverage did not retain the unchanged limit.");
+            Require(sampler.MaximumActiveGap > 0 && sampler.MaximumActiveGap <= ReplayCapacityPolicy.CoverageMilliseconds,
+                "Active evidence did not fit the explicit candidate growth horizon.");
             Require(sampler.Peak(output) >= ReplayStorage.Observe(output).AllocatedBytes,
                 "Terminal output allocation was omitted from the observed peak.");
             sampler.StopAndCheck();
         });
-        Check("active-650ms-delay-rejects", path =>
+        Check("active-650ms-inventory-delay-is-measurement", path =>
         {
             using var sampler = new ReplayCalibrationRun.Sampler(Plan(path), active: false);
             sampler.BeginActive();
             lock (sampler.Gate) Thread.Sleep(650);
-            Exception rejection = null;
-            try { sampler.EndActive(); } catch (IOException ex) { rejection = ex; }
-            Require(rejection != null, "The same delay while a producer can grow must reject the active interval.");
+            sampler.EndActive(); sampler.StopAndCheck();
+            Require(sampler.MaximumActiveGap >= 650 && sampler.MaximumActiveGap <= ReplayCapacityPolicy.CoverageMilliseconds,
+                "A covered inventory delay must remain measured without becoming a separate product heartbeat.");
+        });
+        Check("offline-capacity-monitor-runs-without-caller", path =>
+        {
+            using var sampler = new ReplayCalibrationRun.Sampler(Plan(path), active: false);
+            sampler.BeginOffline("inspection-no-callback", 0, 5);
+            Thread.Sleep(2200);
+            sampler.EndOffline(); sampler.StopAndCheck();
+            Require(sampler.Failure == null && sampler.ObserverAbsent,
+                "An admitted offline inspection must preserve genuine capacity observations without caller callbacks and join every observer.");
+        });
+        Check("missing-growth-evidence-cannot-qualify", path =>
+        {
+            string cell = Path.Combine(path, "T01"); Directory.CreateDirectory(cell);
+            File.WriteAllBytes(Path.Combine(cell, "chunk-000000001.ts"), new byte[4096]);
+            using var sampler = new ReplayCalibrationRun.Sampler(Plan(path), active: false);
+            sampler.BeginActive();
+            lock (sampler.Gate) Thread.Sleep(ReplayCapacityPolicy.CoverageMilliseconds + 50);
+            sampler.MarkCaptureStop("T01"); sampler.EndActive();
+            bool rejected = false;
+            try { sampler.CaptureMetrics("T01"); } catch (IOException) { rejected = true; }
+            Require(rejected, "Missing inventory evidence outside the declared growth horizon must remain inconclusive.");
+            sampler.StopAndCheck();
         });
         Check("offline-allocation-shortage-before-admission", path =>
         {
@@ -101,12 +124,28 @@ internal static class ReplayCalibrationPhaseChecks
         });
         Check("offline-deadline-remains-enforced", path =>
         {
-            using var sampler = new ReplayCalibrationRun.Sampler(Plan(path), active: false);
-            sampler.BeginOffline("archive-control", 0, 1);
-            Thread.Sleep(1150);
-            bool rejected = false;
-            try { sampler.Check(); } catch (IOException) { rejected = true; }
-            Require(rejected, "An offline phase outside its own deadline must block further work.");
+            const string deadlineFailure = "Offline storage phase deadline exceeded.";
+            var sampler = new ReplayCalibrationRun.Sampler(Plan(path), active: false);
+            bool disposalRejected = false;
+            try
+            {
+                sampler.BeginOffline("archive-control", 0, 1);
+                Require(SpinWait.SpinUntil(() => sampler.Failure != null, TimeSpan.FromSeconds(5)) && sampler.Failure == deadlineFailure,
+                    "The storage observer did not retain the offline deadline failure.");
+                bool rejected = false;
+                try { sampler.Check(); } catch (IOException error) when (error.Message == deadlineFailure) { rejected = true; }
+                Require(rejected, "An offline phase outside its own deadline must block further work.");
+            }
+            finally
+            {
+                try { sampler.Dispose(); }
+                catch (IOException error) when (error.InnerException is AggregateException aggregate &&
+                    aggregate.InnerExceptions is [IOException failure] && failure.Message == deadlineFailure)
+                {
+                    disposalRejected = true;
+                }
+            }
+            Require(disposalRejected && sampler.ObserverAbsent, "Disposal must close the observers and retain the offline deadline failure.");
         });
         Check("offline-cumulative-full-phase-admission", path =>
         {
@@ -173,12 +212,21 @@ internal static class ReplayCalibrationPhaseChecks
             { sampler.Check(); Require(wait.ElapsedMilliseconds < 2000, "Closed case metadata handles were not enabled."); Thread.Sleep(5); }
             sampler.StopAndCheck();
         });
-        Check("mutable-handles-released-before-verified-retirement", path =>
+        Check("closed-snapshot-handles-released-before-verified-retirement", path =>
         {
-            string snapshot = Path.Combine(path, "buffer", "save-owned"); Directory.CreateDirectory(snapshot);
+            string snapshot = Path.Combine(path, "T01", "buffer", "save-owned"); Directory.CreateDirectory(snapshot);
             File.WriteAllBytes(Path.Combine(snapshot, "000000.ts"), new byte[4096]); File.WriteAllText(Path.Combine(snapshot, "concat.txt"), "file '000000.ts'\n");
             using var sampler = new ReplayCalibrationRun.Sampler(Plan(path) with { ReuseCurrentMetadataHandles = true }, active: false);
-            Require(Volatile.Read(ref sampler.MetadataHandles) >= 2, "Mutable fixture did not exercise reused native handles.");
+            string media = Path.Combine(snapshot, "000000.ts"), list = Path.Combine(snapshot, "concat.txt");
+            Require(!sampler.RetainsMetadata(media) && !sampler.RetainsMetadata(list), "Live snapshot retained an observer handle.");
+            sampler.SealClosedCase("T01");
+            var wait = System.Diagnostics.Stopwatch.StartNew();
+            while (!sampler.RetainsMetadata(media) || !sampler.RetainsMetadata(list))
+            {
+                sampler.Check();
+                Require(wait.ElapsedMilliseconds < 2000, "Closed snapshot did not acquire both native handles.");
+                Thread.Sleep(5);
+            }
             bool ungatedRejected = false;
             try { sampler.ReleaseInventoryHandles(); } catch (IOException) { ungatedRejected = true; }
             Require(ungatedRejected, "Handle release bypassed the inventory mutation gate.");
@@ -243,8 +291,8 @@ internal static class ReplayCalibrationPhaseChecks
             while (sampler.Observations < before + 3)
             { sampler.Check(); Require(wait.ElapsedMilliseconds < 3000, "Proposed inventory observation did not progress."); Thread.Sleep(5); }
             sampler.EndActive(); sampler.StopAndCheck();
-            Require(sampler.MaximumDirectories == 72 && sampler.MaximumFiles == 5120 && sampler.MaximumActiveGap <= 500,
-                "Proposed full inventory did not meet the unchanged active observation gate.");
+            Require(sampler.MaximumDirectories == 72 && sampler.MaximumFiles == 5120 && sampler.MaximumActiveGap <= ReplayCapacityPolicy.CoverageMilliseconds,
+                "Proposed full inventory did not supply complete evidence inside the explicit growth horizon.");
             Require(!sampler.RetainsMetadata(Path.Combine(cell, "chunk-000000000.ts")), "Current payload handle was retained.");
         });
         File.WriteAllText(Path.Combine(root, "phase-checks.json"), JsonSerializer.Serialize(new {
