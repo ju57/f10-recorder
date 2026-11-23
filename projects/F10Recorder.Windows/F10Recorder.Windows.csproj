@@ -11,6 +11,9 @@
   <ItemGroup Condition="'$(F10QueueEnginePath)' != ''">
     <Content Include="$(F10QueueEnginePath)" Link="engine/ffmpeg-queue.exe" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" />
   </ItemGroup>
+  <ItemGroup Condition="'$(F10PrivateReceiptPublicKey)' != ''">
+    <EmbeddedResource Include="$(F10PrivateReceiptPublicKey)" LogicalName="F10Recorder.PrivateFiveMinuteIssuer" />
+  </ItemGroup>
   <Target Name="VerifyQueueEngine" BeforeTargets="PrepareForBuild" Condition="'$(F10QueueEnginePath)' != ''">
     <GetFileHash Files="$(F10QueueEnginePath)" Algorithm="SHA256">
       <Output TaskParameter="Hash" PropertyName="QueueEngineHash" />

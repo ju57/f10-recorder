@@ -12,6 +12,7 @@ internal sealed record ReplayReferenceModel(string Revision, string Scope, strin
     // Runtime projection of separately validated v9 evidence. Never serialized
     // into an original measurement model or its historical hash.
     [JsonIgnore] internal ReplayCoverageBinding Coverage { get; init; }
+    [JsonIgnore] internal PrivateFiveMinuteBinding PrivateReceipt { get; init; }
     internal const long Guard = 16 * 1024 * 1024;
     internal const long MaximumInputBytes = 1_000_000_000;
     // Legacy measurements retain their three cells. Only a validated coverage

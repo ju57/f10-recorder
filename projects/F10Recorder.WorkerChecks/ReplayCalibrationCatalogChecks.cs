@@ -151,6 +151,17 @@ internal static partial class ReplayCalibrationCatalogChecks
         Require(result.Model.FinalBytes(1000) == 16_779_450 && result.Model.PeakBytes(1000) == 201_342_976,
             "Supplied final-output coefficients and the complete rounded scratch envelope must reach estimate arithmetic.");
         var cases = new List<string> { "missing-read-only", "complete-supplied-receipt", "actual-volume-NTFS", "literal-model-estimates" };
+        string privateFile = Path.Combine(catalog, ReplayCalibrationCatalog.PrivateFiveMinuteFile);
+        File.WriteAllText(privateFile, "{}");
+        try
+        {
+            Require(Load(catalog).Model == null, "A conflicting private receipt must not fall back to a direct five-minute measurement.");
+            Require(ReplayCalibrationCatalog.EvidenceFileName(catalog, 5) == ReplayCalibrationCatalog.PrivateFiveMinuteFile
+                && ReplayCalibrationCatalog.EvidenceFileName(catalog, 1) == ReplayCalibrationCatalog.FileNameFor(1),
+                "Private five-minute evidence must stay bound to its duration.");
+            cases.Add("private-five-minute-conflict-and-duration");
+        }
+        finally { File.Delete(privateFile); }
         foreach (int minutes in new[] { 1, 30 })
         {
             var durationFixture = Fixture(catalog, minutes);

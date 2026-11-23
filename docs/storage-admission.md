@@ -4,6 +4,30 @@ For issue #83, the [paused checkpoint](agents/issue-83-checkpoint.md) records
 current task authority. The versioned procedures below preserve their original
 bounds; documentation maintenance does not resume execution or authorize recording.
 
+## Private five-minute receipt
+
+A private build may embed a one-use issuer's RSA public key through
+`F10PrivateReceiptPublicKey`. The account-private catalog can then read
+`reference-private-5m-v1.json` for the five-minute profile. Default builds
+contain no issuer key. The signed payload binds the consuming exporter, the
+original measured exporter, the parent calibration, the pre-run contract,
+both output observations and the digest of the independently reviewed evidence.
+Keep the issuer, key material, observations and machine-specific receipts
+outside the repository.
+
+The loader verifies the signature, original training model, capture profile,
+current host and unchanged storage limits. It derives the consuming profile's
+scope from the signed arguments and rechecks the protected receipt and actual
+destination when deciding applicability. Removing or changing the receipt
+withdraws the cached model. Five-minute direct and private receipts cannot share
+a five-minute catalog, and a shared coverage receipt conflicts with the private
+receipt. Other durations need their own applicable evidence.
+
+This exception accepts measurements through verified closure of the recording
+and both saves. Independent review must bind subsequent experiment-only report
+writes and preserve the original controller outcome. Storage admission still
+uses the ordinary reservation, capacity and producer-closure checks.
+
 ## Proposed independent presentation confirmation method
 
 The qualification helper prepares the separately versioned

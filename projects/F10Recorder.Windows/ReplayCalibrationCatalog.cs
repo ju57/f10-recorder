@@ -72,7 +72,8 @@ internal static partial class ReplayCalibrationCatalog
         : throw new IOException("Replay duration has no reference qualification cell.");
     internal const int MaximumBytes = 128 * 1024;
     internal static string EvidenceFileName(string protectedDirectory, int replayMinutes = 5)
-        => File.Exists(Path.Combine(protectedDirectory, SameCaptureFileName)) ? SameCaptureFileName
+        => replayMinutes == 5 && File.Exists(Path.Combine(protectedDirectory, PrivateFiveMinuteFile)) ? PrivateFiveMinuteFile
+            : File.Exists(Path.Combine(protectedDirectory, SameCaptureFileName)) ? SameCaptureFileName
             : File.Exists(Path.Combine(protectedDirectory, CoverageFileName)) ? CoverageFileName : FileNameFor(replayMinutes);
     // Versioned canonical numeric recipe. Changing any requirement invalidates
     // both model and qualification revisions. Capture/audio arguments additionally
@@ -155,6 +156,11 @@ internal static partial class ReplayCalibrationCatalog
         try
         {
             if (!Directory.Exists(protectedDirectory)) return new(null, "Reference calibration is absent.");
+            if (File.Exists(Path.Combine(protectedDirectory, PrivateFiveMinuteFile)))
+            {
+                Require(!HasSharedCoverage(protectedDirectory), "Conflicting private and shared coverage receipts.");
+                if (replayMinutes == 5) return LoadPrivateFiveMinute(protectedDirectory, hostIdentity ?? HostIdentity);
+            }
             if (File.Exists(Path.Combine(protectedDirectory, SameCaptureFileName)))
                 return LoadSameCaptureFrom(protectedDirectory, hostIdentity, replayMinutes);
             if (File.Exists(Path.Combine(protectedDirectory, CoverageFileName)))
@@ -189,8 +195,15 @@ internal static partial class ReplayCalibrationCatalog
         try
         {
             if (model?.Coverage != null) return CoverageApplicable(model, destination, hostIdentity);
-            if (model == null || model.Revision != ModelRevision(model.Scope, model.Volume, model.AllocationUnit,
-                model.FinalResidual, model.SampledFinalizationExtra, model.TrainingReceipts, hostIdentity, model.CaptureHeadroom, model.ReplayMinutes)) return false;
+            if (model == null) return false;
+            var revision = ModelRevision(model.Scope, model.Volume, model.AllocationUnit, model.FinalResidual,
+                model.SampledFinalizationExtra, model.TrainingReceipts, hostIdentity, model.CaptureHeadroom, model.ReplayMinutes);
+            if (model.PrivateReceipt is { } binding)
+            {
+                if (model.ReplayMinutes != 5 || model.Revision != PrivateRevision(revision, binding.FileHash)
+                    || !PrivateReceiptStillPresent(binding)) return false;
+            }
+            else if (model.Revision != revision) return false;
             var capacity = ReplayStorage.ObserveCapacity(destination);
             if (capacity.Volume != model.Volume || capacity.AllocationUnit != model.AllocationUnit
                 || GetDriveType(capacity.Volume) != 3) return false; // DRIVE_FIXED
